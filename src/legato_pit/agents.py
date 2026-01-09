@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 
 import requests
-from flask import Blueprint, request, jsonify, session, current_app, g
+from flask import Blueprint, request, jsonify, session, current_app, g, render_template
 
 from .core import login_required
 
@@ -42,6 +42,46 @@ def verify_system_token(req) -> bool:
         system_pat = current_app.config.get('SYSTEM_PAT')
         return token == system_pat
     return False
+
+
+# ============ Page Routes ============
+
+@agents_bp.route('/')
+@login_required
+def index():
+    """Agents queue management page."""
+    db = get_db()
+
+    # Get pending agents
+    pending_rows = db.execute(
+        """
+        SELECT queue_id, project_name, project_type, title, description,
+               source_transcript, created_at
+        FROM agent_queue
+        WHERE status = 'pending'
+        ORDER BY created_at DESC
+        """
+    ).fetchall()
+    pending_agents = [dict(row) for row in pending_rows]
+
+    # Get recent processed agents (last 20)
+    recent_rows = db.execute(
+        """
+        SELECT queue_id, project_name, project_type, title, status,
+               approved_by, approved_at
+        FROM agent_queue
+        WHERE status != 'pending'
+        ORDER BY updated_at DESC
+        LIMIT 20
+        """
+    ).fetchall()
+    recent_agents = [dict(row) for row in recent_rows]
+
+    return render_template(
+        'agents.html',
+        pending_agents=pending_agents,
+        recent_agents=recent_agents,
+    )
 
 
 # ============ API Endpoints (called by Conduct) ============

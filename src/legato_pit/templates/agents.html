@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Agents - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="agents-container">
+    <header class="page-header">
+        <h1>Agent Queue</h1>
+        <p class="subtitle">Review and approve Lab repository creation</p>
+    </header>
+
+    {% if pending_agents %}
+    <section class="card">
+        <h2>Pending Approval</h2>
+        <div class="agent-list">
+            {% for agent in pending_agents %}
+            <div class="agent-item" data-queue-id="{{ agent.queue_id }}">
+                <div class="agent-info">
+                    <span class="agent-title">{{ agent.title }}</span>
+                    <span class="agent-meta">
+                        <span class="badge badge-{{ agent.project_type }}">{{ agent.project_type }}</span>
+                        <code>Lab.{{ agent.project_name }}.{{ 'Note' if agent.project_type == 'note' else 'Chord' }}</code>
+                    </span>
+                    {% if agent.description %}
+                    <p class="agent-desc">{{ agent.description }}</p>
+                    {% endif %}
+                    {% if agent.source_transcript %}
+                    <span class="agent-source">Source: {{ agent.source_transcript }}</span>
+                    {% endif %}
+                    <span class="agent-date">Queued: {{ agent.created_at[:16] }}</span>
+                </div>
+                <div class="agent-actions">
+                    <button class="btn btn-primary" onclick="approveAgent('{{ agent.queue_id }}')">
+                        Approve
+                    </button>
+                    <button class="btn btn-secondary" onclick="rejectAgent('{{ agent.queue_id }}')">
+                        Reject
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% else %}
+    <section class="card">
+        <div class="empty-state-large">
+            <p>No agents pending approval</p>
+            <span class="empty-hint">When transcripts are classified as projects, they'll appear here for review before spawning Lab repositories.</span>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if recent_agents %}
+    <section class="card">
+        <h2>Recent Activity</h2>
+        <div class="agent-list">
+            {% for agent in recent_agents %}
+            <div class="agent-item agent-{{ agent.status }}">
+                <div class="agent-info">
+                    <span class="agent-title">{{ agent.title }}</span>
+                    <span class="agent-meta">
+                        <span class="badge badge-{{ agent.status }}">{{ agent.status }}</span>
+                        <code>Lab.{{ agent.project_name }}.{{ 'Note' if agent.project_type == 'note' else 'Chord' }}</code>
+                    </span>
+                    {% if agent.approved_by %}
+                    <span class="agent-date">{{ agent.status }} by {{ agent.approved_by }} at {{ agent.approved_at[:16] if agent.approved_at else '' }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>How It Works</h2>
+        <ol class="how-it-works">
+            <li>Submit a transcript via <a href="{{ url_for('dropbox.index') }}">Dropbox</a> describing a project idea</li>
+            <li>Conduct classifies it and queues the agent here</li>
+            <li>Review the project details and click <strong>Approve</strong> to spawn the Lab repository</li>
+            <li>A new repo is created with an initial issue assigned to Copilot</li>
+        </ol>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function approveAgent(queueId) {
+    if (!confirm('Approve this agent? This will spawn a new Lab repository.')) {
+        return;
+    }
+
+    const item = document.querySelector(`[data-queue-id="${queueId}"]`);
+    const btn = item.querySelector('.btn-primary');
+    btn.disabled = true;
+    btn.textContent = 'Approving...';
+
+    try {
+        const response = await fetch(`/agents/api/${queueId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'approved') {
+            item.classList.add('agent-approved');
+            item.querySelector('.agent-actions').innerHTML = '<span class="badge badge-approved">Approved - spawning...</span>';
+            setTimeout(() => window.location.reload(), 2000);
+        } else {
+            alert(`Error: ${data.error}`);
+            btn.disabled = false;
+            btn.textContent = 'Approve';
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+    }
+}
+
+async function rejectAgent(queueId) {
+    const reason = prompt('Reason for rejection (optional):');
+    if (reason === null) return;
+
+    const item = document.querySelector(`[data-queue-id="${queueId}"]`);
+    const btn = item.querySelector('.btn-secondary');
+    btn.disabled = true;
+    btn.textContent = 'Rejecting...';
+
+    try {
+        const response = await fetch(`/agents/api/${queueId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'rejected') {
+            item.remove();
+            // Check if list is empty
+            const list = document.querySelector('.agent-list');
+            if (list && list.children.length === 0) {
+                window.location.reload();
+            }
+        } else {
+            alert(`Error: ${data.error}`);
+            btn.disabled = false;
+            btn.textContent = 'Reject';
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Reject';
+    }
+}
+</script>
+{% endblock %}
