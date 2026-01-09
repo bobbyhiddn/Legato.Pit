@@ -374,6 +374,37 @@ def get_config():
     })
 
 
+@chat_bp.route('/api/stats', methods=['GET'])
+@login_required
+def get_stats():
+    """Get RAG system statistics for debugging.
+
+    Response:
+    {
+        "knowledge_entries": 42,
+        "embeddings": 42,
+        "provider": "text-embedding-3-small",
+        "has_openai_key": true,
+        "has_anthropic_key": true
+    }
+    """
+    import os
+
+    try:
+        services = get_services()
+        stats = services['context'].get_stats()
+
+        # Add key availability info
+        stats['has_openai_key'] = bool(os.environ.get('OPENAI_API_KEY'))
+        stats['has_anthropic_key'] = bool(os.environ.get('ANTHROPIC_API_KEY'))
+        stats['has_system_pat'] = bool(os.environ.get('SYSTEM_PAT'))
+
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Failed to get stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @chat_bp.route('/api/models', methods=['GET'])
 @login_required
 def get_models():

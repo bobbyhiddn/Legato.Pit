@@ -299,6 +299,52 @@ def api_sync():
         }), 500
 
 
+@library_bp.route('/api/generate-embeddings', methods=['POST'])
+@login_required
+def api_generate_embeddings():
+    """Generate embeddings for entries that don't have them.
+
+    This is useful if sync completed but embeddings weren't generated
+    (e.g., missing API key at sync time).
+
+    Response:
+    {
+        "status": "success",
+        "embeddings_generated": 42
+    }
+    """
+    from .rag.embedding_service import EmbeddingService
+    from .rag.openai_provider import OpenAIEmbeddingProvider
+
+    try:
+        db = get_db()
+
+        # Create embedding service
+        try:
+            provider = OpenAIEmbeddingProvider()
+            embedding_service = EmbeddingService(provider, db)
+        except ValueError as e:
+            return jsonify({
+                'status': 'error',
+                'error': f'OpenAI API key not configured: {e}',
+            }), 400
+
+        # Generate missing embeddings
+        count = embedding_service.generate_missing_embeddings('knowledge', delay=0.1)
+
+        return jsonify({
+            'status': 'success',
+            'embeddings_generated': count,
+        })
+
+    except Exception as e:
+        logger.error(f"Generate embeddings failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+        }), 500
+
+
 @library_bp.route('/api/sync/status', methods=['GET'])
 @login_required
 def api_sync_status():

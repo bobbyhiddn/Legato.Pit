@@ -10,13 +10,18 @@
                 <h1>Knowledge Library</h1>
                 <p class="subtitle">{{ total_knowledge }} entries across {{ categories|length }} categories</p>
             </div>
-            <button type="button" class="btn btn-primary" id="syncBtn" onclick="syncLibrary()">
-                Sync from GitHub
-            </button>
+            <div class="header-actions">
+                <button type="button" class="btn btn-secondary" id="embedBtn" onclick="generateEmbeddings()">
+                    Generate Embeddings
+                </button>
+                <button type="button" class="btn btn-primary" id="syncBtn" onclick="syncLibrary()">
+                    Sync from GitHub
+                </button>
+            </div>
         </div>
     </header>
 
-    <div id="syncStatus" class="sync-status" style="display: none;"></div>
+    <div id="statusDiv" class="sync-status" style="display: none;"></div>
 
     <div class="library-search">
         <form action="{{ url_for('library.search') }}" method="GET" class="search-form">
@@ -64,8 +69,8 @@
             <span class="stat-label">Knowledge Entries</span>
         </div>
         <div class="stat-card">
-            <span class="stat-value">{{ total_projects }}</span>
-            <span class="stat-label">Projects</span>
+            <span class="stat-value" id="embeddingsCount">-</span>
+            <span class="stat-label">Embeddings</span>
         </div>
         <div class="stat-card">
             <span class="stat-value">{{ categories|length }}</span>
@@ -83,9 +88,22 @@
 
 {% block scripts %}
 <script>
+    const statusDiv = document.getElementById('statusDiv');
+
+    // Fetch embeddings count on page load
+    async function loadStats() {
+        try {
+            const response = await fetch('/chat/api/stats');
+            const data = await response.json();
+            document.getElementById('embeddingsCount').textContent = data.embeddings || 0;
+        } catch (error) {
+            console.error('Failed to load stats:', error);
+        }
+    }
+    loadStats();
+
     async function syncLibrary() {
         const btn = document.getElementById('syncBtn');
-        const statusDiv = document.getElementById('syncStatus');
 
         btn.disabled = true;
         btn.textContent = 'Syncing...';
@@ -110,6 +128,7 @@
                     Generated ${data.stats.embeddings_generated} embeddings.
                     <a href="" onclick="location.reload(); return false;">Refresh page</a>
                 `;
+                loadStats();
             } else {
                 statusDiv.className = 'sync-status error';
                 statusDiv.textContent = `Sync failed: ${data.error}`;
@@ -120,6 +139,40 @@
         } finally {
             btn.disabled = false;
             btn.textContent = 'Sync from GitHub';
+        }
+    }
+
+    async function generateEmbeddings() {
+        const btn = document.getElementById('embedBtn');
+
+        btn.disabled = true;
+        btn.textContent = 'Generating...';
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'sync-status syncing';
+        statusDiv.textContent = 'Generating embeddings for entries...';
+
+        try {
+            const response = await fetch('/library/api/generate-embeddings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                statusDiv.className = 'sync-status success';
+                statusDiv.textContent = `Generated ${data.embeddings_generated} embeddings.`;
+                loadStats();
+            } else {
+                statusDiv.className = 'sync-status error';
+                statusDiv.textContent = `Failed: ${data.error}`;
+            }
+        } catch (error) {
+            statusDiv.className = 'sync-status error';
+            statusDiv.textContent = `Failed: ${error.message}`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Generate Embeddings';
         }
     }
 </script>
