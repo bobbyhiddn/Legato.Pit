@@ -92,6 +92,49 @@ def create_app():
         init_db()
         logger.info("RAG database initialized")
 
+    # Auto-sync library on startup (background thread)
+    def startup_sync():
+        """Sync library from GitHub on app startup."""
+        import threading
+        import time
+
+        def sync_task():
+            time.sleep(5)  # Wait for app to fully initialize
+            try:
+                with app.app_context():
+                    from .rag.database import init_db
+                    from .rag.library_sync import LibrarySync
+                    from .rag.embedding_service import EmbeddingService
+                    from .rag.openai_provider import OpenAIEmbeddingProvider
+
+                    token = os.getenv('SYSTEM_PAT')
+                    if not token:
+                        logger.warning("SYSTEM_PAT not set, skipping library sync")
+                        return
+
+                    db = init_db()
+
+                    # Create embedding service if OpenAI key available
+                    embedding_service = None
+                    if os.getenv('OPENAI_API_KEY'):
+                        try:
+                            provider = OpenAIEmbeddingProvider()
+                            embedding_service = EmbeddingService(provider, db)
+                        except Exception as e:
+                            logger.warning(f"Could not create embedding service: {e}")
+
+                    sync = LibrarySync(db, embedding_service)
+                    stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+                    logger.info(f"Startup library sync complete: {stats}")
+            except Exception as e:
+                logger.error(f"Startup library sync failed: {e}")
+
+        thread = threading.Thread(target=sync_task, daemon=True)
+        thread.start()
+        logger.info("Started background library sync")
+
+    startup_sync()
+
     # Context processor for templates
     @app.context_processor
     def inject_globals():

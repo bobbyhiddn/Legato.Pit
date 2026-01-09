@@ -93,7 +93,7 @@ def index():
     )
 
 
-@library_bp.route('/entry/<entry_id>')
+@library_bp.route('/entry/<path:entry_id>')
 @login_required
 def view_entry(entry_id: str):
     """View a single knowledge entry."""

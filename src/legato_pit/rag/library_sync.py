@@ -232,7 +232,8 @@ class LibrarySync:
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, path)
         category = frontmatter.get('category') or categorize_from_path(path)
-        entry_id = frontmatter.get('id') or generate_entry_id(category, title)
+        # Always generate entry_id from hash to ensure URL-safe format
+        entry_id = generate_entry_id(category, title)
 
         # Check if entry exists
         existing = self.conn.execute(
@@ -331,7 +332,8 @@ class LibrarySync:
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, file_path.name)
         category = frontmatter.get('category') or categorize_from_path(relative_path)
-        entry_id = frontmatter.get('id') or generate_entry_id(category, title)
+        # Always generate entry_id from hash to ensure URL-safe format
+        entry_id = generate_entry_id(category, title)
 
         # Check if entry exists
         existing = self.conn.execute(
