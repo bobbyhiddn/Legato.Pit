@@ -31,8 +31,20 @@ def get_db():
     return g.db_conn
 
 
+def strip_frontmatter(content: str) -> str:
+    """Remove YAML frontmatter from markdown content."""
+    if content.startswith('---'):
+        parts = content.split('---', 2)
+        if len(parts) >= 3:
+            return parts[2].strip()
+    return content
+
+
 def render_markdown(content: str) -> str:
-    """Render markdown content to HTML."""
+    """Render markdown content to HTML, stripping frontmatter."""
+    # Remove frontmatter since it's shown in collapsible metadata
+    content = strip_frontmatter(content)
+
     md = markdown.Markdown(
         extensions=[
             'tables',
@@ -458,3 +470,100 @@ def list_projects():
         'library_projects.html',
         projects=[dict(p) for p in projects],
     )
+
+
+@library_bp.route('/api/entry/<path:entry_id>/save', methods=['POST'])
+@login_required
+def api_save_entry(entry_id: str):
+    """Save entry to GitHub and update local DB.
+
+    Request body:
+    {
+        "content": "markdown content",
+        "message": "commit message"
+    }
+
+    Response:
+    {
+        "status": "success",
+        "commit_sha": "abc123..."
+    }
+    """
+    from .rag.github_service import commit_file
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'error': 'No data provided'}), 400
+
+    content = data.get('content')
+    message = data.get('message', 'Update knowledge entry')
+
+    if not content:
+        return jsonify({'status': 'error', 'error': 'Content is required'}), 400
+
+    try:
+        db = get_db()
+
+        # Get entry from DB
+        entry = db.execute(
+            "SELECT * FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'status': 'error', 'error': 'Entry not found'}), 404
+
+        entry_dict = dict(entry)
+        file_path = entry_dict.get('file_path')
+
+        if not file_path:
+            return jsonify({
+                'status': 'error',
+                'error': 'Entry has no file_path - cannot commit to GitHub'
+            }), 400
+
+        # Get token and repo config
+        token = current_app.config.get('SYSTEM_PAT')
+        if not token:
+            return jsonify({
+                'status': 'error',
+                'error': 'SYSTEM_PAT not configured'
+            }), 500
+
+        repo = 'bobbyhiddn/Legato.Library'
+
+        # Commit to GitHub
+        result = commit_file(
+            repo=repo,
+            path=file_path,
+            content=content,
+            message=message,
+            token=token,
+        )
+
+        commit_sha = result['commit']['sha']
+
+        # Update local DB
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET content = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+            """,
+            (content, entry_id)
+        )
+        db.commit()
+
+        logger.info(f"Saved entry {entry_id} to GitHub: {commit_sha[:7]}")
+
+        return jsonify({
+            'status': 'success',
+            'commit_sha': commit_sha,
+        })
+
+    except Exception as e:
+        logger.error(f"Save entry failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+        }), 500

@@ -129,23 +129,55 @@ class ChatService:
         temperature: float,
     ) -> str:
         """Chat via OpenAI API."""
+        import openai
+
+        # Newer/reasoning models require max_completion_tokens instead of max_tokens
+        model_lower = self.model.lower()
+        uses_new_param = (
+            model_lower.startswith('o1') or
+            model_lower.startswith('o3') or
+            model_lower.startswith('o4') or
+            model_lower.startswith('gpt-5')
+        )
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                messages=messages,
-            )
+            if uses_new_param:
+                # Reasoning models: no temperature, use max_completion_tokens
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=max_tokens,
+                    messages=messages,
+                )
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=messages,
+                )
 
             return response.choices[0].message.content
+
+        except openai.BadRequestError as e:
+            # Handle case where model requires max_completion_tokens
+            if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
+                logger.info(f"Retrying with max_completion_tokens for {self.model}")
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=max_tokens,
+                    messages=messages,
+                )
+                return response.choices[0].message.content
+            raise
 
         except Exception as e:
             logger.error(f"OpenAI chat failed: {e}")
             raise
 
-    # Curated Anthropic models (no public list API available)
-    ANTHROPIC_MODELS = [
+    # Fallback Anthropic models if API fetch fails
+    ANTHROPIC_MODELS_FALLBACK = [
         {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
+        {"id": "claude-opus-4-20250514", "name": "Claude Opus 4"},
         {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
         {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku"},
         {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus"},
@@ -155,16 +187,55 @@ class ChatService:
     def get_available_models(cls, provider: ChatProvider) -> List[Dict[str, str]]:
         """Get list of available models for a provider.
 
-        For OpenAI, fetches dynamically from API.
-        For Claude, returns curated list (no public API).
+        Fetches dynamically from API for both providers.
 
         Returns:
             List of dicts with 'id' and 'name' keys
         """
         if provider == ChatProvider.CLAUDE:
-            return cls.ANTHROPIC_MODELS
+            return cls.fetch_anthropic_models()
         else:
             return cls.fetch_openai_models()
+
+    @classmethod
+    def fetch_anthropic_models(cls) -> List[Dict[str, str]]:
+        """Fetch available models from Anthropic API."""
+        import requests
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            logger.warning("ANTHROPIC_API_KEY not set, returning fallback models")
+            return cls.ANTHROPIC_MODELS_FALLBACK
+
+        try:
+            response = requests.get(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            models = []
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                display_name = model.get("display_name", model_id)
+                # Only include chat-capable models (claude-*)
+                if model_id.startswith("claude-"):
+                    models.append({"id": model_id, "name": display_name})
+
+            if models:
+                logger.info(f"Fetched {len(models)} Anthropic models")
+                return models
+            else:
+                return cls.ANTHROPIC_MODELS_FALLBACK
+
+        except Exception as e:
+            logger.error(f"Failed to fetch Anthropic models: {e}")
+            return cls.ANTHROPIC_MODELS_FALLBACK
 
     @classmethod
     def fetch_openai_models(cls) -> List[Dict[str, str]]:
