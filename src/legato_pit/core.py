@@ -45,10 +45,10 @@ def create_app():
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
         PREFERRED_URL_SCHEME='https' if is_production else 'http',
 
-        # GitHub OAuth
-        GITHUB_CLIENT_ID=os.getenv('GITHUB_CLIENT_ID'),
-        GITHUB_CLIENT_SECRET=os.getenv('GITHUB_CLIENT_SECRET'),
-        GITHUB_ALLOWED_USERS=os.getenv('GITHUB_ALLOWED_USERS', '').split(','),
+        # GitHub OAuth (env vars use GH_ prefix to avoid GitHub's reserved GITHUB_ prefix)
+        GITHUB_CLIENT_ID=os.getenv('GH_OAUTH_CLIENT_ID'),
+        GITHUB_CLIENT_SECRET=os.getenv('GH_OAUTH_CLIENT_SECRET'),
+        GITHUB_ALLOWED_USERS=os.getenv('GH_ALLOWED_USERS', '').split(','),
 
         # LEGATO configuration
         LEGATO_ORG=os.getenv('LEGATO_ORG', 'bobbyhiddn'),

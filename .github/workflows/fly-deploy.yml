@@ -24,9 +24,9 @@ jobs:
           flyctl secrets set \
             FLASK_SECRET_KEY="${{ secrets.FLASK_SECRET_KEY }}" \
             FLASK_ENV="production" \
-            GITHUB_CLIENT_ID="${{ secrets.GITHUB_CLIENT_ID }}" \
-            GITHUB_CLIENT_SECRET="${{ secrets.GITHUB_CLIENT_SECRET }}" \
-            GITHUB_ALLOWED_USERS="${{ secrets.GITHUB_ALLOWED_USERS }}" \
+            GH_OAUTH_CLIENT_ID="${{ secrets.GH_OAUTH_CLIENT_ID }}" \
+            GH_OAUTH_CLIENT_SECRET="${{ secrets.GH_OAUTH_CLIENT_SECRET }}" \
+            GH_ALLOWED_USERS="${{ secrets.GH_ALLOWED_USERS }}" \
             SYSTEM_PAT="${{ secrets.SYSTEM_PAT }}" \
             LEGATO_ORG="${{ secrets.LEGATO_ORG }}" \
             CONDUCT_REPO="${{ secrets.CONDUCT_REPO }}" \
