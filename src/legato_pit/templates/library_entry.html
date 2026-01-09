@@ -74,6 +74,9 @@
             {% if entry.file_path %}
             <button type="button" onclick="showEditPane()" class="btn btn-primary">Edit</button>
             {% endif %}
+            <button type="button" onclick="generateChord()" class="btn btn-accent" id="chordBtn">
+                Generate Chord
+            </button>
             <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
         </div>
     </div>
@@ -172,6 +175,44 @@
         editStatus.textContent = message;
         editStatus.className = `edit-status ${type}`;
         editStatus.style.display = 'block';
+    }
+
+    async function generateChord() {
+        const scope = prompt('Project scope:\n- note: Single feature, quick implementation\n- chord: Multi-phase, complex project\n\nEnter "note" or "chord":', 'chord');
+        if (!scope || (scope !== 'note' && scope !== 'chord')) {
+            if (scope !== null) alert('Invalid scope. Please enter "note" or "chord".');
+            return;
+        }
+
+        const chordBtn = document.getElementById('chordBtn');
+        chordBtn.disabled = true;
+        chordBtn.textContent = 'Queueing...';
+
+        try {
+            const response = await fetch('/agents/api/from-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    entry_id: entryId,
+                    project_scope: scope
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'queued') {
+                alert(`Queued as agent: ${data.queue_id}\n\nGo to Agents tab to approve.`);
+                chordBtn.textContent = 'Queued!';
+            } else {
+                alert(`Error: ${data.error}`);
+                chordBtn.disabled = false;
+                chordBtn.textContent = 'Generate Chord';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            chordBtn.disabled = false;
+            chordBtn.textContent = 'Generate Chord';
+        }
     }
 </script>
 {% endblock %}

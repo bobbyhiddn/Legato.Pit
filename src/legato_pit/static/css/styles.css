@@ -364,6 +364,15 @@ body {
     background: #2ea043;
 }
 
+.btn-accent {
+    background: var(--accent-purple);
+    color: #fff;
+}
+
+.btn-accent:hover {
+    background: #a371f7;
+}
+
 .btn-small {
     padding: 0.375rem 0.75rem;
     font-size: 0.75rem;

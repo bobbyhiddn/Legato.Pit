@@ -84,6 +84,133 @@ def index():
     )
 
 
+# ============ API Endpoints (called by Pit UI) ============
+
+@agents_bp.route('/api/from-entry', methods=['POST'])
+@login_required
+def api_queue_from_entry():
+    """Queue an agent from a library entry.
+
+    Request body:
+    {
+        "entry_id": "kb-abc123",
+        "project_scope": "note" or "chord"
+    }
+
+    Response:
+    {
+        "status": "queued",
+        "queue_id": "aq-abc123def456"
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    entry_id = data.get('entry_id')
+    project_scope = data.get('project_scope', 'chord')
+
+    if not entry_id:
+        return jsonify({'error': 'Missing entry_id'}), 400
+
+    if project_scope not in ('note', 'chord'):
+        return jsonify({'error': 'Invalid project_scope, must be "note" or "chord"'}), 400
+
+    try:
+        db = get_db()
+
+        # Get the library entry
+        entry = db.execute(
+            "SELECT * FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': 'Entry not found'}), 404
+
+        entry = dict(entry)
+
+        # Generate project name from title
+        import re
+        project_name = re.sub(r'[^a-zA-Z0-9]+', '-', entry['title'].lower()).strip('-')[:50]
+
+        # Build tasker body from entry content
+        content_preview = entry['content'][:500] if entry['content'] else ''
+        tasker_body = f"""## Tasker: {entry['title']}
+
+### Context
+From knowledge entry `{entry_id}`:
+"{content_preview}"
+
+### Objective
+Implement the project as described in the knowledge entry.
+
+### Acceptance Criteria
+- [ ] Core functionality implemented
+- [ ] Documentation updated
+- [ ] Tests written
+
+### Constraints
+- Follow patterns in `copilot-instructions.md`
+- Reference `SIGNAL.md` for project intent
+- Keep PRs focused and reviewable
+
+### References
+- Source entry: `{entry_id}`
+- Category: {entry.get('category', 'general')}
+
+---
+*Generated from Pit library entry | Source: {entry_id}*
+"""
+
+        # Build signal JSON
+        signal_json = {
+            "id": f"lab.{project_scope}.{project_name}",
+            "type": "project",
+            "source": "pit-library",
+            "category": project_scope,
+            "title": entry['title'],
+            "domain_tags": [],
+            "intent": entry.get('content', '')[:200],
+            "key_phrases": [],
+            "path": f"Lab.{project_name}.{'Note' if project_scope == 'note' else 'Chord'}",
+        }
+
+        queue_id = generate_queue_id()
+
+        db.execute(
+            """
+            INSERT INTO agent_queue
+            (queue_id, project_name, project_type, title, description,
+             signal_json, tasker_body, source_transcript, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (
+                queue_id,
+                project_name,
+                project_scope,
+                entry['title'],
+                entry.get('content', '')[:500],
+                json.dumps(signal_json),
+                tasker_body,
+                f"library:{entry_id}",
+            )
+        )
+        db.commit()
+
+        logger.info(f"Queued agent from entry: {queue_id} - {project_name}")
+
+        return jsonify({
+            'status': 'queued',
+            'queue_id': queue_id,
+            'project_name': project_name,
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to queue from entry: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ============ API Endpoints (called by Conduct) ============
 
 @agents_bp.route('/api/queue', methods=['POST'])
