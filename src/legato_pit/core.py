@@ -78,6 +78,7 @@ def create_app():
     from .library import library_bp
     from .chat import chat_bp
     from .memory_api import memory_api_bp
+    from .agents import agents_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -85,6 +86,7 @@ def create_app():
     app.register_blueprint(library_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(memory_api_bp)
+    app.register_blueprint(agents_bp)
 
     # Initialize RAG database on startup
     with app.app_context():

@@ -37,6 +37,40 @@
         </div>
     </section>
 
+    {% if pending_agents %}
+    <section class="card card-highlight">
+        <h2>Queued Agents</h2>
+        <p class="section-subtitle">Pending approval before spawning Lab repositories</p>
+        <div class="agent-list">
+            {% for agent in pending_agents %}
+            <div class="agent-item" data-queue-id="{{ agent.queue_id }}">
+                <div class="agent-info">
+                    <span class="agent-title">{{ agent.title }}</span>
+                    <span class="agent-meta">
+                        <span class="badge badge-{{ agent.project_type }}">{{ agent.project_type }}</span>
+                        {{ agent.project_name }}
+                        {% if agent.source_transcript %}
+                        &middot; from {{ agent.source_transcript }}
+                        {% endif %}
+                    </span>
+                    {% if agent.description %}
+                    <span class="agent-desc">{{ agent.description[:100] }}{% if agent.description|length > 100 %}...{% endif %}</span>
+                    {% endif %}
+                </div>
+                <div class="agent-actions">
+                    <button class="btn btn-small btn-primary" onclick="approveAgent('{{ agent.queue_id }}')">
+                        Approve
+                    </button>
+                    <button class="btn btn-small btn-secondary" onclick="rejectAgent('{{ agent.queue_id }}')">
+                        Reject
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <section class="card">
         <h2>Recent Jobs</h2>
         {% if recent_jobs %}
@@ -86,6 +120,77 @@
 <script>
 function refreshDashboard() {
     window.location.reload();
+}
+
+async function approveAgent(queueId) {
+    if (!confirm('Approve this agent? This will spawn a new Lab repository.')) {
+        return;
+    }
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Approving...';
+
+    try {
+        const response = await fetch(`/agents/api/${queueId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'approved') {
+            const item = document.querySelector(`[data-queue-id="${queueId}"]`);
+            item.classList.add('agent-approved');
+            item.innerHTML = '<div class="agent-info"><span class="agent-title">Approved - spawning repository...</span></div>';
+            setTimeout(() => window.location.reload(), 2000);
+        } else {
+            alert(`Error: ${data.error}`);
+            btn.disabled = false;
+            btn.textContent = 'Approve';
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+    }
+}
+
+async function rejectAgent(queueId) {
+    const reason = prompt('Reason for rejection (optional):');
+    if (reason === null) return; // Cancelled
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Rejecting...';
+
+    try {
+        const response = await fetch(`/agents/api/${queueId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'rejected') {
+            const item = document.querySelector(`[data-queue-id="${queueId}"]`);
+            item.remove();
+            // If no more agents, remove the section
+            const agentList = document.querySelector('.agent-list');
+            if (agentList && agentList.children.length === 0) {
+                agentList.closest('.card').remove();
+            }
+        } else {
+            alert(`Error: ${data.error}`);
+            btn.disabled = false;
+            btn.textContent = 'Reject';
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Reject';
+    }
 }
 </script>
 {% endblock %}

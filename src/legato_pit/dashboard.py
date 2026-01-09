@@ -193,6 +193,33 @@ def get_stats():
     return stats
 
 
+def get_pending_agents():
+    """Get pending agents from the queue."""
+    from flask import g
+    from .rag.database import init_db
+
+    try:
+        if 'db_conn' not in g:
+            g.db_conn = init_db()
+        db = g.db_conn
+
+        rows = db.execute(
+            """
+            SELECT queue_id, project_name, project_type, title, description,
+                   source_transcript, created_at
+            FROM agent_queue
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    except Exception as e:
+        logger.error(f"Error fetching pending agents: {e}")
+        return []
+
+
 @dashboard_bp.route('/')
 @login_required
 def index():
@@ -203,7 +230,8 @@ def index():
         system_status=get_system_status(),
         recent_jobs=get_recent_jobs(),
         recent_artifacts=get_recent_artifacts(),
-        stats=get_stats()
+        stats=get_stats(),
+        pending_agents=get_pending_agents()
     )
 
 

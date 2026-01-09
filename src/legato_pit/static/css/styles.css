@@ -1177,3 +1177,84 @@ footer p {
     border: 1px solid var(--accent-red);
     color: var(--accent-red);
 }
+
+/* Agent queue */
+.card-highlight {
+    border: 1px solid var(--accent-purple);
+    background: linear-gradient(135deg, rgba(163, 113, 247, 0.05) 0%, transparent 50%);
+}
+
+.section-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: -0.5rem 0 1rem 0;
+}
+
+.agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.agent-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    transition: border-color 0.15s;
+}
+
+.agent-item:hover {
+    border-color: var(--accent-purple);
+}
+
+.agent-item.agent-approved {
+    border-color: var(--accent-green);
+    background: rgba(63, 185, 80, 0.1);
+}
+
+.agent-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.agent-title {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.agent-meta {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.agent-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.agent-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.badge-note {
+    background: var(--accent-blue);
+}
+
+.badge-chord {
+    background: var(--accent-purple);
+}

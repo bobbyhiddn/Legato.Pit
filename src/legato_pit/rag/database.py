@@ -156,12 +156,34 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
+    # Agent queue for pending project spawns
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agent_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            queue_id TEXT UNIQUE NOT NULL,
+            project_name TEXT NOT NULL,
+            project_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            signal_json TEXT NOT NULL,
+            tasker_body TEXT NOT NULL,
+            source_transcript TEXT,
+            status TEXT DEFAULT 'pending',
+            approved_by TEXT,
+            approved_at DATETIME,
+            spawn_result TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_status ON agent_queue(status)")
 
     conn.commit()
     logger.info(f"Database initialized at {db_path or get_db_path()}")
