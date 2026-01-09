@@ -114,6 +114,31 @@ def create_app():
 
                     db = init_db()
 
+                    # Clean up invalid/duplicate entries first
+                    cleanup_count = 0
+                    # Remove entries with invalid entry_ids
+                    invalid = db.execute(
+                        "SELECT id FROM knowledge_entries WHERE entry_id NOT LIKE 'kb-%' OR LENGTH(entry_id) != 11"
+                    ).fetchall()
+                    for row in invalid:
+                        db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
+                        db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
+                        cleanup_count += 1
+                    # Remove duplicates by file_path
+                    dups = db.execute("""
+                        SELECT id FROM knowledge_entries
+                        WHERE file_path IS NOT NULL AND id NOT IN (
+                            SELECT MAX(id) FROM knowledge_entries WHERE file_path IS NOT NULL GROUP BY file_path
+                        )
+                    """).fetchall()
+                    for row in dups:
+                        db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
+                        db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
+                        cleanup_count += 1
+                    if cleanup_count > 0:
+                        db.commit()
+                        logger.info(f"Cleaned up {cleanup_count} invalid/duplicate entries")
+
                     # Create embedding service if OpenAI key available
                     embedding_service = None
                     if os.getenv('OPENAI_API_KEY'):

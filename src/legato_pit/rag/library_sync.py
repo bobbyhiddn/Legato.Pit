@@ -235,21 +235,21 @@ class LibrarySync:
         # Always generate entry_id from hash to ensure URL-safe format
         entry_id = generate_entry_id(category, title)
 
-        # Check if entry exists
+        # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
-            "SELECT id FROM knowledge_entries WHERE entry_id = ?",
-            (entry_id,)
+            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
+            (path,)
         ).fetchone()
 
         if existing:
-            # Update existing entry
+            # Update existing entry (including entry_id if changed)
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
-                SET title = ?, category = ?, content = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE entry_id = ?
+                SET entry_id = ?, title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
                 """,
-                (title, category, body, path, entry_id)
+                (entry_id, title, category, body, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -335,20 +335,20 @@ class LibrarySync:
         # Always generate entry_id from hash to ensure URL-safe format
         entry_id = generate_entry_id(category, title)
 
-        # Check if entry exists
+        # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
-            "SELECT id FROM knowledge_entries WHERE entry_id = ?",
-            (entry_id,)
+            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
+            (relative_path,)
         ).fetchone()
 
         if existing:
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
-                SET title = ?, category = ?, content = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE entry_id = ?
+                SET entry_id = ?, title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
                 """,
-                (title, category, body, relative_path, entry_id)
+                (entry_id, title, category, body, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")

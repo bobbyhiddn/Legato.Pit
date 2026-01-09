@@ -10,14 +10,9 @@
                 <h1>Knowledge Library</h1>
                 <p class="subtitle">{{ total_knowledge }} entries across {{ categories|length }} categories</p>
             </div>
-            <div class="header-actions">
-                <button type="button" class="btn btn-secondary" id="embedBtn" onclick="generateEmbeddings()">
-                    Generate Embeddings
-                </button>
-                <button type="button" class="btn btn-primary" id="syncBtn" onclick="syncLibrary()">
-                    Sync from GitHub
-                </button>
-            </div>
+            <button type="button" class="btn btn-primary" id="embedBtn" onclick="generateEmbeddings()">
+                Generate Embeddings
+            </button>
         </div>
     </header>
 
@@ -102,46 +97,6 @@
     }
     loadStats();
 
-    async function syncLibrary() {
-        const btn = document.getElementById('syncBtn');
-
-        btn.disabled = true;
-        btn.textContent = 'Syncing...';
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'sync-status syncing';
-        statusDiv.textContent = 'Syncing from GitHub...';
-
-        try {
-            const response = await fetch('/library/api/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: 'github' })
-            });
-
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                statusDiv.className = 'sync-status success';
-                statusDiv.innerHTML = `
-                    Sync complete! Found ${data.stats.files_found} files.
-                    Created ${data.stats.entries_created}, updated ${data.stats.entries_updated}.
-                    Generated ${data.stats.embeddings_generated} embeddings.
-                    <a href="" onclick="location.reload(); return false;">Refresh page</a>
-                `;
-                loadStats();
-            } else {
-                statusDiv.className = 'sync-status error';
-                statusDiv.textContent = `Sync failed: ${data.error}`;
-            }
-        } catch (error) {
-            statusDiv.className = 'sync-status error';
-            statusDiv.textContent = `Sync failed: ${error.message}`;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Sync from GitHub';
-        }
-    }
-
     async function generateEmbeddings() {
         const btn = document.getElementById('embedBtn');
 
@@ -175,5 +130,6 @@
             btn.textContent = 'Generate Embeddings';
         }
     }
+
 </script>
 {% endblock %}

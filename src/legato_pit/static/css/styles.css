@@ -1057,3 +1057,58 @@ footer p {
     --accent-color: var(--accent-blue);
     --card-bg: var(--bg-secondary);
 }
+
+/* Entry Metadata (collapsible) */
+.entry-metadata {
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
+.entry-metadata summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.entry-metadata summary:hover {
+    color: var(--text-primary);
+}
+
+.entry-metadata[open] summary {
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.metadata-list {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.375rem 1rem;
+    margin: 0;
+}
+
+.metadata-list dt {
+    color: var(--text-secondary);
+}
+
+.metadata-list dd {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.metadata-list code {
+    font-size: 0.8em;
+    padding: 0.125rem 0.375rem;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+/* Header actions layout */
+.header-actions {
+    display: flex;
+    gap: 0.5rem;
+}

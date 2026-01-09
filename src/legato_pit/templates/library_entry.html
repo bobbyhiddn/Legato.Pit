@@ -18,13 +18,34 @@
         <header class="entry-header">
             <h1>{{ entry.title }}</h1>
             <div class="entry-meta">
-                <span class="entry-id">{{ entry.entry_id }}</span>
                 {% if entry.category %}
                 <span class="entry-category badge">{{ entry.category }}</span>
                 {% endif %}
                 <span class="entry-date">{{ entry.created_at[:10] }}</span>
             </div>
         </header>
+
+        <details class="entry-metadata">
+            <summary>Metadata</summary>
+            <dl class="metadata-list">
+                <dt>Entry ID</dt>
+                <dd><code>{{ entry.entry_id }}</code></dd>
+                {% if entry.category %}
+                <dt>Category</dt>
+                <dd>{{ entry.category }}</dd>
+                {% endif %}
+                {% if entry.file_path %}
+                <dt>File Path</dt>
+                <dd><code>{{ entry.file_path }}</code></dd>
+                {% endif %}
+                <dt>Created</dt>
+                <dd>{{ entry.created_at }}</dd>
+                {% if entry.updated_at and entry.updated_at != entry.created_at %}
+                <dt>Updated</dt>
+                <dd>{{ entry.updated_at }}</dd>
+                {% endif %}
+            </dl>
+        </details>
 
         <div class="entry-content markdown-body">
             {{ entry.content_html|safe }}

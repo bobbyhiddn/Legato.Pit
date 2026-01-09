@@ -290,16 +290,168 @@ def stats():
 def trigger_sync():
     """Trigger a sync from Library repository.
 
-    This endpoint can be called by GitHub webhooks or manually.
+    Request body (optional):
+    {
+        "clear": true  // Clear all entries before sync (fixes duplicates)
+    }
+    """
+    from .rag.database import init_db
+    from .rag.library_sync import LibrarySync
+    from .rag.embedding_service import EmbeddingService
+    from .rag.openai_provider import OpenAIEmbeddingProvider
+
+    data = request.get_json() or {}
+    clear_first = data.get('clear', False)
+
+    try:
+        db = init_db()
+
+        # Clear existing entries if requested
+        if clear_first:
+            db.execute("DELETE FROM embeddings WHERE entry_type = 'knowledge'")
+            db.execute("DELETE FROM knowledge_entries")
+            db.commit()
+            logger.info("Cleared knowledge entries before sync")
+
+        # Create embedding service if possible
+        embedding_service = None
+        if os.environ.get('OPENAI_API_KEY'):
+            try:
+                provider = OpenAIEmbeddingProvider()
+                embedding_service = EmbeddingService(provider, db)
+            except Exception:
+                pass
+
+        sync = LibrarySync(db, embedding_service)
+        token = os.environ.get('SYSTEM_PAT')
+        stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+
+        return jsonify({
+            'status': 'success',
+            'stats': stats,
+        })
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_api_bp.route('/pipeline/status', methods=['POST'])
+@require_api_token
+def pipeline_status():
+    """Update pipeline status.
+
+    Called by Conduct workflows to report progress.
+
+    Request body:
+    {
+        "run_id": "12345",
+        "stage": "parse" | "classify" | "process-knowledge" | "process-projects" | "complete",
+        "status": "started" | "success" | "failed",
+        "details": {
+            "thread_count": 5,
+            "knowledge_count": 3,
+            ...
+        }
+    }
 
     Response:
     {
-        "status": "syncing",
-        "message": "Sync started in background"
+        "success": true,
+        "message": "Status updated"
     }
     """
-    # TODO: Implement Library sync
-    return jsonify({
-        'status': 'not_implemented',
-        'message': 'Library sync not yet implemented',
-    }), 501
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    required = ['run_id', 'stage', 'status']
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return jsonify({'error': f'Missing required fields: {missing}'}), 400
+
+    try:
+        from .rag.database import init_db
+        import json
+
+        db = init_db()
+
+        # Store pipeline status
+        db.execute(
+            """
+            INSERT INTO pipeline_runs (run_id, stage, status, details, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(run_id, stage) DO UPDATE SET
+                status = excluded.status,
+                details = excluded.details,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                data['run_id'],
+                data['stage'],
+                data['status'],
+                json.dumps(data.get('details', {})),
+            ),
+        )
+        db.commit()
+
+        logger.info(f"Pipeline {data['run_id']} stage {data['stage']}: {data['status']}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Status updated',
+        })
+
+    except Exception as e:
+        logger.error(f"Pipeline status update failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_api_bp.route('/pipeline/status/<run_id>', methods=['GET'])
+@require_api_token
+def get_pipeline_status(run_id: str):
+    """Get pipeline status for a run.
+
+    Response:
+    {
+        "run_id": "12345",
+        "stages": [
+            {"stage": "parse", "status": "success", "details": {...}, "updated_at": "..."},
+            {"stage": "classify", "status": "running", ...}
+        ]
+    }
+    """
+    try:
+        from .rag.database import init_db
+        import json
+
+        db = init_db()
+
+        rows = db.execute(
+            """
+            SELECT stage, status, details, updated_at
+            FROM pipeline_runs
+            WHERE run_id = ?
+            ORDER BY updated_at
+            """,
+            (run_id,),
+        ).fetchall()
+
+        stages = [
+            {
+                'stage': r['stage'],
+                'status': r['status'],
+                'details': json.loads(r['details']) if r['details'] else {},
+                'updated_at': r['updated_at'],
+            }
+            for r in rows
+        ]
+
+        return jsonify({
+            'run_id': run_id,
+            'stages': stages,
+        })
+
+    except Exception as e:
+        logger.error(f"Get pipeline status failed: {e}")
+        return jsonify({'error': str(e)}), 500
