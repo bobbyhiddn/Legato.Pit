@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="{{ app_description }}">
+    <meta name="theme-color" content="#161b22">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>{% block title %}{{ title|default(app_name) }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="main-nav">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">{{ app_name }}</a>
+            {% if is_authenticated %}
+            <div class="nav-links">
+                <a href="{{ url_for('dashboard.index') }}" class="nav-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}">Dashboard</a>
+                <a href="{{ url_for('library.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('library.') %}active{% endif %}">Library</a>
+                <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
+                <a href="{{ url_for('dropbox.index') }}" class="nav-link {% if request.endpoint == 'dropbox.index' %}active{% endif %}">Dropbox</a>
+                <div class="nav-user">
+                    {% if user.avatar_url %}
+                    <img src="{{ user.avatar_url }}" alt="{{ user.username }}" class="user-avatar">
+                    {% endif %}
+                    <a href="{{ url_for('auth.logout') }}" class="nav-link logout">Logout</a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>{{ app_name }} &middot; {{ now.year }}</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Library - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="search-container">
+    <header class="search-header">
+        <h1>Search Library</h1>
+    </header>
+
+    <div class="library-search">
+        <form action="{{ url_for('library.search') }}" method="GET" class="search-form">
+            <input type="text" name="q" value="{{ query }}" placeholder="Search knowledge base..." class="search-input" autofocus>
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+    </div>
+
+    {% if query %}
+    <div class="search-results">
+        <p class="results-count">{{ results|length }} results for "{{ query }}"</p>
+
+        <div class="entry-list">
+            {% for result in results %}
+            <a href="{{ url_for('library.view_entry', entry_id=result.entry_id) }}" class="entry-card search-result">
+                <span class="entry-title">{{ result.title }}</span>
+                <span class="entry-meta">
+                    <span class="entry-category">{{ result.category or 'general' }}</span>
+                </span>
+                <p class="entry-snippet">{{ result.content[:200] }}...</p>
+            </a>
+            {% else %}
+            <p class="empty-state">No results found for "{{ query }}"</p>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="search-actions">
+        <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
+    </div>
+</div>
+{% endblock %}

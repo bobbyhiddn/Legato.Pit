@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Library - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="library-container">
+    <header class="library-header">
+        <div class="header-row">
+            <div>
+                <h1>Knowledge Library</h1>
+                <p class="subtitle">{{ total_knowledge }} entries across {{ categories|length }} categories</p>
+            </div>
+            <button type="button" class="btn btn-primary" id="syncBtn" onclick="syncLibrary()">
+                Sync from GitHub
+            </button>
+        </div>
+    </header>
+
+    <div id="syncStatus" class="sync-status" style="display: none;"></div>
+
+    <div class="library-search">
+        <form action="{{ url_for('library.search') }}" method="GET" class="search-form">
+            <input type="text" name="q" placeholder="Search knowledge base..." class="search-input">
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+    </div>
+
+    <div class="library-grid">
+        <section class="library-section categories-section">
+            <h2>Categories</h2>
+            <div class="category-list">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="category-card">
+                    <span class="category-name">{{ cat.category or 'Uncategorized' }}</span>
+                    <span class="category-count">{{ cat.count }}</span>
+                </a>
+                {% else %}
+                <p class="empty-state">No categories yet</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="library-section recent-section">
+            <h2>Recent Entries</h2>
+            <div class="entry-list">
+                {% for entry in recent %}
+                <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-card">
+                    <span class="entry-title">{{ entry.title }}</span>
+                    <span class="entry-meta">
+                        <span class="entry-category">{{ entry.category or 'general' }}</span>
+                        <span class="entry-date">{{ entry.created_at[:10] }}</span>
+                    </span>
+                </a>
+                {% else %}
+                <p class="empty-state">No entries yet</p>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+
+    <div class="library-stats">
+        <div class="stat-card">
+            <span class="stat-value">{{ total_knowledge }}</span>
+            <span class="stat-label">Knowledge Entries</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-value">{{ total_projects }}</span>
+            <span class="stat-label">Projects</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-value">{{ categories|length }}</span>
+            <span class="stat-label">Categories</span>
+        </div>
+    </div>
+
+    {% if total_projects > 0 %}
+    <div class="library-actions">
+        <a href="{{ url_for('library.list_projects') }}" class="btn btn-secondary">View Projects</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function syncLibrary() {
+        const btn = document.getElementById('syncBtn');
+        const statusDiv = document.getElementById('syncStatus');
+
+        btn.disabled = true;
+        btn.textContent = 'Syncing...';
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'sync-status syncing';
+        statusDiv.textContent = 'Syncing from GitHub...';
+
+        try {
+            const response = await fetch('/library/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'github' })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                statusDiv.className = 'sync-status success';
+                statusDiv.innerHTML = `
+                    Sync complete! Found ${data.stats.files_found} files.
+                    Created ${data.stats.entries_created}, updated ${data.stats.entries_updated}.
+                    Generated ${data.stats.embeddings_generated} embeddings.
+                    <a href="" onclick="location.reload(); return false;">Refresh page</a>
+                `;
+            } else {
+                statusDiv.className = 'sync-status error';
+                statusDiv.textContent = `Sync failed: ${data.error}`;
+            }
+        } catch (error) {
+            statusDiv.className = 'sync-status error';
+            statusDiv.textContent = `Sync failed: ${error.message}`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Sync from GitHub';
+        }
+    }
+</script>
+{% endblock %}

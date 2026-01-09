@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Get the current branch
+current_branch=$(git symbolic-ref --short HEAD)
+
+# If we're on main, update submodules before pushing
+if [ "$current_branch" = "main" ]; then
+    echo "Pushing to main branch - updating submodules first..."
+    
+    # Store initial commit hash
+    initial_commit=$(git rev-parse HEAD)
+    
+    # Update submodules
+    git submodule update --remote --merge
+    
+    # If there are changes, commit them
+    if ! git diff --quiet; then
+        git add .
+        git commit -m "Update submodules before push"
+    fi
+fi
+
+# Continue with push
+exit 0

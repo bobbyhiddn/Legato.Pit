@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Projects - Library - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="projects-container">
+    <nav class="breadcrumb">
+        <a href="{{ url_for('library.index') }}">Library</a>
+        <span class="separator">/</span>
+        <span class="current">Projects</span>
+    </nav>
+
+    <header class="projects-header">
+        <h1>Projects</h1>
+        <p class="subtitle">{{ projects|length }} active projects</p>
+    </header>
+
+    <div class="project-list">
+        {% for project in projects %}
+        <div class="project-card">
+            <div class="project-header">
+                <h3 class="project-title">{{ project.title }}</h3>
+                <span class="project-status badge badge-{{ project.status }}">{{ project.status }}</span>
+            </div>
+            {% if project.description %}
+            <p class="project-description">{{ project.description }}</p>
+            {% endif %}
+            <div class="project-meta">
+                <span class="project-id">{{ project.project_id }}</span>
+                {% if project.repo_name %}
+                <a href="https://github.com/{{ project.repo_name }}" target="_blank" class="project-repo">
+                    {{ project.repo_name }}
+                </a>
+                {% endif %}
+                <span class="project-date">{{ project.created_at[:10] }}</span>
+            </div>
+        </div>
+        {% else %}
+        <p class="empty-state">No projects yet</p>
+        {% endfor %}
+    </div>
+
+    <div class="projects-actions">
+        <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
+    </div>
+</div>
+{% endblock %}

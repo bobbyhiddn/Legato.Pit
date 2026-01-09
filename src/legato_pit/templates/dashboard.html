@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <header class="page-header">
+        <h1>LEGATO Dashboard</h1>
+        <button class="btn btn-small" onclick="refreshDashboard()">Refresh</button>
+    </header>
+
+    <section class="stats-row">
+        <div class="stat-card">
+            <span class="stat-value">{{ stats.transcripts }}</span>
+            <span class="stat-label">Transcripts</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-value">{{ stats.artifacts }}</span>
+            <span class="stat-label">Artifacts</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-value">{{ stats.projects }}</span>
+            <span class="stat-label">Projects</span>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>System Status</h2>
+        <div class="status-list">
+            {% for status in system_status %}
+            <div class="status-item status-{{ status.status }}">
+                <span class="status-indicator"></span>
+                <span class="status-name">{{ status.name }}</span>
+                <span class="status-text">{{ status.text }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Recent Jobs</h2>
+        {% if recent_jobs %}
+        <div class="job-list">
+            {% for job in recent_jobs %}
+            <a href="{{ job.url }}" target="_blank" class="job-item">
+                <div class="job-status status-{{ job.status }}">
+                    <span class="status-indicator"></span>
+                </div>
+                <div class="job-info">
+                    <span class="job-title">{{ job.title }}</span>
+                    <span class="job-meta">{{ job.status_text }} &middot; {{ job.created_at[:10] }}</span>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">No recent jobs</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Recent Artifacts</h2>
+        {% if recent_artifacts %}
+        <div class="artifact-list">
+            {% for artifact in recent_artifacts %}
+            <div class="artifact-item">
+                <span class="artifact-name">{{ artifact.name }}</span>
+                <span class="badge badge-{{ artifact.category }}">{{ artifact.category }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">No artifacts yet</p>
+        {% endif %}
+    </section>
+
+    <div class="quick-action">
+        <a href="{{ url_for('dropbox.index') }}" class="btn btn-primary btn-large">
+            + New Transcript
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshDashboard() {
+    window.location.reload();
+}
+</script>
+{% endblock %}

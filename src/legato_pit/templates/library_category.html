@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}{{ category }} - Library - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="category-container">
+    <nav class="breadcrumb">
+        <a href="{{ url_for('library.index') }}">Library</a>
+        <span class="separator">/</span>
+        <span class="current">{{ category }}</span>
+    </nav>
+
+    <header class="category-header">
+        <h1>{{ category }}</h1>
+        <p class="subtitle">{{ entries|length }} entries</p>
+    </header>
+
+    <div class="entry-list">
+        {% for entry in entries %}
+        <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-card">
+            <span class="entry-title">{{ entry.title }}</span>
+            <span class="entry-date">{{ entry.created_at[:10] }}</span>
+        </a>
+        {% else %}
+        <p class="empty-state">No entries in this category</p>
+        {% endfor %}
+    </div>
+
+    <div class="category-actions">
+        <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
+    </div>
+</div>
+{% endblock %}

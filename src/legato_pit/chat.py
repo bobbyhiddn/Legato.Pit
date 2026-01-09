@@ -1,0 +1,411 @@
+"""
+Chat Blueprint - RAG-Enabled Conversational Interface
+
+Provides web UI and API for chatting with the knowledge base.
+"""
+
+import os
+import json
+import logging
+import secrets
+from datetime import datetime
+
+from flask import (
+    Blueprint, render_template, request, jsonify,
+    session, current_app, g
+)
+
+from .core import login_required
+
+logger = logging.getLogger(__name__)
+
+chat_bp = Blueprint('chat', __name__, url_prefix='/chat')
+
+
+def get_services():
+    """Get or create RAG services."""
+    if 'chat_services' not in g:
+        from .rag.database import init_db
+        from .rag.embedding_service import EmbeddingService
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+        from .rag.context_builder import ContextBuilder
+        from .rag.chat_service import ChatService, ChatProvider
+
+        # Initialize database
+        if 'db_conn' not in g:
+            g.db_conn = init_db()
+
+        # Create embedding provider
+        try:
+            provider = OpenAIEmbeddingProvider()
+        except ValueError:
+            from .rag.ollama_provider import OllamaEmbeddingProvider
+            provider = OllamaEmbeddingProvider()
+
+        embedding_service = EmbeddingService(provider, g.db_conn)
+        context_builder = ContextBuilder(embedding_service)
+
+        # Create chat service
+        chat_provider = ChatProvider.CLAUDE
+        if os.environ.get('CHAT_PROVIDER', 'claude').lower() == 'openai':
+            chat_provider = ChatProvider.OPENAI
+
+        chat_service = ChatService(
+            provider=chat_provider,
+            model=os.environ.get('CHAT_MODEL'),
+        )
+
+        g.chat_services = {
+            'embedding': embedding_service,
+            'context': context_builder,
+            'chat': chat_service,
+            'db': g.db_conn,
+        }
+
+    return g.chat_services
+
+
+def get_or_create_session(db_conn) -> str:
+    """Get current chat session or create a new one."""
+    session_id = session.get('chat_session_id')
+
+    if not session_id:
+        session_id = secrets.token_urlsafe(16)
+        session['chat_session_id'] = session_id
+
+        # Create session in database
+        user = session.get('user', {})
+        db_conn.execute(
+            """
+            INSERT INTO chat_sessions (session_id, user_id)
+            VALUES (?, ?)
+            """,
+            (session_id, user.get('username')),
+        )
+        db_conn.commit()
+
+    return session_id
+
+
+def get_chat_history(db_conn, session_id: str, limit: int = 20):
+    """Get recent chat history for a session."""
+    rows = db_conn.execute(
+        """
+        SELECT role, content, context_used, created_at
+        FROM chat_messages
+        WHERE session_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (session_id, limit),
+    ).fetchall()
+
+    # Reverse to get chronological order
+    return [
+        {
+            'role': r['role'],
+            'content': r['content'],
+            'context': json.loads(r['context_used']) if r['context_used'] else None,
+            'timestamp': r['created_at'],
+        }
+        for r in reversed(rows)
+    ]
+
+
+def save_message(db_conn, session_id: str, role: str, content: str, context=None, model=None):
+    """Save a chat message to the database."""
+    db_conn.execute(
+        """
+        INSERT INTO chat_messages (session_id, role, content, context_used, model_used)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (session_id, role, content, json.dumps(context) if context else None, model),
+    )
+    db_conn.commit()
+
+
+@chat_bp.route('/')
+@login_required
+def index():
+    """Chat interface page."""
+    services = get_services()
+    stats = services['context'].get_stats()
+
+    return render_template(
+        'chat.html',
+        stats=stats,
+        provider=services['chat'].provider.value,
+        model=services['chat'].model,
+    )
+
+
+@chat_bp.route('/api/send', methods=['POST'])
+@login_required
+def send_message():
+    """Send a message and get a response.
+
+    Request body:
+    {
+        "message": "User's question",
+        "include_context": true,  # Optional, default true
+        "provider": "claude",     # Optional: claude or openai
+        "model": "claude-sonnet-4-20250514"  # Optional: specific model
+    }
+
+    Response:
+    {
+        "response": "Assistant's response",
+        "context": [{"entry_id": "...", "title": "...", "similarity": 0.85}],
+        "model": "claude-sonnet-4-20250514"
+    }
+    """
+    data = request.get_json()
+
+    if not data or not data.get('message'):
+        return jsonify({'error': 'message required'}), 400
+
+    message = data['message']
+    include_context = data.get('include_context', True)
+    requested_provider = data.get('provider')
+    requested_model = data.get('model')
+
+    try:
+        services = get_services()
+
+        # If provider/model requested, create a new chat service
+        chat_service = services['chat']
+        if requested_provider or requested_model:
+            from .rag.chat_service import ChatService, ChatProvider
+            provider = ChatProvider.CLAUDE if requested_provider == 'claude' else ChatProvider.OPENAI if requested_provider == 'openai' else chat_service.provider
+            chat_service = ChatService(provider=provider, model=requested_model)
+
+        session_id = get_or_create_session(services['db'])
+
+        # Get conversation history
+        history = get_chat_history(services['db'], session_id, limit=10)
+        history_messages = [
+            {'role': h['role'], 'content': h['content']}
+            for h in history
+        ]
+
+        # Build prompt with RAG context
+        messages = services['context'].build_messages(
+            query=message,
+            history=history_messages,
+        )
+
+        # Get context entries for response
+        prompt_data = services['context'].build_prompt(message)
+        context_entries = prompt_data.get('context_entries', [])
+
+        # Save user message
+        save_message(services['db'], session_id, 'user', message)
+
+        # Get LLM response
+        response = chat_service.chat(messages)
+
+        # Save assistant message with context
+        save_message(
+            services['db'],
+            session_id,
+            'assistant',
+            response,
+            context=context_entries,
+            model=chat_service.model,
+        )
+
+        return jsonify({
+            'response': response,
+            'context': context_entries if include_context else [],
+            'model': chat_service.model,
+            'provider': chat_service.provider.value,
+        })
+
+    except Exception as e:
+        logger.error(f"Chat failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/history', methods=['GET'])
+@login_required
+def get_history():
+    """Get chat history for current session.
+
+    Response:
+    {
+        "messages": [
+            {
+                "role": "user" | "assistant",
+                "content": "...",
+                "context": [...],
+                "timestamp": "..."
+            }
+        ]
+    }
+    """
+    try:
+        services = get_services()
+        session_id = session.get('chat_session_id')
+
+        if not session_id:
+            return jsonify({'messages': []})
+
+        history = get_chat_history(services['db'], session_id, limit=50)
+        return jsonify({'messages': history})
+
+    except Exception as e:
+        logger.error(f"Get history failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/sessions', methods=['GET'])
+@login_required
+def list_sessions():
+    """List all chat sessions for the current user."""
+    try:
+        services = get_services()
+        user = session.get('user', {})
+
+        rows = services['db'].execute(
+            """
+            SELECT session_id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 20
+            """,
+            (user.get('username'),),
+        ).fetchall()
+
+        return jsonify({
+            'sessions': [
+                {
+                    'session_id': r['session_id'],
+                    'title': r['title'],
+                    'created_at': r['created_at'],
+                    'updated_at': r['updated_at'],
+                }
+                for r in rows
+            ]
+        })
+
+    except Exception as e:
+        logger.error(f"List sessions failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/sessions/new', methods=['POST'])
+@login_required
+def new_session():
+    """Start a new chat session."""
+    try:
+        services = get_services()
+
+        # Clear current session
+        session.pop('chat_session_id', None)
+
+        # Create new one
+        session_id = get_or_create_session(services['db'])
+
+        return jsonify({
+            'session_id': session_id,
+            'message': 'New session created',
+        })
+
+    except Exception as e:
+        logger.error(f"New session failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/sessions/<session_id>', methods=['DELETE'])
+@login_required
+def delete_session(session_id):
+    """Delete a chat session."""
+    try:
+        services = get_services()
+        user = session.get('user', {})
+
+        # Verify ownership
+        row = services['db'].execute(
+            "SELECT user_id FROM chat_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+        if not row or row['user_id'] != user.get('username'):
+            return jsonify({'error': 'Session not found'}), 404
+
+        # Delete messages and session
+        services['db'].execute(
+            "DELETE FROM chat_messages WHERE session_id = ?",
+            (session_id,),
+        )
+        services['db'].execute(
+            "DELETE FROM chat_sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        services['db'].commit()
+
+        # Clear from session if current
+        if session.get('chat_session_id') == session_id:
+            session.pop('chat_session_id', None)
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logger.error(f"Delete session failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/config', methods=['GET'])
+@login_required
+def get_config():
+    """Get current chat configuration."""
+    from .rag.chat_service import ChatService, ChatProvider
+
+    services = get_services()
+
+    return jsonify({
+        'provider': services['chat'].provider.value,
+        'model': services['chat'].model,
+        'available_models': {
+            'claude': ChatService.get_available_models(ChatProvider.CLAUDE),
+            'openai': ChatService.get_available_models(ChatProvider.OPENAI),
+        },
+    })
+
+
+@chat_bp.route('/api/models', methods=['GET'])
+@login_required
+def get_models():
+    """Get available models for a provider.
+
+    Query params:
+    - provider: 'claude' or 'openai' (default: both)
+
+    Response:
+    {
+        "claude": [{"id": "...", "name": "..."}],
+        "openai": [{"id": "...", "name": "..."}]
+    }
+    """
+    from .rag.chat_service import ChatService, ChatProvider
+
+    provider = request.args.get('provider')
+
+    try:
+        if provider == 'claude':
+            return jsonify({
+                'claude': ChatService.get_available_models(ChatProvider.CLAUDE),
+            })
+        elif provider == 'openai':
+            return jsonify({
+                'openai': ChatService.get_available_models(ChatProvider.OPENAI),
+            })
+        else:
+            return jsonify({
+                'claude': ChatService.get_available_models(ChatProvider.CLAUDE),
+                'openai': ChatService.get_available_models(ChatProvider.OPENAI),
+            })
+    except Exception as e:
+        logger.error(f"Failed to fetch models: {e}")
+        return jsonify({'error': str(e)}), 500

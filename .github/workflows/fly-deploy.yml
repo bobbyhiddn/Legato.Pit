@@ -1,0 +1,68 @@
+name: Fly Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Legato.Pit
+    runs-on: ubuntu-latest
+    concurrency: deploy-group
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Set secrets on Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "Setting secrets on Fly.io..."
+          flyctl secrets set \
+            FLASK_SECRET_KEY="${{ secrets.FLASK_SECRET_KEY }}" \
+            FLASK_ENV="production" \
+            GITHUB_CLIENT_ID="${{ secrets.GITHUB_CLIENT_ID }}" \
+            GITHUB_CLIENT_SECRET="${{ secrets.GITHUB_CLIENT_SECRET }}" \
+            GITHUB_ALLOWED_USERS="${{ secrets.GITHUB_ALLOWED_USERS }}" \
+            SYSTEM_PAT="${{ secrets.SYSTEM_PAT }}" \
+            LEGATO_ORG="${{ secrets.LEGATO_ORG }}" \
+            CONDUCT_REPO="${{ secrets.CONDUCT_REPO }}" \
+            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" \
+            CHAT_PROVIDER="${{ secrets.CHAT_PROVIDER }}" \
+            AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            AWS_ENDPOINT_URL_S3="${{ secrets.AWS_ENDPOINT_URL_S3 }}" \
+            AWS_REGION="${{ secrets.AWS_REGION }}" \
+            BUCKET_NAME="${{ secrets.BUCKET_NAME }}"
+
+      - name: Deploy to Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
+
+      - name: Verify deployment health
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 15
+
+          APP_URL="https://legato-pit.fly.dev"
+          MAX_ATTEMPTS=5
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Health check attempt $ATTEMPT of $MAX_ATTEMPTS..."
+            if curl -sf "${APP_URL}/health" > /dev/null 2>&1; then
+              echo "Application is healthy!"
+              exit 0
+            fi
+            echo "Waiting 10 seconds..."
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "Warning: Health check did not pass after $MAX_ATTEMPTS attempts"
+          echo "Check logs with: fly logs --app legato-pit"
