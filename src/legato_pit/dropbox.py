@@ -114,49 +114,47 @@ def upload():
     # Get source identifier
     source_id = sanitize_source_id(request.form.get('source_id', ''))
 
-    # Check for file upload
-    if 'file' in request.files:
-        file = request.files['file']
+    transcript_text = None
 
-        if file.filename == '':
-            flash('No file selected', 'error')
-            return redirect(url_for('dropbox.index'))
-
-        if not allowed_file(file.filename):
-            flash('Invalid file type. Please upload .txt or .md files.', 'error')
-            return redirect(url_for('dropbox.index'))
-
-        # Read file content
-        content = file.read()
-
-        if len(content) > MAX_TRANSCRIPT_SIZE:
-            flash(f'File too large. Maximum size is {MAX_TRANSCRIPT_SIZE // 1024}KB.', 'error')
-            return redirect(url_for('dropbox.index'))
-
-        try:
-            transcript_text = content.decode('utf-8')
-        except UnicodeDecodeError:
-            flash('Could not read file. Please ensure it is UTF-8 encoded text.', 'error')
-            return redirect(url_for('dropbox.index'))
-
-        # Use filename as source if not provided
-        if not source_id or source_id.startswith('dropbox-'):
-            source_id = sanitize_source_id(file.filename.rsplit('.', 1)[0])
-
-    # Check for text input
-    elif request.form.get('transcript'):
-        transcript_text = request.form['transcript'].strip()
-
-        if not transcript_text:
-            flash('Please enter transcript text or upload a file.', 'error')
-            return redirect(url_for('dropbox.index'))
+    # Check for text input first (more common use case)
+    text_input = request.form.get('transcript', '').strip()
+    if text_input:
+        transcript_text = text_input
 
         if len(transcript_text.encode('utf-8')) > MAX_TRANSCRIPT_SIZE:
             flash(f'Transcript too long. Maximum size is {MAX_TRANSCRIPT_SIZE // 1024}KB.', 'error')
             return redirect(url_for('dropbox.index'))
 
-    else:
-        flash('Please provide a transcript via text or file upload.', 'error')
+    # Check for file upload if no text
+    elif 'file' in request.files:
+        file = request.files['file']
+
+        # Only process if a file was actually selected
+        if file.filename:
+            if not allowed_file(file.filename):
+                flash('Invalid file type. Please upload .txt or .md files.', 'error')
+                return redirect(url_for('dropbox.index'))
+
+            # Read file content
+            content = file.read()
+
+            if len(content) > MAX_TRANSCRIPT_SIZE:
+                flash(f'File too large. Maximum size is {MAX_TRANSCRIPT_SIZE // 1024}KB.', 'error')
+                return redirect(url_for('dropbox.index'))
+
+            try:
+                transcript_text = content.decode('utf-8')
+            except UnicodeDecodeError:
+                flash('Could not read file. Please ensure it is UTF-8 encoded text.', 'error')
+                return redirect(url_for('dropbox.index'))
+
+            # Use filename as source if not provided
+            if not source_id or source_id.startswith('dropbox-'):
+                source_id = sanitize_source_id(file.filename.rsplit('.', 1)[0])
+
+    # No content provided
+    if not transcript_text:
+        flash('Please enter transcript text or upload a file.', 'error')
         return redirect(url_for('dropbox.index'))
 
     # Dispatch to LEGATO

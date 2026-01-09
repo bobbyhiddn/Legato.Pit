@@ -5,18 +5,9 @@
 {% block content %}
 <div class="library-container">
     <header class="library-header">
-        <div class="header-row">
-            <div>
-                <h1>Knowledge Library</h1>
-                <p class="subtitle">{{ total_knowledge }} entries across {{ categories|length }} categories</p>
-            </div>
-            <button type="button" class="btn btn-primary" id="embedBtn" onclick="generateEmbeddings()">
-                Generate Embeddings
-            </button>
-        </div>
+        <h1>Knowledge Library</h1>
+        <p class="subtitle">{{ total_knowledge }} entries across {{ categories|length }} categories</p>
     </header>
-
-    <div id="statusDiv" class="sync-status" style="display: none;"></div>
 
     <div class="library-search">
         <form action="{{ url_for('library.search') }}" method="GET" class="search-form">
@@ -83,8 +74,6 @@
 
 {% block scripts %}
 <script>
-    const statusDiv = document.getElementById('statusDiv');
-
     // Fetch embeddings count on page load
     async function loadStats() {
         try {
@@ -96,40 +85,5 @@
         }
     }
     loadStats();
-
-    async function generateEmbeddings() {
-        const btn = document.getElementById('embedBtn');
-
-        btn.disabled = true;
-        btn.textContent = 'Generating...';
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'sync-status syncing';
-        statusDiv.textContent = 'Generating embeddings for entries...';
-
-        try {
-            const response = await fetch('/library/api/generate-embeddings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                statusDiv.className = 'sync-status success';
-                statusDiv.textContent = `Generated ${data.embeddings_generated} embeddings.`;
-                loadStats();
-            } else {
-                statusDiv.className = 'sync-status error';
-                statusDiv.textContent = `Failed: ${data.error}`;
-            }
-        } catch (error) {
-            statusDiv.className = 'sync-status error';
-            statusDiv.textContent = `Failed: ${error.message}`;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Generate Embeddings';
-        }
-    }
-
 </script>
 {% endblock %}
