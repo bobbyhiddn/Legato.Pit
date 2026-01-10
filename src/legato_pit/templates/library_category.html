@@ -12,190 +12,75 @@
         gap: 1rem;
     }
 
-    .select-mode-toggle {
+    .entry-list {
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: 0.5rem;
     }
 
-    .toggle-label {
-        font-size: 0.875rem;
-        color: var(--text-secondary);
+    .entry-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: border-color 0.2s;
     }
 
-    .toggle-switch {
-        position: relative;
-        width: 48px;
-        height: 24px;
+    .entry-card:hover {
+        border-color: var(--accent-color);
     }
 
-    .toggle-switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
+    .entry-info {
+        flex: 1;
+        min-width: 0;
     }
 
-    .toggle-slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: var(--border-color);
-        transition: 0.3s;
-        border-radius: 24px;
-    }
-
-    .toggle-slider:before {
-        position: absolute;
-        content: "";
-        height: 18px;
-        width: 18px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: 0.3s;
-        border-radius: 50%;
-    }
-
-    input:checked + .toggle-slider {
-        background-color: var(--accent-color);
-    }
-
-    input:checked + .toggle-slider:before {
-        transform: translateX(24px);
-    }
-
-    .entry-list.select-mode .entry-card {
+    .entry-link {
         display: flex;
         align-items: center;
         gap: 0.75rem;
+        text-decoration: none;
+        color: inherit;
     }
 
-    .entry-checkbox {
-        width: 20px;
-        height: 20px;
-        cursor: pointer;
-        display: none;
-    }
-
-    .select-mode .entry-checkbox {
-        display: block;
-    }
-
-    .entry-card.selected {
-        background: var(--accent-color);
-        color: white;
-        border-color: var(--accent-color);
-    }
-
-    .entry-card.selected .entry-date {
-        opacity: 0.8;
-    }
-
-    /* Floating action bar */
-    .selection-bar {
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 0.75rem 1.5rem;
-        display: none;
-        align-items: center;
-        gap: 1rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        z-index: 100;
-    }
-
-    .selection-bar.visible {
-        display: flex;
-    }
-
-    .selection-count {
+    .entry-title {
         font-weight: 500;
-        min-width: 100px;
-    }
-
-    .selection-actions {
-        display: flex;
-        gap: 0.5rem;
-    }
-
-    .project-name-input {
-        padding: 0.5rem 0.75rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        background: var(--bg-tertiary);
         color: var(--text-primary);
-        font-size: 0.875rem;
-        width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .project-name-input:focus {
-        outline: none;
-        border-color: var(--accent-color);
+    .entry-link:hover .entry-title {
+        color: var(--accent-color);
     }
 
-    /* Modal */
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0,0,0,0.7);
-        display: none;
-        justify-content: center;
-        align-items: center;
-        z-index: 200;
-    }
-
-    .modal-overlay.visible {
-        display: flex;
-    }
-
-    .modal {
-        background: var(--card-bg);
-        border-radius: 12px;
-        padding: 1.5rem;
-        max-width: 400px;
-        width: 90%;
-    }
-
-    .modal h3 {
-        margin: 0 0 1rem 0;
-    }
-
-    .modal-entries {
-        margin: 1rem 0;
-        max-height: 150px;
-        overflow-y: auto;
-        font-size: 0.875rem;
+    .entry-date {
+        font-size: 0.75rem;
         color: var(--text-secondary);
+        flex-shrink: 0;
     }
 
-    .modal-entries li {
-        padding: 0.25rem 0;
-    }
-
-    .modal-input {
-        width: 100%;
-        padding: 0.75rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-        margin-bottom: 1rem;
-    }
-
-    .modal-actions {
+    .entry-actions {
         display: flex;
-        justify-content: flex-end;
         gap: 0.5rem;
+        margin-left: 0.75rem;
+    }
+
+    .chord-badge {
+        font-size: 0.625rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        background: var(--success-color);
+        color: white;
+        text-transform: uppercase;
+    }
+
+    .chord-badge.pending {
+        background: var(--warning-color);
     }
 </style>
 {% endblock %}
@@ -213,23 +98,26 @@
             <h1>{{ category }}</h1>
             <p class="subtitle">{{ entries|length }} entries</p>
         </div>
-        <div class="select-mode-toggle">
-            <span class="toggle-label">Select Mode</span>
-            <label class="toggle-switch">
-                <input type="checkbox" id="selectModeToggle" onchange="toggleSelectMode()">
-                <span class="toggle-slider"></span>
-            </label>
-        </div>
     </header>
 
-    <div class="entry-list" id="entryList">
+    <div class="entry-list">
         {% for entry in entries %}
-        <div class="entry-card" data-entry-id="{{ entry.entry_id }}" onclick="handleCardClick(event, '{{ entry.entry_id }}')">
-            <input type="checkbox" class="entry-checkbox" id="check-{{ entry.entry_id }}" onchange="updateSelection()">
-            <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
-                <span class="entry-title">{{ entry.title }}</span>
-                <span class="entry-date">{{ entry.created_at[:10] }}</span>
-            </a>
+        <div class="entry-card" data-entry-id="{{ entry.entry_id }}">
+            <div class="entry-info">
+                <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
+                    <span class="entry-title">{{ entry.title }}</span>
+                    <span class="entry-date">{{ entry.created_at[:10] }}</span>
+                </a>
+            </div>
+            <div class="entry-actions">
+                {% if entry.chord_status == 'active' %}
+                <span class="chord-badge">Chord</span>
+                {% elif entry.chord_status == 'pending' %}
+                <span class="chord-badge pending">Pending</span>
+                {% elif entry.needs_chord %}
+                <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
+                {% endif %}
+            </div>
         </div>
         {% else %}
         <p class="empty-state">No entries in this category</p>
@@ -240,162 +128,4 @@
         <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
     </div>
 </div>
-
-<!-- Floating selection bar -->
-<div class="selection-bar" id="selectionBar">
-    <span class="selection-count" id="selectionCount">0 selected</span>
-    <div class="selection-actions">
-        <button class="btn btn-secondary btn-small" onclick="clearSelection()">Clear</button>
-        <button class="btn btn-primary btn-small" onclick="openChordModal()">Create Chord</button>
-    </div>
-</div>
-
-<!-- Create Chord Modal -->
-<div class="modal-overlay" id="chordModal">
-    <div class="modal">
-        <h3>Create Chord from Notes</h3>
-        <p>Combining <span id="modalCount">0</span> note(s) into one Chord:</p>
-        <ul class="modal-entries" id="modalEntries"></ul>
-        <input type="text" class="modal-input" id="projectNameInput" placeholder="Project name (e.g., my-feature)">
-        <div class="modal-actions">
-            <button class="btn btn-secondary" onclick="closeChordModal()">Cancel</button>
-            <button class="btn btn-primary" id="createBtn" onclick="createChord()">Create Chord</button>
-        </div>
-    </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-    let selectMode = false;
-    let selectedEntries = new Set();
-
-    function toggleSelectMode() {
-        selectMode = document.getElementById('selectModeToggle').checked;
-        const entryList = document.getElementById('entryList');
-
-        if (selectMode) {
-            entryList.classList.add('select-mode');
-        } else {
-            entryList.classList.remove('select-mode');
-            clearSelection();
-        }
-    }
-
-    function handleCardClick(event, entryId) {
-        if (!selectMode) return; // Normal navigation
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        const checkbox = document.getElementById(`check-${entryId}`);
-        checkbox.checked = !checkbox.checked;
-        updateSelection();
-    }
-
-    function updateSelection() {
-        selectedEntries.clear();
-
-        document.querySelectorAll('.entry-checkbox:checked').forEach(cb => {
-            const card = cb.closest('.entry-card');
-            selectedEntries.add(card.dataset.entryId);
-            card.classList.add('selected');
-        });
-
-        document.querySelectorAll('.entry-checkbox:not(:checked)').forEach(cb => {
-            const card = cb.closest('.entry-card');
-            card.classList.remove('selected');
-        });
-
-        const count = selectedEntries.size;
-        document.getElementById('selectionCount').textContent = `${count} selected`;
-
-        const bar = document.getElementById('selectionBar');
-        if (count > 0) {
-            bar.classList.add('visible');
-        } else {
-            bar.classList.remove('visible');
-        }
-    }
-
-    function clearSelection() {
-        document.querySelectorAll('.entry-checkbox').forEach(cb => {
-            cb.checked = false;
-        });
-        updateSelection();
-    }
-
-    function openChordModal() {
-        if (selectedEntries.size === 0) return;
-
-        document.getElementById('modalCount').textContent = selectedEntries.size;
-
-        // Build entry list
-        const entriesList = document.getElementById('modalEntries');
-        entriesList.innerHTML = '';
-        selectedEntries.forEach(id => {
-            const card = document.querySelector(`[data-entry-id="${id}"]`);
-            const title = card.querySelector('.entry-title').textContent;
-            const li = document.createElement('li');
-            li.textContent = title;
-            entriesList.appendChild(li);
-        });
-
-        // Clear and focus input
-        document.getElementById('projectNameInput').value = '';
-        document.getElementById('chordModal').classList.add('visible');
-        setTimeout(() => document.getElementById('projectNameInput').focus(), 100);
-    }
-
-    function closeChordModal() {
-        document.getElementById('chordModal').classList.remove('visible');
-    }
-
-    async function createChord() {
-        const projectName = document.getElementById('projectNameInput').value.trim();
-        if (!projectName) {
-            alert('Please enter a project name');
-            return;
-        }
-
-        const createBtn = document.getElementById('createBtn');
-        createBtn.disabled = true;
-        createBtn.textContent = 'Creating...';
-
-        try {
-            const response = await fetch('/library/api/create-chord', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    entry_ids: Array.from(selectedEntries),
-                    project_name: projectName
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                closeChordModal();
-                clearSelection();
-
-                // Redirect to agents page
-                window.location.href = '/agents/';
-            } else {
-                alert(`Error: ${data.error}`);
-            }
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-        } finally {
-            createBtn.disabled = false;
-            createBtn.textContent = 'Create Chord';
-        }
-    }
-
-    // Close modal on escape
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closeChordModal();
-        }
-    });
-</script>
 {% endblock %}

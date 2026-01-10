@@ -78,9 +78,12 @@
             <a href="{{ entry.chord.url }}" target="_blank" class="btn btn-accent">
                 View Chord: {{ entry.chord.repo }}
             </a>
-            {% else %}
+            {% elif entry.chord_status == 'pending' %}
+            <span class="btn btn-secondary disabled">Chord Pending</span>
+            {% elif entry.needs_chord %}
+            <button type="button" class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Add to Chord</button>
             <button type="button" onclick="generateChord()" class="btn btn-accent" id="chordBtn">
-                Generate Chord
+                Quick Chord
             </button>
             {% endif %}
             <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>

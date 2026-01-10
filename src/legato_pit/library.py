@@ -265,7 +265,7 @@ def view_category(category: str):
 
     entries = db.execute(
         """
-        SELECT entry_id, title, created_at
+        SELECT entry_id, title, created_at, needs_chord, chord_status
         FROM knowledge_entries
         WHERE category = ?
         ORDER BY title
