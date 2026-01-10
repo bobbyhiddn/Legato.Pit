@@ -370,7 +370,7 @@
             <h1>Chat with Knowledge Base</h1>
             <div class="chat-stats">
                 <span>{{ stats.knowledge_entries }} entries indexed</span>
-                <span>{{ provider }}:{{ model }}</span>
+                <span id="currentModelDisplay">{{ provider }}:{{ model }}</span>
             </div>
         </header>
 
@@ -474,7 +474,19 @@
         modelSelect.innerHTML = models.map(m =>
             `<option value="${m.value}">${m.label}</option>`
         ).join('');
+
+        updateModelDisplay();
     }
+
+    function updateModelDisplay() {
+        const displayEl = document.getElementById('currentModelDisplay');
+        if (displayEl) {
+            displayEl.textContent = `${providerSelect.value}:${modelSelect.value}`;
+        }
+    }
+
+    // Update display when model changes
+    modelSelect.addEventListener('change', updateModelDisplay);
 
     // Fetch models from API on load
     fetchModels();
