@@ -45,6 +45,43 @@ def get_agents_db():
     return g.agents_db_conn
 
 
+def get_categories_with_counts():
+    """Get all user categories with entry counts.
+
+    Returns categories from user_categories table (not just categories with entries),
+    with a count of how many entries exist in each category.
+
+    Returns:
+        List of dicts with: category (name), display_name, count, folder_name
+    """
+    from .rag.database import get_user_categories
+
+    db = get_db()
+    user_categories = get_user_categories(db, 'default')
+
+    # Get entry counts per category
+    counts = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        """
+    ).fetchall()
+    count_map = {row['category']: row['count'] for row in counts}
+
+    # Merge categories with counts
+    result = []
+    for cat in user_categories:
+        result.append({
+            'category': cat['name'],  # Use 'name' as 'category' for template compatibility
+            'display_name': cat['display_name'],
+            'count': count_map.get(cat['name'], 0),
+            'folder_name': cat['folder_name'],
+        })
+
+    return result
+
+
 def trigger_background_sync():
     """Trigger a background library sync if not already running.
 
@@ -207,15 +244,8 @@ def index():
 
     db = get_db()
 
-    # Get categories
-    categories = db.execute(
-        """
-        SELECT category, COUNT(*) as count
-        FROM knowledge_entries
-        GROUP BY category
-        ORDER BY count DESC
-        """
-    ).fetchall()
+    # Get categories from user_categories with entry counts
+    categories = get_categories_with_counts()
 
     # Get recent entries
     recent = db.execute(
@@ -238,7 +268,7 @@ def index():
 
     return render_template(
         'library.html',
-        categories=[dict(c) for c in categories],
+        categories=categories,
         recent=[dict(r) for r in recent],
         total_knowledge=total_knowledge,
         total_projects=total_projects,
@@ -310,20 +340,13 @@ def view_entry(entry_id: str):
             'approved_at': chord_info['approved_at'],
         }
 
-    # Get categories for sidebar
-    categories = db.execute(
-        """
-        SELECT category, COUNT(*) as count
-        FROM knowledge_entries
-        GROUP BY category
-        ORDER BY count DESC
-        """
-    ).fetchall()
+    # Get categories for sidebar (from user_categories with counts)
+    categories = get_categories_with_counts()
 
     return render_template(
         'library_entry.html',
         entry=entry_dict,
-        categories=[dict(c) for c in categories],
+        categories=categories,
     )
 
 
@@ -343,21 +366,14 @@ def view_category(category: str):
         (category,),
     ).fetchall()
 
-    # Get categories for sidebar
-    categories = db.execute(
-        """
-        SELECT category, COUNT(*) as count
-        FROM knowledge_entries
-        GROUP BY category
-        ORDER BY count DESC
-        """
-    ).fetchall()
+    # Get categories for sidebar (from user_categories with counts)
+    categories = get_categories_with_counts()
 
     return render_template(
         'library_category.html',
         category=category,
         entries=[dict(e) for e in entries],
-        categories=[dict(c) for c in categories],
+        categories=categories,
     )
 
 
@@ -410,20 +426,13 @@ def daily_index():
         """
     ).fetchall()
 
-    # Get categories for sidebar
-    categories = db.execute(
-        """
-        SELECT category, COUNT(*) as count
-        FROM knowledge_entries
-        GROUP BY category
-        ORDER BY category
-        """
-    ).fetchall()
+    # Get categories for sidebar (from user_categories with counts)
+    categories = get_categories_with_counts()
 
     return render_template(
         'library_daily.html',
         dates=[dict(d) for d in dates],
-        categories=[dict(c) for c in categories],
+        categories=categories,
     )
 
 
@@ -450,15 +459,8 @@ def daily_view(date: str):
         (date,)
     ).fetchall()
 
-    # Get categories for sidebar
-    categories = db.execute(
-        """
-        SELECT category, COUNT(*) as count
-        FROM knowledge_entries
-        GROUP BY category
-        ORDER BY category
-        """
-    ).fetchall()
+    # Get categories for sidebar (from user_categories with counts)
+    categories = get_categories_with_counts()
 
     # Get adjacent dates for navigation
     prev_date = db.execute(
@@ -483,7 +485,7 @@ def daily_view(date: str):
         'library_daily_view.html',
         date=date,
         entries=[dict(e) for e in entries],
-        categories=[dict(c) for c in categories],
+        categories=categories,
         prev_date=prev_date['date'] if prev_date else None,
         next_date=next_date['date'] if next_date else None,
     )

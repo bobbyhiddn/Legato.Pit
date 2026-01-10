@@ -388,7 +388,7 @@
                 {% for cat in categories %}
                 <a href="{{ url_for('library.view_category', category=cat.category) }}"
                    class="sidebar-link {% if cat.category == category %}active{% endif %}">
-                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
                     <span class="sidebar-count">{{ cat.count }}</span>
                 </a>
                 {% endfor %}

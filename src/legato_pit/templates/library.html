@@ -126,14 +126,12 @@
     .entry-card {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: center;
         gap: 1rem;
         padding: 0.75rem 1rem;
         background: var(--card-bg);
         border: 1px solid var(--border-color);
         border-radius: 8px;
-        text-decoration: none;
-        color: inherit;
         transition: border-color 0.2s;
     }
 
@@ -141,27 +139,129 @@
         border-color: var(--accent-color);
     }
 
+    .entry-link {
+        flex: 1;
+        min-width: 0;
+        text-decoration: none;
+        color: inherit;
+    }
+
     .entry-title {
         font-weight: 500;
         color: var(--text-primary);
-        flex: 1;
-        min-width: 0;
         word-wrap: break-word;
         overflow-wrap: break-word;
     }
 
-    .entry-meta {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 0.25rem;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        flex-shrink: 0;
+    .entry-link:hover .entry-title {
+        color: var(--accent-color);
     }
 
-    .entry-category {
-        text-transform: capitalize;
+    .entry-date {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .entry-actions {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+
+    .entry-card:hover .entry-actions {
+        opacity: 1;
+    }
+
+    /* Category pill */
+    .category-pill {
+        position: relative;
+    }
+
+    .category-select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding: 0.25rem 1.25rem 0.25rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        border: none;
+        border-radius: 12px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .category-pill::after {
+        content: '▾';
+        position: absolute;
+        right: 0.4rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.6rem;
+        color: var(--text-secondary);
+        pointer-events: none;
+    }
+
+    .category-select:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .category-select:focus {
+        outline: none;
+        background: var(--accent-color);
+        color: white;
+    }
+
+    /* Action button group */
+    .action-group {
+        display: flex;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .action-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.35rem 0.5rem;
+        font-size: 0.75rem;
+        background: transparent;
+        color: var(--text-secondary);
+        border: none;
+        border-right: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .action-btn:last-child {
+        border-right: none;
+    }
+
+    .action-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .action-btn.btn-chord:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .action-btn.btn-delete:hover {
+        background: var(--danger-color, #dc3545);
+        color: white;
+    }
+
+    .action-btn svg {
+        width: 14px;
+        height: 14px;
     }
 
     .library-stats {
@@ -229,7 +329,7 @@
             <nav class="sidebar-nav">
                 {% for cat in categories %}
                 <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
-                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
                     <span class="sidebar-count">{{ cat.count }}</span>
                 </a>
                 {% endfor %}
@@ -271,13 +371,29 @@
             <h2>Recent Entries</h2>
             <div class="entry-list">
                 {% for entry in recent %}
-                <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-card">
-                    <span class="entry-title">{{ entry.title }}</span>
-                    <span class="entry-meta">
-                        <span class="entry-category">{{ entry.category or 'general' }}</span>
-                        <span class="entry-date">{{ entry.created_at[:10] }}</span>
-                    </span>
-                </a>
+                <div class="entry-card" data-entry-id="{{ entry.entry_id }}">
+                    <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
+                        <div class="entry-title">{{ entry.title }}</div>
+                        <div class="entry-date">{{ entry.created_at[:10] }}</div>
+                    </a>
+                    <div class="entry-actions">
+                        <span class="category-pill">
+                            <select class="category-select" onchange="changeCategory('{{ entry.entry_id }}', this.value)" title="Change category">
+                                {% for cat in categories %}
+                                <option value="{{ cat.category }}" {% if cat.category == entry.category %}selected{% endif %}>{{ cat.display_name or cat.category }}</option>
+                                {% endfor %}
+                            </select>
+                        </span>
+                        <div class="action-group">
+                            <button class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                            </button>
+                            <button class="action-btn btn-delete" onclick="deleteEntry('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Delete note">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 {% else %}
                 <p class="empty-state">No entries yet</p>
                 {% endfor %}
@@ -345,6 +461,99 @@
                 btn.textContent = 'Sync Now';
                 btn.disabled = false;
             }, 2000);
+        }
+    }
+
+    async function changeCategory(entryId, newCategory) {
+        const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+        const select = card.querySelector('.category-select');
+        const originalValue = select.dataset.original || select.value;
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}/category`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCategory })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                // Reload to show updated data
+                location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+                select.value = originalValue;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            select.value = originalValue;
+        }
+    }
+
+    async function addToChordQueue(entryId, title) {
+        const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+        const btn = card.querySelector('.btn-chord');
+        btn.disabled = true;
+
+        try {
+            const response = await fetch('/agents/api/queue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    entry_id: entryId,
+                    title: title
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                btn.style.background = 'var(--success-color)';
+                btn.style.color = 'white';
+                setTimeout(() => {
+                    btn.style.background = '';
+                    btn.style.color = '';
+                    btn.disabled = false;
+                }, 2000);
+            } else {
+                alert(`Error: ${data.error}`);
+                btn.disabled = false;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            btn.disabled = false;
+        }
+    }
+
+    async function deleteEntry(entryId, title) {
+        if (!confirm(`Delete "${title}"?\n\nThis will remove the note from GitHub and the local database.`)) {
+            return;
+        }
+
+        const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+        const btn = card.querySelector('.btn-delete');
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                card.style.opacity = '0';
+                card.style.transition = 'opacity 0.3s';
+                setTimeout(() => card.remove(), 300);
+            } else {
+                alert(`Error: ${data.error}`);
+                btn.disabled = false;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            btn.disabled = false;
         }
     }
 </script>

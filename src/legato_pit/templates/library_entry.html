@@ -207,10 +207,80 @@
     .entry-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.5rem;
+        gap: 0.75rem;
+        align-items: center;
         margin-top: 1.5rem;
         padding-top: 1rem;
         border-top: 1px solid var(--border-color);
+    }
+
+    /* Action button group */
+    .action-group {
+        display: flex;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .action-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+        background: transparent;
+        color: var(--text-secondary);
+        border: none;
+        border-right: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all 0.15s;
+        gap: 0.375rem;
+        text-decoration: none;
+    }
+
+    .action-btn:last-child {
+        border-right: none;
+    }
+
+    .action-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .action-btn.btn-edit:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .action-btn.btn-chord:hover {
+        background: var(--success-color);
+        color: white;
+    }
+
+    .action-btn.btn-delete:hover {
+        background: var(--danger-color, #dc3545);
+        color: white;
+    }
+
+    .action-btn.btn-view:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .action-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .action-btn.confirming {
+        background: var(--danger-color, #dc3545);
+        color: white;
+        animation: pulse 1s infinite;
+    }
+
+    .action-btn.btn-success {
+        background: var(--success-color, #28a745);
+        color: white;
     }
 
     /* Entry tags styling */
@@ -306,7 +376,7 @@
                 {% for cat in categories %}
                 <a href="{{ url_for('library.view_category', category=cat.category) }}"
                    class="sidebar-link {% if cat.category == entry.category %}active{% endif %}">
-                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
                     <span class="sidebar-count">{{ cat.count }}</span>
                 </a>
                 {% endfor %}
@@ -406,17 +476,34 @@
             </article>
 
             <div class="entry-actions">
-                {% if entry.file_path %}
-                <button type="button" onclick="showEditPane()" class="btn btn-primary">Edit</button>
-                {% endif %}
+                <div class="action-group">
+                    {% if entry.file_path %}
+                    <button type="button" onclick="showEditPane()" class="action-btn btn-edit" title="Edit note">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        <span>Edit</span>
+                    </button>
+                    {% endif %}
+                    <button type="button" class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                        <span>Chord</span>
+                    </button>
+                    <button type="button" class="action-btn btn-delete" id="deleteBtn" onclick="initiateDelete()" title="Delete note">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        <span>Delete</span>
+                    </button>
+                </div>
                 {% if entry.chord %}
-                <a href="{{ entry.chord.url }}" target="_blank" class="btn btn-accent">
-                    View Chord: {{ entry.chord.repo }}
+                <a href="{{ entry.chord.url }}" target="_blank" class="action-btn btn-view" title="View linked chord repository">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    <span>{{ entry.chord.repo }}</span>
                 </a>
                 {% endif %}
-                <button type="button" class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Add to Chord</button>
-                <button type="button" class="btn btn-danger" id="deleteBtn" onclick="initiateDelete()">Delete</button>
-                <button type="button" class="btn btn-danger confirm-delete" id="confirmDeleteBtn" onclick="confirmDelete()" style="display: none;">Click again to confirm</button>
+            </div>
+            <div id="deleteConfirm" style="display: none; margin-top: 0.5rem;">
+                <button type="button" class="action-btn confirming" id="confirmDeleteBtn" onclick="confirmDelete()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    <span>Click again to confirm delete</span>
+                </button>
             </div>
         </div>
 
@@ -581,15 +668,54 @@
         editStatus.style.display = 'block';
     }
 
+    // Add to chord queue functionality
+    async function addToChordQueue(entryId, title) {
+        const btn = event.target.closest('.action-btn');
+        const originalText = btn.querySelector('span').textContent;
+        btn.querySelector('span').textContent = 'Adding...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch('/agents/api/queue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    entry_id: entryId,
+                    title: title
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                btn.querySelector('span').textContent = 'Queued!';
+                btn.classList.add('btn-success');
+                setTimeout(() => {
+                    btn.querySelector('span').textContent = originalText;
+                    btn.classList.remove('btn-success');
+                    btn.disabled = false;
+                }, 2000);
+            } else {
+                alert(`Error: ${data.error}`);
+                btn.querySelector('span').textContent = originalText;
+                btn.disabled = false;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            btn.querySelector('span').textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
     // Delete functionality
     let deleteTimeout = null;
 
     function initiateDelete() {
         const deleteBtn = document.getElementById('deleteBtn');
-        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        const confirmContainer = document.getElementById('deleteConfirm');
 
         deleteBtn.style.display = 'none';
-        confirmBtn.style.display = 'inline-block';
+        confirmContainer.style.display = 'block';
 
         // Auto-cancel after 5 seconds
         deleteTimeout = setTimeout(() => {
@@ -599,10 +725,10 @@
 
     function cancelDelete() {
         const deleteBtn = document.getElementById('deleteBtn');
-        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        const confirmContainer = document.getElementById('deleteConfirm');
 
-        deleteBtn.style.display = 'inline-block';
-        confirmBtn.style.display = 'none';
+        deleteBtn.style.display = 'flex';
+        confirmContainer.style.display = 'none';
 
         if (deleteTimeout) {
             clearTimeout(deleteTimeout);
@@ -613,7 +739,7 @@
     async function confirmDelete() {
         const confirmBtn = document.getElementById('confirmDeleteBtn');
         confirmBtn.disabled = true;
-        confirmBtn.textContent = 'Deleting...';
+        confirmBtn.querySelector('span').textContent = 'Deleting...';
 
         if (deleteTimeout) {
             clearTimeout(deleteTimeout);
@@ -633,13 +759,13 @@
                 alert(`Error: ${data.error}`);
                 cancelDelete();
                 confirmBtn.disabled = false;
-                confirmBtn.textContent = 'Click again to confirm';
+                confirmBtn.querySelector('span').textContent = 'Click again to confirm delete';
             }
         } catch (error) {
             alert(`Error: ${error.message}`);
             cancelDelete();
             confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Click again to confirm';
+            confirmBtn.querySelector('span').textContent = 'Click again to confirm delete';
         }
     }
 </script>
