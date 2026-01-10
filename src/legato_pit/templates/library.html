@@ -321,7 +321,11 @@
         btn.textContent = 'Syncing...';
 
         try {
-            const response = await fetch('/library/api/sync', { method: 'POST' });
+            const response = await fetch('/library/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
             const data = await response.json();
 
             if (data.status === 'success') {

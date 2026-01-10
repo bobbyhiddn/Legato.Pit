@@ -251,6 +251,9 @@ class LibrarySync:
         chord_status = frontmatter.get('chord_status')
         chord_repo = frontmatter.get('chord_repo')
 
+        # Extract source transcript for tracking
+        source_transcript = frontmatter.get('source_transcript')
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -326,14 +329,14 @@ class LibrarySync:
                 SET entry_id = ?, title = ?, category = ?, content = ?,
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
-                    domain_tags = ?, key_phrases = ?,
+                    domain_tags = ?, key_phrases = ?, source_transcript = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, path)
+                 domain_tags, key_phrases, source_transcript, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -345,12 +348,12 @@ class LibrarySync:
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 domain_tags, key_phrases, source_transcript)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases)
+                 domain_tags, key_phrases, source_transcript)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
@@ -432,6 +435,9 @@ class LibrarySync:
         chord_status = frontmatter.get('chord_status')
         chord_repo = frontmatter.get('chord_repo')
 
+        # Extract source transcript for tracking
+        source_transcript = frontmatter.get('source_transcript')
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -495,14 +501,14 @@ class LibrarySync:
                 SET entry_id = ?, title = ?, category = ?, content = ?,
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
-                    domain_tags = ?, key_phrases = ?,
+                    domain_tags = ?, key_phrases = ?, source_transcript = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, relative_path)
+                 domain_tags, key_phrases, source_transcript, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -513,12 +519,12 @@ class LibrarySync:
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 domain_tags, key_phrases, source_transcript)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, relative_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases)
+                 domain_tags, key_phrases, source_transcript)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))

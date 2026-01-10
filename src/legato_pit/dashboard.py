@@ -147,13 +147,48 @@ def get_recent_jobs(limit=5):
         else:
             status = 'pending'
 
+        # Try to get source/transcript name from various places
+        source_name = None
+
+        # Check display_title first (often contains useful info)
+        display_title = run.get('display_title', '')
+
+        # For repository_dispatch, check the head_commit message or event payload
+        if run.get('event') == 'repository_dispatch':
+            # The source is often in the run name for dispatched events
+            source_name = run.get('name', '')
+            if 'dropbox' in display_title.lower():
+                source_name = display_title
+
+        # For workflow_dispatch, display_title often has the input
+        elif run.get('event') == 'workflow_dispatch':
+            source_name = display_title
+
+        # Fallback: try to extract from head_commit
+        if not source_name and run.get('head_commit'):
+            commit_msg = run['head_commit'].get('message', '')
+            if commit_msg:
+                source_name = commit_msg[:50]
+
+        # Format the title with source info
+        if source_name and source_name != 'Process Transcript':
+            # Truncate long sources
+            if len(source_name) > 40:
+                source_name = source_name[:37] + '...'
+            title = source_name
+        else:
+            # Use timestamp as fallback identifier
+            created = run['created_at'][:16].replace('T', ' ')
+            title = f"Transcript @ {created}"
+
         jobs.append({
             'id': run['id'],
-            'title': run.get('display_title') or run.get('name', 'Transcript Job'),
+            'title': title,
             'status': status,
             'status_text': run['conclusion'] or run['status'],
             'created_at': run['created_at'],
-            'url': run['html_url']
+            'url': run['html_url'],
+            'event_type': run.get('event', 'unknown')
         })
 
     return jobs
