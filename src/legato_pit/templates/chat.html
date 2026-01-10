@@ -190,8 +190,65 @@
     }
 
     .message-content {
-        white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    .message-user .message-content {
+        white-space: pre-wrap;
+    }
+
+    /* Markdown styling for assistant messages */
+    .message-assistant .message-content p {
+        margin: 0 0 0.5em 0;
+    }
+
+    .message-assistant .message-content p:last-child {
+        margin-bottom: 0;
+    }
+
+    .message-assistant .message-content code {
+        background: rgba(0,0,0,0.2);
+        padding: 0.15em 0.3em;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+
+    .message-assistant .message-content pre {
+        background: rgba(0,0,0,0.3);
+        padding: 0.75em;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 0.5em 0;
+    }
+
+    .message-assistant .message-content pre code {
+        background: none;
+        padding: 0;
+    }
+
+    .message-assistant .message-content ul,
+    .message-assistant .message-content ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+    }
+
+    .message-assistant .message-content li {
+        margin: 0.25em 0;
+    }
+
+    .message-assistant .message-content h1,
+    .message-assistant .message-content h2,
+    .message-assistant .message-content h3 {
+        margin: 0.75em 0 0.5em 0;
+        font-size: 1.1em;
+    }
+
+    .message-assistant .message-content blockquote {
+        border-left: 3px solid var(--accent-color);
+        margin: 0.5em 0;
+        padding-left: 0.75em;
+        opacity: 0.9;
     }
 
     .message-context {
@@ -416,7 +473,16 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Marked.js for markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
+    // Configure marked for safe rendering
+    marked.setOptions({
+        breaks: true,
+        gfm: true,
+        sanitize: false
+    });
+
     const messagesContainer = document.getElementById('chatMessages');
     const emptyChat = document.getElementById('emptyChat');
     const typingIndicator = document.getElementById('typingIndicator');
@@ -510,7 +576,15 @@
         const messageDiv = document.createElement('div');
         messageDiv.className = `message message-${role}`;
 
-        let html = `<div class="message-content">${escapeHtml(content)}</div>`;
+        // Render markdown for assistant messages, escape for user messages
+        let renderedContent;
+        if (role === 'assistant') {
+            renderedContent = marked.parse(content);
+        } else {
+            renderedContent = escapeHtml(content);
+        }
+
+        let html = `<div class="message-content">${renderedContent}</div>`;
 
         if (context && context.length > 0) {
             const contextId = 'context-' + Date.now();

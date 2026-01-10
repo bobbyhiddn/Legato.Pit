@@ -88,6 +88,8 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             chord_id TEXT,
             chord_status TEXT,
             chord_repo TEXT,
+            domain_tags TEXT,
+            key_phrases TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -116,6 +118,14 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         pass
     try:
         cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_repo TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN domain_tags TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN key_phrases TEXT")
     except sqlite3.OperationalError:
         pass
 

@@ -197,13 +197,13 @@ class ChatSessionManager:
 
         Returns messages in chronological order.
         """
-        # Get messages from DB
+        # Get messages from DB - use id for ordering (more reliable than timestamp)
         rows = db_conn.execute(
             """
             SELECT role, content, context_used, model_used, created_at
             FROM chat_messages
             WHERE session_id = ?
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             LIMIT ?
             """,
             (session_id, limit)

@@ -204,29 +204,47 @@ def get_recent_artifacts(limit=5):
 
 
 def get_stats():
-    """Get system statistics."""
-    org = current_app.config['LEGATO_ORG']
+    """Get system statistics from local database.
+
+    Returns:
+        Dict with transcripts (unique), notes (total), chords (active)
+    """
+    from flask import g
+    from .rag.database import init_db
 
     stats = {
         'transcripts': 0,
-        'artifacts': 0,
-        'projects': 0
+        'notes': 0,
+        'chords': 0
     }
 
-    # Count transcripts (workflow runs)
-    runs = github_api(f'/repos/{org}/Legato.Conduct/actions/workflows/process-transcript.yml/runs?per_page=1')
-    if runs:
-        stats['transcripts'] = runs.get('total_count', 0)
+    try:
+        if 'legato_db_conn' not in g:
+            g.legato_db_conn = init_db()
+        db = g.legato_db_conn
 
-    # Count artifacts (rough estimate from commits)
-    commits = github_api(f'/repos/{org}/Legato.Library/commits?per_page=100')
-    if commits:
-        stats['artifacts'] = len(commits)
+        # Count unique transcripts (deduplicated by source_transcript)
+        result = db.execute("""
+            SELECT COUNT(DISTINCT source_transcript)
+            FROM knowledge_entries
+            WHERE source_transcript IS NOT NULL AND source_transcript != ''
+        """).fetchone()
+        stats['transcripts'] = result[0] if result else 0
 
-    # Count Lab projects
-    repos = github_api(f'/users/{org}/repos?per_page=100')
-    if repos:
-        stats['projects'] = len([r for r in repos if r['name'].startswith('Lab.')])
+        # Count total notes
+        result = db.execute("SELECT COUNT(*) FROM knowledge_entries").fetchone()
+        stats['notes'] = result[0] if result else 0
+
+        # Count active chords
+        result = db.execute("""
+            SELECT COUNT(DISTINCT chord_repo)
+            FROM knowledge_entries
+            WHERE chord_status = 'active' AND chord_repo IS NOT NULL
+        """).fetchone()
+        stats['chords'] = result[0] if result else 0
+
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
 
     return stats
 

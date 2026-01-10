@@ -266,8 +266,26 @@ def view_entry(entry_id: str):
             message=f"Entry '{entry_id}' not found",
         ), 404
 
+    import json
     entry_dict = dict(entry)
     entry_dict['content_html'] = render_markdown(entry_dict['content'])
+
+    # Parse JSON tags if present
+    if entry_dict.get('domain_tags'):
+        try:
+            entry_dict['domain_tags'] = json.loads(entry_dict['domain_tags'])
+        except (json.JSONDecodeError, TypeError):
+            entry_dict['domain_tags'] = []
+    else:
+        entry_dict['domain_tags'] = []
+
+    if entry_dict.get('key_phrases'):
+        try:
+            entry_dict['key_phrases'] = json.loads(entry_dict['key_phrases'])
+        except (json.JSONDecodeError, TypeError):
+            entry_dict['key_phrases'] = []
+    else:
+        entry_dict['key_phrases'] = []
 
     # Check if a Chord was spawned from this Note (agent_queue is in agents.db)
     agents_db = get_agents_db()
@@ -372,6 +390,102 @@ def search():
         'library_search.html',
         query=query,
         results=[dict(r) for r in results],
+    )
+
+
+@library_bp.route('/daily')
+@login_required
+def daily_index():
+    """Show daily view with date picker and recent dates."""
+    db = get_db()
+
+    # Get dates with note counts
+    dates = db.execute(
+        """
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY DATE(created_at)
+        ORDER BY date DESC
+        LIMIT 30
+        """
+    ).fetchall()
+
+    # Get categories for sidebar
+    categories = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY category
+        """
+    ).fetchall()
+
+    return render_template(
+        'library_daily.html',
+        dates=[dict(d) for d in dates],
+        categories=[dict(c) for c in categories],
+    )
+
+
+@library_bp.route('/daily/<date>')
+@login_required
+def daily_view(date: str):
+    """View notes from a specific date."""
+    db = get_db()
+
+    # Validate date format
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        return "Invalid date format. Use YYYY-MM-DD", 400
+
+    # Get entries for this date
+    entries = db.execute(
+        """
+        SELECT entry_id, title, category, created_at, chord_status
+        FROM knowledge_entries
+        WHERE DATE(created_at) = ?
+        ORDER BY created_at DESC
+        """,
+        (date,)
+    ).fetchall()
+
+    # Get categories for sidebar
+    categories = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY category
+        """
+    ).fetchall()
+
+    # Get adjacent dates for navigation
+    prev_date = db.execute(
+        """
+        SELECT DATE(created_at) as date FROM knowledge_entries
+        WHERE DATE(created_at) < ?
+        ORDER BY date DESC LIMIT 1
+        """,
+        (date,)
+    ).fetchone()
+
+    next_date = db.execute(
+        """
+        SELECT DATE(created_at) as date FROM knowledge_entries
+        WHERE DATE(created_at) > ?
+        ORDER BY date ASC LIMIT 1
+        """,
+        (date,)
+    ).fetchone()
+
+    return render_template(
+        'library_daily_view.html',
+        date=date,
+        entries=[dict(e) for e in entries],
+        categories=[dict(c) for c in categories],
+        prev_date=prev_date['date'] if prev_date else None,
+        next_date=next_date['date'] if next_date else None,
     )
 
 

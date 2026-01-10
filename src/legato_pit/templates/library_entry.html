@@ -174,6 +174,55 @@
         opacity: 0.9;
     }
 
+    /* Entry tags styling */
+    .entry-tags {
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 8px;
+    }
+
+    .tag-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .tag-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .tag-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+        margin-right: 0.25rem;
+    }
+
+    .tag {
+        display: inline-block;
+        padding: 0.2rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        text-decoration: none;
+    }
+
+    .tag-domain {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .tag-domain:hover {
+        opacity: 0.8;
+    }
+
+    .tag-phrase {
+        background: var(--border-color);
+        color: var(--text-primary);
+    }
+
     .confirm-delete {
         animation: pulse 1s infinite;
     }
@@ -231,6 +280,9 @@
                 <a href="{{ url_for('library.index') }}" class="sidebar-link">
                     <span>Overview</span>
                 </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
+                    <span>Daily View</span>
+                </a>
             </nav>
         </div>
     </aside>
@@ -253,6 +305,27 @@
                         <span class="entry-date">{{ entry.created_at[:10] }}</span>
                     </div>
                 </header>
+
+                {% if entry.domain_tags or entry.key_phrases %}
+                <div class="entry-tags">
+                    {% if entry.domain_tags %}
+                    <div class="tag-group">
+                        <span class="tag-label">Topics:</span>
+                        {% for tag in entry.domain_tags %}
+                        <a href="{{ url_for('library.search') }}?q={{ tag }}" class="tag tag-domain">{{ tag }}</a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if entry.key_phrases %}
+                    <div class="tag-group">
+                        <span class="tag-label">Phrases:</span>
+                        {% for phrase in entry.key_phrases %}
+                        <span class="tag tag-phrase">{{ phrase }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
 
                 <details class="entry-metadata">
                     <summary>Metadata</summary>

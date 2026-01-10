@@ -5,6 +5,7 @@ Provides API and UI for managing knowledge categories.
 Categories are stored per-user and can be customized from defaults.
 """
 
+import os
 import re
 import logging
 from flask import Blueprint, request, jsonify, render_template, g
@@ -12,6 +13,40 @@ from flask import Blueprint, request, jsonify, render_template, g
 from .core import login_required
 
 logger = logging.getLogger(__name__)
+
+
+def create_category_folder(folder_name: str) -> dict:
+    """Create a folder in the Library repo with .gitkeep.
+
+    Args:
+        folder_name: The folder to create (e.g., 'work-queues')
+
+    Returns:
+        Dict with status and any error info
+    """
+    from .rag.github_service import commit_file
+
+    token = os.environ.get('SYSTEM_PAT')
+    if not token:
+        return {'created': False, 'error': 'SYSTEM_PAT not configured'}
+
+    library_repo = os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')
+
+    try:
+        result = commit_file(
+            repo=library_repo,
+            path=f"{folder_name}/.gitkeep",
+            content="# This folder contains knowledge entries\n",
+            message=f"Create {folder_name} category folder",
+            token=token
+        )
+        return {'created': True, 'commit': result.get('commit', {}).get('sha', '')[:7]}
+    except Exception as e:
+        # File might already exist, which is fine
+        if 'sha' in str(e).lower() or '422' in str(e):
+            return {'created': False, 'exists': True}
+        logger.error(f"Failed to create category folder {folder_name}: {e}")
+        return {'created': False, 'error': str(e)}
 
 categories_bp = Blueprint('categories', __name__, url_prefix='/categories')
 
@@ -117,10 +152,20 @@ def api_create_category():
 
         logger.info(f"Created category: {name} (id={category_id})")
 
+        # Create folder in Library repo
+        folder_result = create_category_folder(folder_name)
+        if folder_result.get('created'):
+            logger.info(f"Created folder {folder_name} in Library repo")
+        elif folder_result.get('exists'):
+            logger.info(f"Folder {folder_name} already exists in Library repo")
+        elif folder_result.get('error'):
+            logger.warning(f"Could not create folder {folder_name}: {folder_result['error']}")
+
         return jsonify({
             'success': True,
             'id': category_id,
             'name': name,
+            'folder_created': folder_result.get('created', False),
         })
 
     except Exception as e:
@@ -195,6 +240,44 @@ def api_update_category(category_id: int):
         return jsonify({'error': str(e)}), 500
 
 
+@categories_bp.route('/api/<int:category_id>/stats', methods=['GET'])
+@login_required
+def api_category_stats(category_id: int):
+    """Get stats for a category (note count, etc).
+
+    Used to warn before deletion.
+    """
+    try:
+        db = get_db()
+        user_id = get_user_id()
+
+        # Get category name
+        cat = db.execute(
+            "SELECT name, display_name FROM user_categories WHERE id = ? AND user_id = ?",
+            (category_id, user_id)
+        ).fetchone()
+
+        if not cat:
+            return jsonify({'error': 'Category not found'}), 404
+
+        # Count notes using this category
+        result = db.execute(
+            "SELECT COUNT(*) FROM knowledge_entries WHERE category = ?",
+            (cat['name'],)
+        ).fetchone()
+        note_count = result[0] if result else 0
+
+        return jsonify({
+            'name': cat['name'],
+            'display_name': cat['display_name'],
+            'note_count': note_count,
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get category stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @categories_bp.route('/api/<int:category_id>', methods=['DELETE'])
 @login_required
 def api_delete_category(category_id: int):
@@ -202,7 +285,11 @@ def api_delete_category(category_id: int):
 
     Note: This sets is_active=0, not a hard delete.
     Entries using this category will keep their current category.
+    Requires confirm=true in request body to actually delete.
     """
+    data = request.get_json() or {}
+    confirm = data.get('confirm', False)
+
     try:
         db = get_db()
         user_id = get_user_id()
@@ -216,15 +303,29 @@ def api_delete_category(category_id: int):
         if not cat:
             return jsonify({'error': 'Category not found'}), 404
 
+        # Count affected notes
+        result = db.execute(
+            "SELECT COUNT(*) FROM knowledge_entries WHERE category = ?",
+            (cat['name'],)
+        ).fetchone()
+        note_count = result[0] if result else 0
+
+        if not confirm and note_count > 0:
+            return jsonify({
+                'error': 'Confirmation required',
+                'note_count': note_count,
+                'requires_confirm': True,
+            }), 400
+
         db.execute(
             "UPDATE user_categories SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (category_id,)
         )
         db.commit()
 
-        logger.info(f"Deleted category: {cat['name']} (id={category_id})")
+        logger.info(f"Deleted category: {cat['name']} (id={category_id}), orphaned {note_count} notes")
 
-        return jsonify({'success': True, 'name': cat['name']})
+        return jsonify({'success': True, 'name': cat['name'], 'orphaned_notes': note_count})
 
     except Exception as e:
         logger.error(f"Failed to delete category: {e}")

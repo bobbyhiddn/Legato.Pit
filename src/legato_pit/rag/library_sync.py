@@ -251,6 +251,32 @@ class LibrarySync:
         chord_status = frontmatter.get('chord_status')
         chord_repo = frontmatter.get('chord_repo')
 
+        # Extract topic tags - stored as JSON strings
+        import json
+        domain_tags_raw = frontmatter.get('domain_tags')
+        key_phrases_raw = frontmatter.get('key_phrases')
+
+        # Parse JSON arrays or keep as-is if already parsed
+        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith('['):
+            try:
+                domain_tags = json.dumps(json.loads(domain_tags_raw))
+            except json.JSONDecodeError:
+                domain_tags = domain_tags_raw
+        elif isinstance(domain_tags_raw, list):
+            domain_tags = json.dumps(domain_tags_raw)
+        else:
+            domain_tags = None
+
+        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith('['):
+            try:
+                key_phrases = json.dumps(json.loads(key_phrases_raw))
+            except json.JSONDecodeError:
+                key_phrases = key_phrases_raw
+        elif isinstance(key_phrases_raw, list):
+            key_phrases = json.dumps(key_phrases_raw)
+        else:
+            key_phrases = None
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -299,12 +325,14 @@ class LibrarySync:
                 SET entry_id = ?, title = ?, category = ?, content = ?,
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
+                    domain_tags = ?, key_phrases = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
-                 final_chord_id, final_chord_status, final_chord_repo, path)
+                 final_chord_id, final_chord_status, final_chord_repo,
+                 domain_tags, key_phrases, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -315,11 +343,13 @@ class LibrarySync:
                 """
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, path,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
@@ -401,6 +431,31 @@ class LibrarySync:
         chord_status = frontmatter.get('chord_status')
         chord_repo = frontmatter.get('chord_repo')
 
+        # Extract topic tags - stored as JSON strings
+        import json
+        domain_tags_raw = frontmatter.get('domain_tags')
+        key_phrases_raw = frontmatter.get('key_phrases')
+
+        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith('['):
+            try:
+                domain_tags = json.dumps(json.loads(domain_tags_raw))
+            except json.JSONDecodeError:
+                domain_tags = domain_tags_raw
+        elif isinstance(domain_tags_raw, list):
+            domain_tags = json.dumps(domain_tags_raw)
+        else:
+            domain_tags = None
+
+        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith('['):
+            try:
+                key_phrases = json.dumps(json.loads(key_phrases_raw))
+            except json.JSONDecodeError:
+                key_phrases = key_phrases_raw
+        elif isinstance(key_phrases_raw, list):
+            key_phrases = json.dumps(key_phrases_raw)
+        else:
+            key_phrases = None
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -438,12 +493,14 @@ class LibrarySync:
                 SET entry_id = ?, title = ?, category = ?, content = ?,
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
+                    domain_tags = ?, key_phrases = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
-                 final_chord_id, final_chord_status, final_chord_repo, relative_path)
+                 final_chord_id, final_chord_status, final_chord_repo,
+                 domain_tags, key_phrases, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -453,11 +510,13 @@ class LibrarySync:
                 """
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, relative_path,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))

@@ -3,6 +3,18 @@
 {% block title %}Agents - {{ app_name }}{% endblock %}
 
 {% block content %}
+<style>
+    .agent-note-link {
+        color: var(--accent-color);
+        text-decoration: none;
+    }
+    .agent-note-link:hover {
+        text-decoration: underline;
+    }
+    .agent-note-link code {
+        color: inherit;
+    }
+</style>
 <div class="agents-container">
     <header class="page-header">
         <h1>Chord Queue</h1>
@@ -28,7 +40,7 @@
                     <p class="agent-desc">{{ agent.description }}</p>
                     {% endif %}
                     {% if agent.related_entry_id %}
-                    <span class="agent-source">Linked note: <code>{{ agent.related_entry_id }}</code></span>
+                    <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=agent.related_entry_id.split(',')[0]) }}" class="agent-note-link"><code>{{ agent.related_entry_id }}</code></a></span>
                     {% elif agent.source_transcript %}
                     <span class="agent-source">Source: {{ agent.source_transcript }}</span>
                     {% endif %}
