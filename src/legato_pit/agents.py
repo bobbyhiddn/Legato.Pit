@@ -439,7 +439,7 @@ def api_approve_agent(queue_id: str):
 @agents_bp.route('/api/reject-all', methods=['POST'])
 @login_required
 def api_reject_all():
-    """Delete all pending agents from the queue.
+    """Delete all pending agents from the queue and reset linked notes.
 
     Response:
     {
@@ -452,14 +452,34 @@ def api_reject_all():
         user = session.get('user', {})
         username = user.get('login', 'unknown')
 
-        # Count before delete
-        count = db.execute(
-            "SELECT COUNT(*) as cnt FROM agent_queue WHERE status = 'pending'"
-        ).fetchone()['cnt']
+        # Get all pending agents with their linked entries
+        pending = db.execute(
+            "SELECT queue_id, related_entry_id FROM agent_queue WHERE status = 'pending'"
+        ).fetchall()
+
+        count = len(pending)
+
+        # Collect all entry IDs to reset
+        all_entry_ids = []
+        for agent in pending:
+            if agent['related_entry_id']:
+                entry_ids = [eid.strip() for eid in agent['related_entry_id'].split(',') if eid.strip()]
+                all_entry_ids.extend(entry_ids)
 
         # Delete all pending
         db.execute("DELETE FROM agent_queue WHERE status = 'pending'")
         db.commit()
+
+        # Reset chord_status on all linked notes
+        if all_entry_ids:
+            legato_db = get_legato_db()
+            for entry_id in all_entry_ids:
+                legato_db.execute(
+                    "UPDATE knowledge_entries SET chord_status = NULL WHERE entry_id = ?",
+                    (entry_id,)
+                )
+            legato_db.commit()
+            logger.info(f"Reset chord_status for {len(all_entry_ids)} entries")
 
         logger.info(f"Cleared {count} pending agents by {username}")
 
@@ -497,6 +517,17 @@ def api_reject_agent(queue_id: str):
         user = session.get('user', {})
         username = user.get('login', 'unknown')
 
+        # Get the agent's related_entry_id before rejecting
+        agent = db.execute(
+            "SELECT related_entry_id FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
+            (queue_id,)
+        ).fetchone()
+
+        if not agent:
+            return jsonify({'error': 'Agent not found or already processed'}), 404
+
+        related_entry_id = agent['related_entry_id'] if agent else None
+
         result = db.execute(
             """
             UPDATE agent_queue
@@ -511,8 +542,21 @@ def api_reject_agent(queue_id: str):
         )
         db.commit()
 
-        if result.rowcount == 0:
-            return jsonify({'error': 'Agent not found or already processed'}), 404
+        # Reset chord_status on linked notes so they can be re-queued
+        if related_entry_id:
+            legato_db = get_legato_db()
+            entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
+            for entry_id in entry_ids:
+                legato_db.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET chord_status = NULL
+                    WHERE entry_id = ?
+                    """,
+                    (entry_id,)
+                )
+            legato_db.commit()
+            logger.info(f"Reset chord_status for {len(entry_ids)} entries after rejection")
 
         logger.info(f"Rejected agent: {queue_id} by {username}")
 

@@ -111,12 +111,11 @@
             </div>
             <div class="entry-actions">
                 {% if entry.chord_status == 'active' %}
-                <span class="chord-badge">Chord</span>
+                <span class="chord-badge">Active</span>
                 {% elif entry.chord_status == 'pending' %}
                 <span class="chord-badge pending">Pending</span>
-                {% elif entry.needs_chord %}
-                <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
                 {% endif %}
+                <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
             </div>
         </div>
         {% else %}
