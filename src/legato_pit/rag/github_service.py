@@ -185,6 +185,89 @@ def delete_file(
     return result
 
 
+def list_folder(
+    repo: str,
+    path: str,
+    token: str,
+    branch: str = "main",
+) -> list[dict]:
+    """List contents of a folder on GitHub.
+
+    Args:
+        repo: Repository in "owner/repo" format
+        path: Folder path within repo
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        List of file/folder info dicts with 'name', 'path', 'type', 'sha'
+
+    Raises:
+        requests.RequestException on API errors
+    """
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+    response = requests.get(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=10,
+    )
+
+    if response.status_code == 404:
+        return []
+
+    response.raise_for_status()
+    data = response.json()
+
+    # Contents API returns list for folders, dict for files
+    if isinstance(data, dict):
+        return [data]
+    return data
+
+
+def move_file(
+    repo: str,
+    old_path: str,
+    new_path: str,
+    message: str,
+    token: str,
+    branch: str = "main",
+) -> dict:
+    """Move a file from one path to another on GitHub.
+
+    This is done by getting content, creating at new location, deleting old.
+
+    Args:
+        repo: Repository in "owner/repo" format
+        old_path: Current file path
+        new_path: New file path
+        message: Commit message
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        Dict with 'created' and 'deleted' commit info
+
+    Raises:
+        requests.RequestException on API errors
+    """
+    # Get current content
+    content = get_file_content(repo, old_path, token, branch)
+    if content is None:
+        raise ValueError(f"File not found: {old_path}")
+
+    # Create at new location
+    created = create_file(repo, new_path, content, message, token, branch)
+
+    # Delete from old location
+    deleted = delete_file(repo, old_path, f"Remove {old_path} (moved)", token, branch)
+
+    logger.info(f"Moved {old_path} -> {new_path} in {repo}")
+    return {'created': created, 'deleted': deleted}
+
+
 def create_file(
     repo: str,
     path: str,

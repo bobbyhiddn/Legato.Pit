@@ -187,6 +187,8 @@ def api_update_category(category_id: int):
         "folder_name": "new-folder",
         "sort_order": 5
     }
+
+    If folder_name changes, all notes in the old folder will be moved to the new folder.
     """
     data = request.get_json()
     if not data:
@@ -195,6 +197,19 @@ def api_update_category(category_id: int):
     try:
         db = get_db()
         user_id = get_user_id()
+
+        # Get current category info
+        current = db.execute(
+            "SELECT name, folder_name FROM user_categories WHERE id = ? AND user_id = ?",
+            (category_id, user_id)
+        ).fetchone()
+
+        if not current:
+            return jsonify({'error': 'Category not found'}), 404
+
+        old_folder = current['folder_name']
+        new_folder = data.get('folder_name', '').strip() if 'folder_name' in data else old_folder
+        folder_changed = new_folder and new_folder != old_folder
 
         # Build update query dynamically
         updates = []
@@ -210,7 +225,7 @@ def api_update_category(category_id: int):
 
         if 'folder_name' in data:
             updates.append('folder_name = ?')
-            params.append(data['folder_name'].strip())
+            params.append(new_folder)
 
         if 'sort_order' in data:
             updates.append('sort_order = ?')
@@ -219,21 +234,91 @@ def api_update_category(category_id: int):
         if not updates:
             return jsonify({'error': 'No fields to update'}), 400
 
+        # If folder is changing, move files in GitHub first
+        files_moved = 0
+        move_errors = []
+
+        if folder_changed:
+            from .rag.github_service import list_folder, move_file, create_file
+
+            token = os.environ.get('SYSTEM_PAT')
+            library_repo = os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')
+
+            if token:
+                try:
+                    # Create new folder with .gitkeep first
+                    try:
+                        create_file(
+                            repo=library_repo,
+                            path=f"{new_folder}/.gitkeep",
+                            content="# This folder contains knowledge entries\n",
+                            message=f"Create {new_folder} folder for category rename",
+                            token=token
+                        )
+                    except Exception:
+                        pass  # Folder might already exist
+
+                    # List files in old folder
+                    files = list_folder(library_repo, old_folder, token)
+
+                    for file_info in files:
+                        if file_info.get('type') != 'file':
+                            continue
+                        if file_info.get('name') == '.gitkeep':
+                            continue
+
+                        old_path = file_info['path']
+                        new_path = f"{new_folder}/{file_info['name']}"
+
+                        try:
+                            move_file(
+                                repo=library_repo,
+                                old_path=old_path,
+                                new_path=new_path,
+                                message=f"Move {file_info['name']} from {old_folder} to {new_folder}",
+                                token=token
+                            )
+                            files_moved += 1
+
+                            # Update file_path in database
+                            db.execute(
+                                "UPDATE knowledge_entries SET file_path = ? WHERE file_path = ?",
+                                (new_path, old_path)
+                            )
+
+                        except Exception as e:
+                            move_errors.append(f"{file_info['name']}: {str(e)}")
+                            logger.error(f"Failed to move {old_path}: {e}")
+
+                except Exception as e:
+                    logger.error(f"Failed to move files during folder rename: {e}")
+                    return jsonify({
+                        'error': f'Failed to move files: {str(e)}',
+                        'files_moved': files_moved
+                    }), 500
+            else:
+                logger.warning("SYSTEM_PAT not set, cannot move files during folder rename")
+
+        # Update database
         updates.append('updated_at = CURRENT_TIMESTAMP')
         params.extend([category_id, user_id])
 
-        result = db.execute(
+        db.execute(
             f"UPDATE user_categories SET {', '.join(updates)} WHERE id = ? AND user_id = ?",
             params
         )
         db.commit()
 
-        if result.rowcount == 0:
-            return jsonify({'error': 'Category not found'}), 404
+        logger.info(f"Updated category id={category_id}" +
+                   (f", moved {files_moved} files from {old_folder} to {new_folder}" if folder_changed else ""))
 
-        logger.info(f"Updated category id={category_id}")
+        response = {'success': True}
+        if folder_changed:
+            response['files_moved'] = files_moved
+            if move_errors:
+                response['move_errors'] = move_errors
 
-        return jsonify({'success': True})
+        return jsonify(response)
 
     except Exception as e:
         logger.error(f"Failed to update category: {e}")
