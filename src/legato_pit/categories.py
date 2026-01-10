@@ -106,7 +106,8 @@ def api_create_category():
         "name": "research",           -- slug (required)
         "display_name": "Research",   -- human readable (required)
         "description": "...",         -- optional
-        "folder_name": "research"     -- optional, defaults to {name}s
+        "folder_name": "research",    -- optional, defaults to {name}s
+        "color": "#6366f1"            -- optional, defaults to indigo
     }
     """
     data = request.get_json()
@@ -117,6 +118,7 @@ def api_create_category():
     display_name = data.get('display_name', '').strip()
     description = data.get('description', '').strip()
     folder_name = data.get('folder_name', '').strip()
+    color = data.get('color', '#6366f1').strip()
 
     if not name or not display_name:
         return jsonify({'error': 'name and display_name are required'}), 400
@@ -127,6 +129,10 @@ def api_create_category():
 
     if len(name) > 30:
         return jsonify({'error': 'name must be 30 characters or less'}), 400
+
+    # Validate color (hex format)
+    if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
+        return jsonify({'error': 'color must be a valid hex color (e.g., #6366f1)'}), 400
 
     # Default folder_name
     if not folder_name:
@@ -143,9 +149,9 @@ def api_create_category():
         ).fetchone()[0] or 0
 
         cursor = db.execute("""
-            INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, name, display_name, description, folder_name, max_order + 1))
+            INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, name, display_name, description, folder_name, max_order + 1, color))
 
         db.commit()
         category_id = cursor.lastrowid
@@ -185,7 +191,8 @@ def api_update_category(category_id: int):
         "display_name": "New Display Name",
         "description": "New description",
         "folder_name": "new-folder",
-        "sort_order": 5
+        "sort_order": 5,
+        "color": "#ff5500"
     }
 
     If folder_name changes, all notes in the old folder will be moved to the new folder.
@@ -211,6 +218,12 @@ def api_update_category(category_id: int):
         new_folder = data.get('folder_name', '').strip() if 'folder_name' in data else old_folder
         folder_changed = new_folder and new_folder != old_folder
 
+        # Validate color if provided
+        if 'color' in data:
+            color = data['color'].strip()
+            if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
+                return jsonify({'error': 'color must be a valid hex color (e.g., #6366f1)'}), 400
+
         # Build update query dynamically
         updates = []
         params = []
@@ -230,6 +243,10 @@ def api_update_category(category_id: int):
         if 'sort_order' in data:
             updates.append('sort_order = ?')
             params.append(int(data['sort_order']))
+
+        if 'color' in data:
+            updates.append('color = ?')
+            params.append(data['color'].strip())
 
         if not updates:
             return jsonify({'error': 'No fields to update'}), 400

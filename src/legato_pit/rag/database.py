@@ -203,6 +203,7 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             display_name TEXT NOT NULL,
             description TEXT,
             folder_name TEXT NOT NULL,
+            color TEXT DEFAULT '#6366f1',
             sort_order INTEGER DEFAULT 0,
             is_active INTEGER DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -210,6 +211,12 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             UNIQUE(user_id, name)
         )
     """)
+
+    # Add color column if it doesn't exist (migration for existing databases)
+    try:
+        cursor.execute("ALTER TABLE user_categories ADD COLUMN color TEXT DEFAULT '#6366f1'")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
@@ -227,13 +234,14 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
 # ============ Category Helpers ============
 
+# (name, display_name, description, folder_name, sort_order, color)
 DEFAULT_CATEGORIES = [
-    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphanys', 1),
-    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concepts', 2),
-    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflections', 3),
-    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmers', 4),
-    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminders', 5),
-    ('worklog', 'Worklog', 'Summary of work already completed', 'worklogs', 6),
+    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphanys', 1, '#f59e0b'),      # Amber
+    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concepts', 2, '#6366f1'),     # Indigo
+    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflections', 3, '#8b5cf6'),             # Violet
+    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmers', 4, '#ec4899'),  # Pink
+    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminders', 5, '#14b8a6'),                   # Teal
+    ('worklog', 'Worklog', 'Summary of work already completed', 'worklogs', 6, '#64748b'),                             # Slate
 ]
 
 
@@ -250,12 +258,12 @@ def seed_default_categories(conn: sqlite3.Connection, user_id: str = 'default') 
     cursor = conn.cursor()
     created = 0
 
-    for name, display_name, description, folder_name, sort_order in DEFAULT_CATEGORIES:
+    for name, display_name, description, folder_name, sort_order, color in DEFAULT_CATEGORIES:
         try:
             cursor.execute("""
-                INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, name, display_name, description, folder_name, sort_order))
+                INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, name, display_name, description, folder_name, sort_order, color))
             created += 1
         except sqlite3.IntegrityError:
             pass  # Already exists
@@ -274,7 +282,7 @@ def get_user_categories(conn: sqlite3.Connection, user_id: str = 'default') -> l
         user_id: User identifier
 
     Returns:
-        List of category dictionaries with id, name, display_name, description, folder_name, sort_order
+        List of category dictionaries with id, name, display_name, description, folder_name, sort_order, color
     """
     # Check if user has any categories
     count = conn.execute(
@@ -286,7 +294,7 @@ def get_user_categories(conn: sqlite3.Connection, user_id: str = 'default') -> l
         seed_default_categories(conn, user_id)
 
     rows = conn.execute("""
-        SELECT id, name, display_name, description, folder_name, sort_order
+        SELECT id, name, display_name, description, folder_name, sort_order, color
         FROM user_categories
         WHERE user_id = ? AND is_active = 1
         ORDER BY sort_order, name

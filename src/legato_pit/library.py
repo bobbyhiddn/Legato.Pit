@@ -52,7 +52,7 @@ def get_categories_with_counts():
     with a count of how many entries exist in each category.
 
     Returns:
-        List of dicts with: category (name), display_name, count, folder_name
+        List of dicts with: category (name), display_name, count, folder_name, color
     """
     from .rag.database import get_user_categories
 
@@ -77,6 +77,7 @@ def get_categories_with_counts():
             'display_name': cat['display_name'],
             'count': count_map.get(cat['name'], 0),
             'folder_name': cat['folder_name'],
+            'color': cat.get('color', '#6366f1'),
         })
 
     return result
