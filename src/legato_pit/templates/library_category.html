@@ -602,6 +602,36 @@
         }
     }
 
+    async function addToChordQueue(entryId, title) {
+        try {
+            const response = await fetch('/agents/api/queue-chord', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entry_id: entryId })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                // Update UI to show queued status
+                const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+                const actions = card.querySelector('.entry-actions');
+                const existingBadge = actions.querySelector('.chord-badge');
+                if (!existingBadge) {
+                    const badge = document.createElement('span');
+                    badge.className = 'chord-badge pending';
+                    badge.textContent = 'Queued';
+                    actions.insertBefore(badge, actions.firstChild);
+                }
+                alert(`Added "${title}" to chord queue`);
+            } else {
+                alert(`Error: ${data.error || 'Failed to queue'}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+
     async function deleteEntry(entryId, title) {
         if (!confirm(`Delete "${title}"?\n\nThis will remove the note from GitHub and the local database.`)) {
             return;

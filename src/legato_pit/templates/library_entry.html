@@ -47,7 +47,6 @@
 
     .sidebar-link {
         display: flex;
-        justify-content: space-between;
         align-items: center;
         padding: 0.5rem 0.75rem;
         border-radius: 6px;
@@ -55,6 +54,18 @@
         color: var(--text-primary);
         font-size: 0.875rem;
         transition: background 0.2s;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link span:not(.category-dot):not(.sidebar-count) {
+        flex: 1;
+    }
+
+    .sidebar-link .category-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
     }
 
     .sidebar-link:hover {
@@ -64,6 +75,10 @@
     .sidebar-link.active {
         background: var(--accent-color);
         color: white;
+    }
+
+    .sidebar-link.active .category-dot {
+        box-shadow: 0 0 0 2px rgba(255,255,255,0.5);
     }
 
     .sidebar-count {
@@ -106,14 +121,15 @@
         font-size: 0.75rem;
         font-weight: 500;
         text-transform: capitalize;
-        background: var(--accent-color);
+        background: var(--category-color, var(--accent-color));
         color: white;
         border: none;
-        transition: opacity 0.2s;
+        transition: filter 0.2s;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.2);
     }
 
     .category-badge:hover {
-        opacity: 0.8;
+        filter: brightness(1.1);
     }
 
     .category-dropdown {
@@ -135,7 +151,9 @@
     }
 
     .category-option {
-        display: block;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
         width: 100%;
         padding: 0.5rem 0.75rem;
         text-align: left;
@@ -154,6 +172,18 @@
     .category-option.current {
         color: var(--accent-color);
         font-weight: 500;
+    }
+
+    .category-option .option-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        margin-top: 0.35rem;
+    }
+
+    .category-option .option-content {
+        flex: 1;
     }
 
     .category-option .category-desc {
@@ -376,6 +406,7 @@
                 {% for cat in categories %}
                 <a href="{{ url_for('library.view_category', category=cat.category) }}"
                    class="sidebar-link {% if cat.category == entry.category %}active{% endif %}">
+                    <span class="category-dot" style="background: {{ cat.color or '#6366f1' }}"></span>
                     <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
                     <span class="sidebar-count">{{ cat.count }}</span>
                 </a>
@@ -547,6 +578,7 @@
 
     // Category selector
     const currentCategory = {{ entry.category|tojson }};
+    let categoryData = {};
 
     async function loadCategories() {
         try {
@@ -556,11 +588,27 @@
             const dropdown = document.getElementById('categoryDropdown');
             if (!dropdown) return;
 
+            // Store category data for color lookup
+            data.categories.forEach(cat => {
+                categoryData[cat.name] = cat;
+            });
+
+            // Set initial color on category badge
+            const badge = document.querySelector('.category-badge');
+            if (badge && categoryData[currentCategory]) {
+                const color = categoryData[currentCategory].color || '#6366f1';
+                badge.closest('.category-selector').style.setProperty('--category-color', color);
+            }
+
             dropdown.innerHTML = data.categories.map(cat => `
                 <button class="category-option ${cat.name === currentCategory ? 'current' : ''}"
-                        onclick="changeCategory('${cat.name}')">
-                    ${cat.display_name}
-                    <span class="category-desc">${cat.description || ''}</span>
+                        onclick="changeCategory('${cat.name}')"
+                        data-color="${cat.color || '#6366f1'}">
+                    <span class="option-dot" style="background: ${cat.color || '#6366f1'}"></span>
+                    <span class="option-content">
+                        ${cat.display_name}
+                        <span class="category-desc">${cat.description || ''}</span>
+                    </span>
                 </button>
             `).join('');
         } catch (error) {
