@@ -68,13 +68,22 @@ def dispatch_transcript(transcript_text, source_id):
     repo = current_app.config['CONDUCT_REPO']
 
     # Prepare dispatch payload
+    # Include both 'transcript' and 'text' fields for compatibility with Conduct
+    # Conduct's classifier may expect either field name depending on version
     payload = {
         'event_type': 'transcript-received',
         'client_payload': {
             'transcript': transcript_text,
+            'text': transcript_text,  # Alias for compatibility
+            'raw_text': transcript_text,  # For routing.json compatibility
             'source': source_id
         }
     }
+
+    # Log dispatch details (truncate content for log readability)
+    preview = transcript_text[:100] + '...' if len(transcript_text) > 100 else transcript_text
+    logger.info(f"Dispatching transcript to Conduct: source={source_id}, length={len(transcript_text)} chars")
+    logger.debug(f"Transcript preview: {preview!r}")
 
     try:
         response = requests.post(
