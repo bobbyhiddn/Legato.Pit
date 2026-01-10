@@ -184,17 +184,105 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
+    # User-defined categories
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT 'default',
+            name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            description TEXT,
+            folder_name TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, name)
+        )
+    """)
+
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_needs_chord ON knowledge_entries(needs_chord, chord_status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_categories_user ON user_categories(user_id, is_active)")
 
     conn.commit()
     logger.info(f"Legato database initialized at {path}")
 
     return conn
+
+
+# ============ Category Helpers ============
+
+DEFAULT_CATEGORIES = [
+    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphanys', 1),
+    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concepts', 2),
+    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflections', 3),
+    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmers', 4),
+    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminders', 5),
+    ('worklog', 'Worklog', 'Summary of work already completed', 'worklogs', 6),
+]
+
+
+def seed_default_categories(conn: sqlite3.Connection, user_id: str = 'default') -> int:
+    """Seed default categories for a user if they don't exist.
+
+    Args:
+        conn: Database connection
+        user_id: User identifier
+
+    Returns:
+        Number of categories created
+    """
+    cursor = conn.cursor()
+    created = 0
+
+    for name, display_name, description, folder_name, sort_order in DEFAULT_CATEGORIES:
+        try:
+            cursor.execute("""
+                INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (user_id, name, display_name, description, folder_name, sort_order))
+            created += 1
+        except sqlite3.IntegrityError:
+            pass  # Already exists
+
+    conn.commit()
+    if created > 0:
+        logger.info(f"Seeded {created} default categories for user {user_id}")
+    return created
+
+
+def get_user_categories(conn: sqlite3.Connection, user_id: str = 'default') -> list[dict]:
+    """Get all active categories for a user, seeding defaults if needed.
+
+    Args:
+        conn: Database connection
+        user_id: User identifier
+
+    Returns:
+        List of category dictionaries with id, name, display_name, description, folder_name, sort_order
+    """
+    # Check if user has any categories
+    count = conn.execute(
+        "SELECT COUNT(*) FROM user_categories WHERE user_id = ? AND is_active = 1",
+        (user_id,)
+    ).fetchone()[0]
+
+    if count == 0:
+        seed_default_categories(conn, user_id)
+
+    rows = conn.execute("""
+        SELECT id, name, display_name, description, folder_name, sort_order
+        FROM user_categories
+        WHERE user_id = ? AND is_active = 1
+        ORDER BY sort_order, name
+    """, (user_id,)).fetchall()
+
+    return [dict(row) for row in rows]
 
 
 # ============ Agents DB ============

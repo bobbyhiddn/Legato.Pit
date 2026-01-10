@@ -911,6 +911,121 @@ def api_save_entry(entry_id: str):
         }), 500
 
 
+@library_bp.route('/api/create-note', methods=['POST'])
+@login_required
+def api_create_note():
+    """Create a new note in the Library.
+
+    Request body:
+    {
+        "title": "Note Title",
+        "category": "concept",
+        "content": "Note content in markdown..."
+    }
+
+    Response:
+    {
+        "status": "success",
+        "entry_id": "kb-abc123",
+        "file_path": "concepts/2026-01-10-note-title.md"
+    }
+    """
+    import hashlib
+    import re
+    from datetime import datetime
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    title = data.get('title', '').strip()
+    category = data.get('category', '').lower().strip()
+    content = data.get('content', '').strip()
+
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+
+    if not category:
+        return jsonify({'error': 'Category is required'}), 400
+
+    # Validate category
+    db = get_db()
+    categories = get_user_categories(db, 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return jsonify({
+            'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
+        }), 400
+
+    try:
+        # Generate entry_id
+        hash_input = f"{title}-{datetime.utcnow().isoformat()}"
+        entry_id = f"kb-{hashlib.sha256(hash_input.encode()).hexdigest()[:8]}"
+
+        # Generate slug from title
+        slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
+        if not slug:
+            slug = entry_id
+
+        # Build file path
+        date_str = datetime.utcnow().strftime('%Y-%m-%d')
+        folder = category_folders.get(category, f'{category}s')
+        file_path = f'{folder}/{date_str}-{slug}.md'
+
+        # Build frontmatter
+        timestamp = datetime.utcnow().isoformat() + 'Z'
+        frontmatter = f"""---
+id: library.{category}.{slug}
+title: "{title}"
+category: {category}
+created: {timestamp}
+domain_tags: []
+key_phrases: []
+---
+
+"""
+        full_content = frontmatter + content
+
+        # Create file in GitHub
+        token = current_app.config.get('SYSTEM_PAT')
+        repo = 'bobbyhiddn/Legato.Library'
+
+        create_file(
+            repo=repo,
+            path=file_path,
+            content=full_content,
+            message=f'Create note: {title}',
+            token=token
+        )
+
+        # Insert into local database
+        db.execute(
+            """
+            INSERT INTO knowledge_entries
+            (entry_id, title, category, content, file_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (entry_id, title, category, content, file_path)
+        )
+        db.commit()
+
+        logger.info(f"Created note: {entry_id} - {title} in {category}")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'file_path': file_path,
+        })
+
+    except Exception as e:
+        logger.error(f"Create note failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @library_bp.route('/api/entry/<path:entry_id>/category', methods=['POST'])
 @login_required
 def api_update_category(entry_id: str):
@@ -923,7 +1038,7 @@ def api_update_category(entry_id: str):
         "category": "concept"
     }
 
-    Valid categories: epiphany, concept, reflection, glimmer, reminder, worklog
+    Valid categories are loaded dynamically from user_categories table.
 
     Response:
     {
@@ -934,26 +1049,22 @@ def api_update_category(entry_id: str):
     }
     """
     import re
+    from .rag.database import get_user_categories
 
-    VALID_CATEGORIES = {'epiphany', 'concept', 'reflection', 'glimmer', 'reminder', 'worklog'}
-    # Category folder names (plural)
-    CATEGORY_FOLDERS = {
-        'epiphany': 'epiphanys',
-        'concept': 'concepts',
-        'reflection': 'reflections',
-        'glimmer': 'glimmers',
-        'reminder': 'reminders',
-        'worklog': 'worklogs',
-    }
+    # Get categories dynamically from database
+    db = get_db()
+    categories = get_user_categories(db, 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
 
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
     new_category = data.get('category', '').lower().strip()
-    if new_category not in VALID_CATEGORIES:
+    if new_category not in valid_categories:
         return jsonify({
-            'error': f'Invalid category. Must be one of: {", ".join(sorted(VALID_CATEGORIES))}'
+            'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
         }), 400
 
     try:
@@ -1013,7 +1124,7 @@ def api_update_category(entry_id: str):
                     # Calculate new file path
                     # Old: glimmers/2024-01-10-something.md -> New: concepts/2024-01-10-something.md
                     filename = old_file_path.split('/')[-1]
-                    new_folder = CATEGORY_FOLDERS.get(new_category, f'{new_category}s')
+                    new_folder = category_folders.get(new_category, f'{new_category}s')
                     new_file_path = f'{new_folder}/{filename}'
 
                     # Create file in new location
@@ -1130,6 +1241,24 @@ def api_delete_entry(entry_id: str):
             (entry_id,)
         )
         db.commit()
+
+        # Delete any linked pending agents
+        try:
+            from .rag.database import init_agents_db
+            agents_db = init_agents_db()
+            # Match entry_id in related_entry_id (may be comma-separated for multi-note chords)
+            agents_db.execute(
+                """
+                DELETE FROM agent_queue
+                WHERE status = 'pending'
+                AND (related_entry_id = ? OR related_entry_id LIKE ? OR related_entry_id LIKE ? OR related_entry_id LIKE ?)
+                """,
+                (entry_id, f"{entry_id},%", f"%,{entry_id},%", f"%,{entry_id}")
+            )
+            agents_db.commit()
+            logger.info(f"Cleaned up any pending agents linked to {entry_id}")
+        except Exception as e:
+            logger.warning(f"Could not clean up linked agents: {e}")
 
         logger.info(f"Deleted entry {entry_id}: {entry_dict['title']}")
 

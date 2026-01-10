@@ -97,6 +97,13 @@
         margin-bottom: 1.5rem;
     }
 
+    .category-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
     .category-header h1 {
         margin: 0 0 0.25rem 0;
         text-transform: capitalize;
@@ -107,6 +114,79 @@
         margin: 0;
     }
 
+    /* Create note modal */
+    .note-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 200;
+    }
+
+    .note-modal.visible {
+        display: flex;
+    }
+
+    .note-modal-content {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 1.5rem;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+    .note-modal-content h3 {
+        margin: 0 0 1rem 0;
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group textarea {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .form-group textarea {
+        resize: vertical;
+        min-height: 150px;
+        font-family: monospace;
+    }
+
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+
     .entry-list {
         display: flex;
         flex-direction: column;
@@ -115,8 +195,9 @@
 
     .entry-card {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
+        gap: 1rem;
         background: var(--card-bg);
         border: 1px solid var(--border-color);
         border-radius: 8px;
@@ -131,32 +212,19 @@
     .entry-info {
         flex: 1;
         min-width: 0;
-        overflow: hidden;
     }
 
     .entry-link {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
+        display: block;
         text-decoration: none;
         color: inherit;
-        overflow: hidden;
-        min-width: 0;
     }
 
     .entry-title {
         font-weight: 500;
         color: var(--text-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 100%;
-        display: block;
-    }
-
-    .entry-link {
-        overflow: hidden;
-        min-width: 0;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
 
     .entry-link:hover .entry-title {
@@ -164,9 +232,10 @@
     }
 
     .entry-date {
+        display: block;
         font-size: 0.75rem;
         color: var(--text-secondary);
-        flex-shrink: 0;
+        margin-top: 0.25rem;
     }
 
     .entry-actions {
@@ -242,8 +311,13 @@
 
     <main class="library-main">
         <header class="category-header">
-            <h1>{{ category }}</h1>
-            <p class="subtitle">{{ entries|length }} entries</p>
+            <div class="category-header-row">
+                <div>
+                    <h1>{{ category }}</h1>
+                    <p class="subtitle">{{ entries|length }} entries</p>
+                </div>
+                <button class="btn btn-primary" onclick="showCreateNoteModal()">+ New Note</button>
+            </div>
         </header>
 
         <div class="entry-list">
@@ -270,4 +344,95 @@
         </div>
     </main>
 </div>
+
+<!-- Create Note Modal -->
+<div class="note-modal" id="createNoteModal">
+    <div class="note-modal-content">
+        <h3>New Note in {{ category }}</h3>
+        <form id="createNoteForm" onsubmit="submitCreateNote(event)">
+            <div class="form-group">
+                <label for="noteTitle">Title</label>
+                <input type="text" id="noteTitle" required placeholder="Note title...">
+            </div>
+
+            <div class="form-group">
+                <label for="noteContent">Content</label>
+                <textarea id="noteContent" placeholder="Write your note in markdown..."></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeCreateNoteModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="createNoteBtn">Create Note</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const currentCategory = {{ category|tojson }};
+
+    function showCreateNoteModal() {
+        document.getElementById('createNoteModal').classList.add('visible');
+        document.getElementById('noteTitle').focus();
+    }
+
+    function closeCreateNoteModal() {
+        document.getElementById('createNoteModal').classList.remove('visible');
+        document.getElementById('createNoteForm').reset();
+    }
+
+    async function submitCreateNote(event) {
+        event.preventDefault();
+
+        const title = document.getElementById('noteTitle').value.trim();
+        const content = document.getElementById('noteContent').value;
+        const createBtn = document.getElementById('createNoteBtn');
+
+        if (!title) {
+            alert('Title is required');
+            return;
+        }
+
+        createBtn.disabled = true;
+        createBtn.textContent = 'Creating...';
+
+        try {
+            const response = await fetch('/library/api/create-note', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: title,
+                    category: currentCategory,
+                    content: content
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                // Redirect to the new note
+                window.location.href = `/library/entry/${data.entry_id}`;
+            } else {
+                alert(`Error: ${data.error}`);
+                createBtn.disabled = false;
+                createBtn.textContent = 'Create Note';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            createBtn.disabled = false;
+            createBtn.textContent = 'Create Note';
+        }
+    }
+
+    // Close modal on escape or clicking outside
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeCreateNoteModal();
+    });
+
+    document.getElementById('createNoteModal').addEventListener('click', (e) => {
+        if (e.target.id === 'createNoteModal') closeCreateNoteModal();
+    });
+</script>
 {% endblock %}

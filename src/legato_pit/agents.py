@@ -515,16 +515,20 @@ def api_reject_all():
         db.execute("DELETE FROM agent_queue WHERE status = 'pending'")
         db.commit()
 
-        # Reset chord_status on all linked notes
+        # Reset chord_status AND needs_chord on all linked notes to prevent re-queueing
         if all_entry_ids:
             legato_db = get_legato_db()
             for entry_id in all_entry_ids:
                 legato_db.execute(
-                    "UPDATE knowledge_entries SET chord_status = NULL WHERE entry_id = ?",
+                    """
+                    UPDATE knowledge_entries
+                    SET chord_status = NULL, needs_chord = 0
+                    WHERE entry_id = ?
+                    """,
                     (entry_id,)
                 )
             legato_db.commit()
-            logger.info(f"Reset chord_status for {len(all_entry_ids)} entries")
+            logger.info(f"Reset chord_status and needs_chord for {len(all_entry_ids)} entries")
 
         logger.info(f"Cleared {count} pending agents by {username}")
 
@@ -587,21 +591,67 @@ def api_reject_agent(queue_id: str):
         )
         db.commit()
 
-        # Reset chord_status on linked notes so they can be re-queued
+        # Reset chord_status AND needs_chord on linked notes to prevent re-queueing
         if related_entry_id:
+            import re
+            from .rag.github_service import get_file_content, commit_file
+
             legato_db = get_legato_db()
+            token = current_app.config.get('SYSTEM_PAT')
+            library_repo = 'bobbyhiddn/Legato.Library'
             entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
+
             for entry_id in entry_ids:
+                # Update local DB
                 legato_db.execute(
                     """
                     UPDATE knowledge_entries
-                    SET chord_status = NULL
+                    SET chord_status = NULL, needs_chord = 0
                     WHERE entry_id = ?
                     """,
                     (entry_id,)
                 )
+
+                # Update GitHub frontmatter to remove needs_chord
+                try:
+                    entry = legato_db.execute(
+                        "SELECT file_path FROM knowledge_entries WHERE entry_id = ?",
+                        (entry_id,)
+                    ).fetchone()
+
+                    if entry and entry['file_path'] and token:
+                        file_path = entry['file_path']
+                        content = get_file_content(library_repo, file_path, token)
+
+                        if content and content.startswith('---'):
+                            parts = content.split('---', 2)
+                            if len(parts) >= 3:
+                                frontmatter = parts[1]
+                                body = parts[2]
+
+                                # Remove chord-related fields from frontmatter
+                                new_frontmatter = re.sub(r'^needs_chord:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                                new_frontmatter = re.sub(r'^chord_name:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                new_frontmatter = re.sub(r'^chord_scope:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                new_frontmatter = re.sub(r'^chord_status:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+
+                                if new_frontmatter != frontmatter:
+                                    new_content = f'---{new_frontmatter}---{body}'
+                                    commit_file(
+                                        repo=library_repo,
+                                        path=file_path,
+                                        content=new_content,
+                                        message=f'Reset chord fields: agent rejected',
+                                        token=token
+                                    )
+                                    logger.info(f"Updated frontmatter for {entry_id}: removed chord fields")
+                except Exception as e:
+                    logger.warning(f"Could not update frontmatter for {entry_id}: {e}")
+
             legato_db.commit()
-            logger.info(f"Reset chord_status for {len(entry_ids)} entries after rejection")
+            logger.info(f"Reset chord_status and needs_chord for {len(entry_ids)} entries after rejection")
 
         logger.info(f"Rejected agent: {queue_id} by {username}")
 
@@ -905,15 +955,33 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
         entry_id = entry['entry_id']
         chord_name = entry['chord_name'] or entry_id.split('-')[-1][:20]
 
-        # Check if already queued (by related_entry_id)
+        # Check if already queued or processed (by related_entry_id, any status)
         existing = agents_db.execute(
-            "SELECT queue_id FROM agent_queue WHERE related_entry_id = ? AND status = 'pending'",
+            "SELECT queue_id, status FROM agent_queue WHERE related_entry_id = ?",
             (entry_id,)
         ).fetchone()
 
         if existing:
             stats['already_queued'] += 1
+            # If it was previously rejected but needs_chord is still 1, fix the entry
+            if existing['status'] == 'rejected':
+                legato_db.execute(
+                    "UPDATE knowledge_entries SET needs_chord = 0 WHERE entry_id = ?",
+                    (entry_id,)
+                )
+                legato_db.commit()
             continue
+
+        # Mark as pending BEFORE inserting to prevent race conditions
+        legato_db.execute(
+            """
+            UPDATE knowledge_entries
+            SET chord_status = 'pending', chord_id = ?
+            WHERE entry_id = ? AND (chord_status IS NULL OR chord_status = '')
+            """,
+            (f"lab.chord.{chord_name}", entry_id)
+        )
+        legato_db.commit()
 
         try:
             # Build tasker body from entry content
@@ -978,17 +1046,6 @@ Implement the project as described in the knowledge entry.
                 )
             )
             agents_db.commit()
-
-            # Update Library entry to mark as pending
-            legato_db.execute(
-                """
-                UPDATE knowledge_entries
-                SET chord_status = 'pending', chord_id = ?
-                WHERE entry_id = ?
-                """,
-                (f"lab.chord.{chord_name}", entry_id)
-            )
-            legato_db.commit()
 
             stats['queued'] += 1
             logger.info(f"Queued chord from Library: {queue_id} - {chord_name} (from {entry_id})")

@@ -246,30 +246,7 @@
                         <div class="category-selector">
                             <button class="category-badge" onclick="toggleCategoryDropdown(event)">{{ entry.category }}</button>
                             <div class="category-dropdown" id="categoryDropdown">
-                                <button class="category-option {% if entry.category == 'epiphany' %}current{% endif %}" onclick="changeCategory('epiphany')">
-                                    epiphany
-                                    <span class="category-desc">Major breakthrough or insight</span>
-                                </button>
-                                <button class="category-option {% if entry.category == 'concept' %}current{% endif %}" onclick="changeCategory('concept')">
-                                    concept
-                                    <span class="category-desc">Technical definition or explanation</span>
-                                </button>
-                                <button class="category-option {% if entry.category == 'reflection' %}current{% endif %}" onclick="changeCategory('reflection')">
-                                    reflection
-                                    <span class="category-desc">Personal thought or observation</span>
-                                </button>
-                                <button class="category-option {% if entry.category == 'glimmer' %}current{% endif %}" onclick="changeCategory('glimmer')">
-                                    glimmer
-                                    <span class="category-desc">Captured moment, photographing a feeling</span>
-                                </button>
-                                <button class="category-option {% if entry.category == 'reminder' %}current{% endif %}" onclick="changeCategory('reminder')">
-                                    reminder
-                                    <span class="category-desc">Action item or follow-up</span>
-                                </button>
-                                <button class="category-option {% if entry.category == 'worklog' %}current{% endif %}" onclick="changeCategory('worklog')">
-                                    worklog
-                                    <span class="category-desc">Summary of work done</span>
-                                </button>
+                                <div class="loading-categories">Loading...</div>
                             </div>
                         </div>
                         {% endif %}
@@ -370,6 +347,28 @@
     const editStatus = document.getElementById('editStatus');
 
     // Category selector
+    const currentCategory = {{ entry.category|tojson }};
+
+    async function loadCategories() {
+        try {
+            const response = await fetch('/categories/api/list');
+            const data = await response.json();
+
+            const dropdown = document.getElementById('categoryDropdown');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = data.categories.map(cat => `
+                <button class="category-option ${cat.name === currentCategory ? 'current' : ''}"
+                        onclick="changeCategory('${cat.name}')">
+                    ${cat.display_name}
+                    <span class="category-desc">${cat.description || ''}</span>
+                </button>
+            `).join('');
+        } catch (error) {
+            console.error('Failed to load categories:', error);
+        }
+    }
+
     function toggleCategoryDropdown(event) {
         event.stopPropagation();
         const dropdown = document.getElementById('categoryDropdown');
@@ -380,6 +379,9 @@
         const dropdown = document.getElementById('categoryDropdown');
         if (dropdown) dropdown.classList.remove('open');
     });
+
+    // Load categories on page init
+    document.addEventListener('DOMContentLoaded', loadCategories);
 
     async function changeCategory(newCategory) {
         const dropdown = document.getElementById('categoryDropdown');

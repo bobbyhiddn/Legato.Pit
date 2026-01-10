@@ -23,6 +23,7 @@
                 <a href="{{ url_for('agents.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('agents.') %}active{% endif %}">Agents</a>
                 <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
                 <a href="{{ url_for('dropbox.index') }}" class="nav-link {% if request.endpoint == 'dropbox.index' %}active{% endif %}">Dropbox</a>
+                <a href="{{ url_for('categories.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('categories.') %}active{% endif %}">Categories</a>
                 <div class="nav-user">
                     {% if user.avatar_url %}
                     <img src="{{ user.avatar_url }}" alt="{{ user.username }}" class="user-avatar">

@@ -100,6 +100,7 @@ def create_app():
     from .memory_api import memory_api_bp
     from .agents import agents_bp
     from .chords import chords_bp
+    from .categories import categories_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -109,6 +110,7 @@ def create_app():
     app.register_blueprint(memory_api_bp)
     app.register_blueprint(agents_bp)
     app.register_blueprint(chords_bp)
+    app.register_blueprint(categories_bp)
 
     # Initialize all databases on startup
     with app.app_context():
