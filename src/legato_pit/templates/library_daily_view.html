@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+
+{% block title %}{{ date }} - Library - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .library-layout {
+        display: flex;
+        gap: 1rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0 1rem;
+    }
+
+    .library-sidebar {
+        width: 180px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 70px;
+        height: fit-content;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .date-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .date-header-info h1 {
+        margin: 0 0 0.25rem 0;
+    }
+
+    .date-header-info .subtitle {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .date-nav {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .date-nav a {
+        padding: 0.5rem 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .date-nav a:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .date-nav .disabled {
+        opacity: 0.3;
+        pointer-events: none;
+    }
+
+    .entry-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .entry-card {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: border-color 0.2s;
+    }
+
+    .entry-card:hover {
+        border-color: var(--accent-color);
+    }
+
+    .entry-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .entry-link {
+        display: block;
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .entry-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+    .entry-link:hover .entry-title {
+        color: var(--accent-color);
+    }
+
+    .entry-meta {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .category-badge {
+        background: var(--accent-color);
+        color: white;
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        text-transform: capitalize;
+    }
+
+    .entry-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-left: 0.75rem;
+    }
+
+    .chord-badge {
+        font-size: 0.625rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        background: var(--success-color);
+        color: white;
+        text-transform: uppercase;
+    }
+
+    .chord-badge.pending {
+        background: var(--warning-color);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--text-secondary);
+    }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .sidebar-nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .date-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
+                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Quick Links</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Overview</span>
+                </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link active">
+                    <span>Daily View</span>
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <header class="date-header">
+            <div class="date-header-info">
+                <h1>{{ date }}</h1>
+                <p class="subtitle">{{ entries|length }} note{{ 's' if entries|length != 1 else '' }}</p>
+            </div>
+            <nav class="date-nav">
+                <a href="{{ url_for('library.daily_view', date=prev_date) if prev_date else '#' }}"
+                   class="{{ 'disabled' if not prev_date else '' }}">&larr; Previous</a>
+                <a href="{{ url_for('library.daily_index') }}">All Dates</a>
+                <a href="{{ url_for('library.daily_view', date=next_date) if next_date else '#' }}"
+                   class="{{ 'disabled' if not next_date else '' }}">Next &rarr;</a>
+            </nav>
+        </header>
+
+        <div class="entry-list">
+            {% for entry in entries %}
+            <div class="entry-card" data-entry-id="{{ entry.entry_id }}">
+                <div class="entry-info">
+                    <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
+                        <span class="entry-title">{{ entry.title }}</span>
+                        <div class="entry-meta">
+                            <span class="category-badge">{{ entry.category }}</span>
+                            <span>{{ entry.created_at[11:16] }}</span>
+                        </div>
+                    </a>
+                </div>
+                <div class="entry-actions">
+                    {% if entry.chord_status == 'active' %}
+                    <span class="chord-badge">Active</span>
+                    {% elif entry.chord_status == 'pending' %}
+                    <span class="chord-badge pending">Pending</span>
+                    {% endif %}
+                    <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
+                </div>
+            </div>
+            {% else %}
+            <p class="empty-state">No notes on this date</p>
+            {% endfor %}
+        </div>
+    </main>
+</div>
+{% endblock %}
