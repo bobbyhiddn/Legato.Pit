@@ -242,6 +242,9 @@
                 <a href="{{ url_for('library.index') }}" class="sidebar-link active">
                     <span>Overview</span>
                 </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
+                    <span>Daily View</span>
+                </a>
                 {% if total_projects > 0 %}
                 <a href="{{ url_for('library.list_projects') }}" class="sidebar-link">
                     <span>Projects</span>
@@ -249,6 +252,12 @@
                 </a>
                 {% endif %}
             </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <button class="btn btn-secondary btn-small" onclick="syncNow()" id="syncBtn">
+                Sync Now
+            </button>
         </div>
     </aside>
 
@@ -305,5 +314,34 @@
         }
     }
     loadStats();
+
+    async function syncNow() {
+        const btn = document.getElementById('syncBtn');
+        btn.disabled = true;
+        btn.textContent = 'Syncing...';
+
+        try {
+            const response = await fetch('/library/api/sync', { method: 'POST' });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                btn.textContent = `Synced! (${data.created + data.updated} updates)`;
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                btn.textContent = 'Sync Failed';
+                setTimeout(() => {
+                    btn.textContent = 'Sync Now';
+                    btn.disabled = false;
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('Sync failed:', error);
+            btn.textContent = 'Sync Failed';
+            setTimeout(() => {
+                btn.textContent = 'Sync Now';
+                btn.disabled = false;
+            }, 2000);
+        }
+    }
 </script>
 {% endblock %}

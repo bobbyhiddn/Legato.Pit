@@ -40,7 +40,7 @@
                     <p class="agent-desc">{{ agent.description }}</p>
                     {% endif %}
                     {% if agent.related_entry_id %}
-                    <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=agent.related_entry_id.split(',')[0]) }}" class="agent-note-link"><code>{{ agent.related_entry_id }}</code></a></span>
+                    <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=agent.related_entry_id.split(',')[0]) }}" class="agent-note-link">{{ agent.related_note_title or agent.related_entry_id }}</a></span>
                     {% elif agent.source_transcript %}
                     <span class="agent-source">Source: {{ agent.source_transcript }}</span>
                     {% endif %}

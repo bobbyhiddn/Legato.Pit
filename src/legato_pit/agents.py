@@ -72,6 +72,18 @@ def index():
     ).fetchall()
     pending_agents = [dict(row) for row in pending_rows]
 
+    # Look up note titles for related_entry_ids
+    legato_db = get_legato_db()
+    for agent in pending_agents:
+        if agent.get('related_entry_id'):
+            # Handle comma-separated entry IDs (take first one for display)
+            entry_id = agent['related_entry_id'].split(',')[0].strip()
+            note = legato_db.execute(
+                "SELECT title FROM knowledge_entries WHERE entry_id = ?",
+                (entry_id,)
+            ).fetchone()
+            agent['related_note_title'] = note['title'] if note else None
+
     # Get recent processed agents (last 20)
     recent_rows = db.execute(
         """
@@ -343,6 +355,28 @@ def api_list_pending():
     except Exception as e:
         logger.error(f"Failed to list pending agents: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@agents_bp.route('/api/pending-count', methods=['GET'])
+@login_required
+def api_pending_count():
+    """Get count of pending agents (lightweight for nav badge).
+
+    Response:
+    {
+        "count": 3
+    }
+    """
+    try:
+        db = get_db()
+        result = db.execute(
+            "SELECT COUNT(*) FROM agent_queue WHERE status = 'pending'"
+        ).fetchone()
+        count = result[0] if result else 0
+        return jsonify({'count': count})
+    except Exception as e:
+        logger.error(f"Failed to get pending count: {e}")
+        return jsonify({'count': 0})
 
 
 @agents_bp.route('/api/<queue_id>/approve', methods=['POST'])

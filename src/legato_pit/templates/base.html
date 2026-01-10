@@ -20,7 +20,7 @@
                 <a href="{{ url_for('dashboard.index') }}" class="nav-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}">Dashboard</a>
                 <a href="{{ url_for('library.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('library.') %}active{% endif %}">Library</a>
                 <a href="{{ url_for('chords.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chords.') %}active{% endif %}">Chords</a>
-                <a href="{{ url_for('agents.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('agents.') %}active{% endif %}">Agents</a>
+                <a href="{{ url_for('agents.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('agents.') %}active{% endif %}">Agents<span class="nav-badge" id="agentQueueBadge" style="display:none;"></span></a>
                 <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
                 <a href="{{ url_for('dropbox.index') }}" class="nav-link {% if request.endpoint == 'dropbox.index' %}active{% endif %}">Dropbox</a>
                 <a href="{{ url_for('categories.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('categories.') %}active{% endif %}">Categories</a>
@@ -90,6 +90,22 @@
 
     <!-- Chord Queue Styles -->
     <style>
+        /* Nav badge for notifications */
+        .nav-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            background: var(--warning-color);
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 600;
+            border-radius: 9px;
+            margin-left: 4px;
+            padding: 0 5px;
+        }
+
         .chord-queue-sidebar {
             position: fixed;
             right: -280px;
@@ -431,8 +447,28 @@
             if (e.key === 'Escape') closeChordModal();
         });
 
+        // Fetch and display pending agent count
+        async function updateAgentBadge() {
+            try {
+                const response = await fetch('/agents/api/pending-count');
+                const data = await response.json();
+                const badge = document.getElementById('agentQueueBadge');
+                if (badge && data.count > 0) {
+                    badge.textContent = data.count;
+                    badge.style.display = 'inline-flex';
+                } else if (badge) {
+                    badge.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Failed to fetch agent count:', error);
+            }
+        }
+
         // Initialize on page load
-        document.addEventListener('DOMContentLoaded', updateChordQueueUI);
+        document.addEventListener('DOMContentLoaded', () => {
+            updateChordQueueUI();
+            updateAgentBadge();
+        });
     </script>
 
     {% block scripts %}{% endblock %}
