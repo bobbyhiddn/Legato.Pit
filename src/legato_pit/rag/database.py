@@ -1,6 +1,8 @@
 """
 SQLite Database Setup for Legato.Pit
 
+Version: 2026-01-10-v2 (chord ontology update)
+
 Split database architecture:
 - legato.db: Knowledge entries, embeddings, sync tracking (RAG data)
 - agents.db: Agent queue for project spawns
