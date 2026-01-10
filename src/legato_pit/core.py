@@ -138,63 +138,83 @@ def create_app():
     # Background sync threads
     def start_background_sync():
         """Start background sync threads for library and agents."""
+        LIBRARY_SYNC_INTERVAL = 60  # seconds - sync library every minute
         AGENT_SYNC_INTERVAL = 60  # seconds
-        AGENT_SYNC_DURATION = 15 * 60  # 15 minutes (inactivity timeout)
+        SYNC_DURATION = 15 * 60  # 15 minutes (inactivity timeout)
 
         def library_sync_task():
-            """One-time library sync on startup."""
+            """Periodic library sync - runs every minute while user is active.
+
+            Syncs knowledge entries from Legato.Library GitHub repo to local DB.
+            Continues as long as there's been user activity within the last 15 minutes.
+            """
             time.sleep(5)  # Wait for app to fully initialize
-            try:
-                with app.app_context():
-                    from .rag.database import init_db
-                    from .rag.library_sync import LibrarySync
-                    from .rag.embedding_service import EmbeddingService
-                    from .rag.openai_provider import OpenAIEmbeddingProvider
 
-                    token = os.getenv('SYSTEM_PAT')
-                    if not token:
-                        logger.warning("SYSTEM_PAT not set, skipping library sync")
-                        return
+            while True:
+                # Check if there's been activity in the last 15 minutes
+                seconds_since_activity = time.time() - get_last_activity()
+                if seconds_since_activity > SYNC_DURATION:
+                    break
 
-                    db = init_db()
+                try:
+                    with app.app_context():
+                        from .rag.database import init_db
+                        from .rag.library_sync import LibrarySync
+                        from .rag.embedding_service import EmbeddingService
+                        from .rag.openai_provider import OpenAIEmbeddingProvider
 
-                    # Clean up invalid/duplicate entries first
-                    cleanup_count = 0
-                    invalid = db.execute(
-                        "SELECT id FROM knowledge_entries WHERE entry_id NOT LIKE 'kb-%' OR LENGTH(entry_id) != 11"
-                    ).fetchall()
-                    for row in invalid:
-                        db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
-                        db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
-                        cleanup_count += 1
-                    dups = db.execute("""
-                        SELECT id FROM knowledge_entries
-                        WHERE file_path IS NOT NULL AND id NOT IN (
-                            SELECT MAX(id) FROM knowledge_entries WHERE file_path IS NOT NULL GROUP BY file_path
-                        )
-                    """).fetchall()
-                    for row in dups:
-                        db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
-                        db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
-                        cleanup_count += 1
-                    if cleanup_count > 0:
-                        db.commit()
-                        logger.info(f"Cleaned up {cleanup_count} invalid/duplicate entries")
+                        token = os.getenv('SYSTEM_PAT')
+                        if not token:
+                            logger.warning("SYSTEM_PAT not set, skipping library sync")
+                            time.sleep(LIBRARY_SYNC_INTERVAL)
+                            continue
 
-                    embedding_service = None
-                    if os.getenv('OPENAI_API_KEY'):
-                        try:
-                            provider = OpenAIEmbeddingProvider()
-                            embedding_service = EmbeddingService(provider, db)
-                        except Exception as e:
-                            logger.warning(f"Could not create embedding service: {e}")
+                        db = init_db()
 
-                    sync = LibrarySync(db, embedding_service)
-                    stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
-                    logger.info(f"Library sync complete: {stats}")
+                        # Clean up invalid/duplicate entries first (only on first run)
+                        cleanup_count = 0
+                        invalid = db.execute(
+                            "SELECT id FROM knowledge_entries WHERE entry_id NOT LIKE 'kb-%' OR LENGTH(entry_id) != 11"
+                        ).fetchall()
+                        for row in invalid:
+                            db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
+                            db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
+                            cleanup_count += 1
+                        dups = db.execute("""
+                            SELECT id FROM knowledge_entries
+                            WHERE file_path IS NOT NULL AND id NOT IN (
+                                SELECT MAX(id) FROM knowledge_entries WHERE file_path IS NOT NULL GROUP BY file_path
+                            )
+                        """).fetchall()
+                        for row in dups:
+                            db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
+                            db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
+                            cleanup_count += 1
+                        if cleanup_count > 0:
+                            db.commit()
+                            logger.info(f"Cleaned up {cleanup_count} invalid/duplicate entries")
 
-            except Exception as e:
-                logger.error(f"Library sync failed: {e}")
+                        embedding_service = None
+                        if os.getenv('OPENAI_API_KEY'):
+                            try:
+                                provider = OpenAIEmbeddingProvider()
+                                embedding_service = EmbeddingService(provider, db)
+                            except Exception as e:
+                                logger.warning(f"Could not create embedding service: {e}")
+
+                        sync = LibrarySync(db, embedding_service)
+                        stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+
+                        # Only log if there were actual changes
+                        if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
+                            logger.info(f"Library sync: {stats}")
+
+                except Exception as e:
+                    logger.error(f"Library sync failed: {e}")
+
+                time.sleep(LIBRARY_SYNC_INTERVAL)
+
+            logger.info("Library sync loop ended (no activity for 15 min)")
 
         def agent_sync_task():
             """Periodic chord sync - runs every minute while user is active.
@@ -210,7 +230,7 @@ def create_app():
             while True:
                 # Check if there's been activity in the last 15 minutes
                 seconds_since_activity = time.time() - get_last_activity()
-                if seconds_since_activity > AGENT_SYNC_DURATION:
+                if seconds_since_activity > SYNC_DURATION:
                     break
                 try:
                     with app.app_context():
@@ -235,7 +255,7 @@ def create_app():
         # Start both threads
         threading.Thread(target=library_sync_task, daemon=True).start()
         threading.Thread(target=agent_sync_task, daemon=True).start()
-        logger.info("Started background sync threads (library once, chord detection every 60s while active)")
+        logger.info("Started background sync threads (library and chord detection every 60s while active)")
 
     start_background_sync()
 
