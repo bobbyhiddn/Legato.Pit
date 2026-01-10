@@ -520,7 +520,8 @@
         const createBtn = document.getElementById('createNoteBtn');
 
         if (!title) {
-            alert('Title is required');
+            showWarning('Title is required');
+            document.getElementById('noteTitle').focus();
             return;
         }
 
@@ -541,15 +542,15 @@
             const data = await response.json();
 
             if (response.ok && data.status === 'success') {
-                // Redirect to the new note
+                showSuccess('Note created');
                 window.location.href = `/library/entry/${data.entry_id}`;
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to create note');
                 createBtn.disabled = false;
                 createBtn.textContent = 'Create Note';
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             createBtn.disabled = false;
             createBtn.textContent = 'Create Note';
         }
@@ -591,14 +592,14 @@
                     }, 300);
                 }
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to move note');
                 // Reset dropdown to current category
                 const card = document.querySelector(`[data-entry-id="${entryId}"]`);
                 const select = card.querySelector('.category-select');
                 select.value = currentCategory;
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
         }
     }
 
@@ -623,12 +624,12 @@
                     badge.textContent = 'Queued';
                     actions.insertBefore(badge, actions.firstChild);
                 }
-                alert(`Added "${title}" to chord queue`);
+                showSuccess(`Added "${title}" to chord queue`);
             } else {
-                alert(`Error: ${data.error || 'Failed to queue'}`);
+                showError(data.error || 'Failed to queue');
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
         }
     }
 
@@ -651,6 +652,7 @@
             const data = await response.json();
 
             if (response.ok && data.status === 'success') {
+                showSuccess('Note deleted');
                 card.style.opacity = '0';
                 card.style.transition = 'opacity 0.3s';
                 setTimeout(() => {
@@ -667,12 +669,12 @@
                     }
                 }, 300);
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to delete');
                 deleteBtn.disabled = false;
                 deleteBtn.textContent = '✕';
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             deleteBtn.disabled = false;
             deleteBtn.textContent = '✕';
         }

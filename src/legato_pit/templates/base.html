@@ -74,6 +74,157 @@
         <p>{{ app_name }} &middot; {{ now.year }}</p>
     </footer>
 
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Toast Styles -->
+    <style>
+        .toast-container {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            min-width: 280px;
+            max-width: 400px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            pointer-events: auto;
+            animation: toastSlideIn 0.3s ease;
+        }
+
+        .toast.toast-exit {
+            animation: toastSlideOut 0.3s ease forwards;
+        }
+
+        @keyframes toastSlideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes toastSlideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
+        .toast-icon {
+            font-size: 1.25rem;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .toast-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            margin-bottom: 0.125rem;
+        }
+
+        .toast-message {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0;
+            font-size: 1.25rem;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        .toast-close:hover {
+            color: var(--text-primary);
+        }
+
+        .toast.toast-success {
+            border-left: 4px solid var(--success-color);
+        }
+        .toast.toast-success .toast-icon { color: var(--success-color); }
+
+        .toast.toast-error {
+            border-left: 4px solid var(--danger-color, #dc3545);
+        }
+        .toast.toast-error .toast-icon { color: var(--danger-color, #dc3545); }
+
+        .toast.toast-warning {
+            border-left: 4px solid var(--warning-color);
+        }
+        .toast.toast-warning .toast-icon { color: var(--warning-color); }
+
+        .toast.toast-info {
+            border-left: 4px solid var(--accent-color);
+        }
+        .toast.toast-info .toast-icon { color: var(--accent-color); }
+    </style>
+
+    <!-- Toast JavaScript -->
+    <script>
+        const TOAST_ICONS = {
+            success: '✓',
+            error: '✕',
+            warning: '⚠',
+            info: 'ℹ'
+        };
+
+        function showToast(message, type = 'info', duration = 4000) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+
+            const icon = TOAST_ICONS[type] || TOAST_ICONS.info;
+
+            toast.innerHTML = `
+                <span class="toast-icon">${icon}</span>
+                <div class="toast-content">
+                    <div class="toast-message">${escapeHtml(message)}</div>
+                </div>
+                <button class="toast-close" onclick="dismissToast(this)">&times;</button>
+            `;
+
+            container.appendChild(toast);
+
+            if (duration > 0) {
+                setTimeout(() => dismissToast(toast.querySelector('.toast-close')), duration);
+            }
+
+            return toast;
+        }
+
+        function dismissToast(closeBtn) {
+            const toast = closeBtn.closest('.toast');
+            if (toast && !toast.classList.contains('toast-exit')) {
+                toast.classList.add('toast-exit');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }
+
+        // Convenience functions
+        function showSuccess(message) { return showToast(message, 'success'); }
+        function showError(message) { return showToast(message, 'error', 6000); }
+        function showWarning(message) { return showToast(message, 'warning', 5000); }
+        function showInfo(message) { return showToast(message, 'info'); }
+    </script>
+
     <!-- Chord Queue Modal -->
     <div class="chord-modal-overlay" id="chordModal">
         <div class="chord-modal">
@@ -328,12 +479,21 @@
         }
 
         function clearChordQueue() {
-            saveChordQueue([]);
+            localStorage.removeItem(CHORD_QUEUE_KEY);
+            const sidebar = document.getElementById('chordQueueSidebar');
+            const toggle = document.getElementById('chordQueueToggle');
+            if (sidebar) sidebar.classList.remove('open');
+            if (toggle) toggle.style.display = 'none';
             document.querySelectorAll('.btn-add-chord.added').forEach(btn => {
                 btn.classList.remove('added');
                 btn.textContent = '+ Chord';
             });
+            updateChordQueueUI();
+            showSuccess('Chord queue cleared');
         }
+
+        // Expose clear function globally for debugging
+        window.clearChordQueue = clearChordQueue;
 
         function updateChordQueueUI() {
             const queue = getChordQueue();
@@ -406,7 +566,8 @@
         async function submitChord() {
             const projectName = document.getElementById('chordProjectName').value.trim();
             if (!projectName) {
-                alert('Please enter a project name');
+                showWarning('Please enter a project name');
+                document.getElementById('chordProjectName').focus();
                 return;
             }
 
@@ -430,12 +591,13 @@
                 if (response.ok) {
                     closeChordModal();
                     clearChordQueue();
+                    showSuccess('Chord created successfully');
                     window.location.href = '/agents/';
                 } else {
-                    alert(`Error: ${data.error}`);
+                    showError(data.error || 'Failed to create chord');
                 }
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                showError(error.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Create';

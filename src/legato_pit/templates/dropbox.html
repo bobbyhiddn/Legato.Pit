@@ -99,7 +99,7 @@ document.querySelector('.upload-form').addEventListener('submit', function(e) {
 
     if (!text && !file) {
         e.preventDefault();
-        alert('Please enter text or select a file to upload.');
+        showWarning('Please enter text or select a file to upload.');
     }
 });
 </script>

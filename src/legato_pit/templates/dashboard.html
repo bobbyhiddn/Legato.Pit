@@ -140,17 +140,18 @@ async function approveAgent(queueId) {
         const data = await response.json();
 
         if (data.status === 'approved') {
+            showSuccess('Agent approved - spawning repository...');
             const item = document.querySelector(`[data-queue-id="${queueId}"]`);
             item.classList.add('agent-approved');
             item.innerHTML = '<div class="agent-info"><span class="agent-title">Approved - spawning repository...</span></div>';
             setTimeout(() => window.location.reload(), 2000);
         } else {
-            alert(`Error: ${data.error}`);
+            showError(data.error || 'Failed to approve');
             btn.disabled = false;
             btn.textContent = 'Approve';
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        showError(error.message);
         btn.disabled = false;
         btn.textContent = 'Approve';
     }
@@ -174,6 +175,7 @@ async function rejectAgent(queueId) {
         const data = await response.json();
 
         if (data.status === 'rejected') {
+            showSuccess('Agent rejected');
             const item = document.querySelector(`[data-queue-id="${queueId}"]`);
             item.remove();
             // If no more agents, remove the section
@@ -182,12 +184,12 @@ async function rejectAgent(queueId) {
                 agentList.closest('.card').remove();
             }
         } else {
-            alert(`Error: ${data.error}`);
+            showError(data.error || 'Failed to reject');
             btn.disabled = false;
             btn.textContent = 'Reject';
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        showError(error.message);
         btn.disabled = false;
         btn.textContent = 'Reject';
     }

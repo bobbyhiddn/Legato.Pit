@@ -141,16 +141,17 @@ async function approveAgent(queueId) {
         const data = await response.json();
 
         if (data.status === 'approved') {
+            showSuccess('Agent approved - spawning repository...');
             item.classList.add('agent-approved');
             item.querySelector('.agent-actions').innerHTML = '<span class="badge badge-approved">Approved - spawning...</span>';
             setTimeout(() => window.location.reload(), 2000);
         } else {
-            alert(`Error: ${data.error}`);
+            showError(data.error || 'Failed to approve');
             btn.disabled = false;
             btn.textContent = 'Approve';
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        showError(error.message);
         btn.disabled = false;
         btn.textContent = 'Approve';
     }
@@ -171,12 +172,13 @@ async function rejectAll() {
         const data = await response.json();
 
         if (data.status === 'cleared') {
+            showSuccess('All agents rejected');
             window.location.reload();
         } else {
-            alert(`Error: ${data.error}`);
+            showError(data.error || 'Failed to reject all');
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        showError(error.message);
     }
 }
 
@@ -199,6 +201,7 @@ async function rejectAgent(queueId) {
         const data = await response.json();
 
         if (data.status === 'rejected') {
+            showSuccess('Agent rejected');
             item.remove();
             // Check if list is empty
             const list = document.querySelector('.agent-list');
@@ -206,12 +209,12 @@ async function rejectAgent(queueId) {
                 window.location.reload();
             }
         } else {
-            alert(`Error: ${data.error}`);
+            showError(data.error || 'Failed to reject');
             btn.disabled = false;
             btn.textContent = 'Reject';
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        showError(error.message);
         btn.disabled = false;
         btn.textContent = 'Reject';
     }

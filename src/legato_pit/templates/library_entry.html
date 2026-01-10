@@ -477,7 +477,7 @@
                         <span>Edit</span>
                     </button>
                     {% endif %}
-                    <button type="button" class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                    <button type="button" class="action-btn btn-chord" onclick="addEntryToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                         <span>Chord</span>
                     </button>
@@ -613,11 +613,11 @@
             if (data.status === 'success') {
                 window.location.reload();
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to change category');
                 badge.textContent = originalText;
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             badge.textContent = originalText;
         }
     }
@@ -679,42 +679,24 @@
         editStatus.style.display = 'block';
     }
 
-    // Add to chord queue functionality
-    async function addToChordQueue(entryId, title) {
-        const btn = event.target.closest('.action-btn');
-        const originalText = btn.querySelector('span').textContent;
-        btn.querySelector('span').textContent = 'Adding...';
-        btn.disabled = true;
-
-        try {
-            const response = await fetch('/agents/api/queue', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    entry_id: entryId,
-                    title: title
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                btn.querySelector('span').textContent = 'Queued!';
+    // Add to chord queue - uses global function from base.html
+    function addEntryToChordQueue(entryId, title) {
+        // Call the global addToChordQueue from base.html
+        if (typeof addToChordQueue === 'function') {
+            addToChordQueue(entryId, title);
+            // Update button state
+            const btn = event.target.closest('.action-btn');
+            if (btn) {
+                btn.querySelector('span').textContent = 'Added!';
                 btn.classList.add('btn-success');
                 setTimeout(() => {
-                    btn.querySelector('span').textContent = originalText;
+                    btn.querySelector('span').textContent = 'Chord';
                     btn.classList.remove('btn-success');
-                    btn.disabled = false;
-                }, 2000);
-            } else {
-                alert(`Error: ${data.error}`);
-                btn.querySelector('span').textContent = originalText;
-                btn.disabled = false;
+                }, 1500);
             }
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-            btn.querySelector('span').textContent = originalText;
-            btn.disabled = false;
+            showSuccess(`Added "${title}" to chord queue`);
+        } else {
+            showError('Chord queue not available');
         }
     }
 
@@ -764,16 +746,16 @@
             const data = await response.json();
 
             if (data.status === 'success') {
-                // Redirect to library
+                showSuccess('Note deleted');
                 window.location.href = '/library/';
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to delete');
                 cancelDelete();
                 confirmBtn.disabled = false;
                 confirmBtn.querySelector('span').textContent = 'Click again to confirm delete';
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             cancelDelete();
             confirmBtn.disabled = false;
             confirmBtn.querySelector('span').textContent = 'Click again to confirm delete';

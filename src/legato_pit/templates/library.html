@@ -536,17 +536,17 @@
             const data = await response.json();
 
             if (response.ok && data.status === 'success') {
-                // Reload to show updated data
+                showSuccess('Category updated');
                 location.reload();
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to update category');
                 select.value = originalValue;
                 // Revert color
                 const oldOption = Array.from(select.options).find(o => o.value === originalValue);
                 pill.style.setProperty('--category-color', oldOption?.dataset.color || '#6366f1');
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             select.value = originalValue;
             const oldOption = Array.from(select.options).find(o => o.value === originalValue);
             pill.style.setProperty('--category-color', oldOption?.dataset.color || '#6366f1');
@@ -570,6 +570,7 @@
             const data = await response.json();
 
             if (response.ok) {
+                showSuccess('Added to chord queue');
                 btn.style.background = 'var(--success-color)';
                 btn.style.color = 'white';
                 setTimeout(() => {
@@ -578,11 +579,11 @@
                     btn.disabled = false;
                 }, 2000);
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to add to queue');
                 btn.disabled = false;
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             btn.disabled = false;
         }
     }
@@ -605,15 +606,16 @@
             const data = await response.json();
 
             if (response.ok && data.status === 'success') {
+                showSuccess('Note deleted');
                 card.style.opacity = '0';
                 card.style.transition = 'opacity 0.3s';
                 setTimeout(() => card.remove(), 300);
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to delete');
                 btn.disabled = false;
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             btn.disabled = false;
         }
     }
@@ -633,15 +635,15 @@
             const data = await response.json();
 
             if (response.ok && data.success) {
-                // Reload to show restored category
+                showSuccess('Category restored');
                 location.reload();
             } else {
-                alert(`Error: ${data.error}`);
+                showError(data.error || 'Failed to adopt category');
                 btn.disabled = false;
                 btn.textContent = 'Adopt';
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showError(error.message);
             btn.disabled = false;
             btn.textContent = 'Adopt';
         }
