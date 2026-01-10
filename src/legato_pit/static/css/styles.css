@@ -137,7 +137,7 @@ body {
     max-width: 800px;
     margin: 0 auto;
     padding: 1rem;
-    padding-bottom: 4rem;
+    padding-bottom: 5rem; /* Space for fixed footer */
 }
 
 /* Flash Messages */
@@ -686,6 +686,7 @@ footer p {
 @media (min-width: 640px) {
     .content {
         padding: 1.5rem;
+        padding-bottom: 5rem; /* Space for fixed footer */
     }
 
     .page-header h1 {

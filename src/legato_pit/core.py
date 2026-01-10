@@ -179,7 +179,10 @@ def create_app():
                 logger.error(f"Library sync failed: {e}")
 
         def agent_sync_task():
-            """Periodic agent sync - runs every minute while user is active.
+            """Periodic chord sync - runs every minute while user is active.
+
+            Checks Library entries for needs_chord=true and chord_status=null,
+            and queues them as agents for user approval.
 
             Continues as long as there's been user activity within the last 15 minutes.
             Any request (page load, button click, API call) resets the activity timer.
@@ -193,47 +196,28 @@ def create_app():
                     break
                 try:
                     with app.app_context():
-                        from .rag.database import init_agents_db
-                        from .agents import (
-                            fetch_conduct_workflow_runs,
-                            fetch_routing_artifact,
-                            import_projects_from_routing,
-                        )
+                        from .rag.database import init_db, init_agents_db
+                        from .agents import import_chords_from_library
 
-                        token = os.getenv('SYSTEM_PAT')
-                        if not token:
-                            logger.warning("SYSTEM_PAT not set, skipping agent sync")
-                            break
-
+                        legato_db = init_db()
                         agents_db = init_agents_db()
-                        org = os.getenv('LEGATO_ORG', 'bobbyhiddn')
-                        conduct_repo = os.getenv('CONDUCT_REPO', 'Legato.Conduct')
 
-                        runs = fetch_conduct_workflow_runs(token, org, conduct_repo, limit=10)
-                        total_imported = 0
+                        stats = import_chords_from_library(legato_db, agents_db)
 
-                        for run in runs:
-                            if run.get('conclusion') != 'success':
-                                continue
-                            routing = fetch_routing_artifact(token, org, conduct_repo, run['id'])
-                            if routing:
-                                stats = import_projects_from_routing(routing, run['id'], agents_db)
-                                total_imported += stats['imported']
-
-                        if total_imported > 0:
-                            logger.info(f"Agent sync: imported {total_imported} projects")
+                        if stats['queued'] > 0:
+                            logger.info(f"Chord sync: queued {stats['queued']} from Library")
 
                 except Exception as e:
-                    logger.error(f"Agent sync failed: {e}")
+                    logger.error(f"Chord sync failed: {e}")
 
                 time.sleep(AGENT_SYNC_INTERVAL)
 
-            logger.info("Agent sync loop ended (no activity for 15 min)")
+            logger.info("Chord sync loop ended (no activity for 15 min)")
 
         # Start both threads
         threading.Thread(target=library_sync_task, daemon=True).start()
         threading.Thread(target=agent_sync_task, daemon=True).start()
-        logger.info("Started background sync threads (library once, agents every 60s while active)")
+        logger.info("Started background sync threads (library once, chord detection every 60s while active)")
 
     start_background_sync()
 

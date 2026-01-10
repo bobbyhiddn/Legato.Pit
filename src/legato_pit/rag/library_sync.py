@@ -39,7 +39,15 @@ def parse_markdown_frontmatter(content: str) -> Tuple[Dict, str]:
                 for line in parts[1].strip().split('\n'):
                     if ':' in line:
                         key, value = line.split(':', 1)
-                        frontmatter[key.strip()] = value.strip().strip('"\'')
+                        value = value.strip().strip('"\'')
+                        # Parse boolean values
+                        if value.lower() == 'true':
+                            value = True
+                        elif value.lower() == 'false':
+                            value = False
+                        elif value.lower() == 'null':
+                            value = None
+                        frontmatter[key.strip()] = value
                 body = parts[2].strip()
             except Exception as e:
                 logger.warning(f"Failed to parse frontmatter: {e}")
@@ -235,6 +243,14 @@ class LibrarySync:
         # Always generate entry_id from hash to ensure URL-safe format
         entry_id = generate_entry_id(category, title)
 
+        # Extract chord fields
+        needs_chord = 1 if frontmatter.get('needs_chord') else 0
+        chord_name = frontmatter.get('chord_name')
+        chord_scope = frontmatter.get('chord_scope')
+        chord_id = frontmatter.get('chord_id')
+        chord_status = frontmatter.get('chord_status')
+        chord_repo = frontmatter.get('chord_repo')
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -246,10 +262,15 @@ class LibrarySync:
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
-                SET entry_id = ?, title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                SET entry_id = ?, title = ?, category = ?, content = ?,
+                    needs_chord = ?, chord_name = ?, chord_scope = ?,
+                    chord_id = ?, chord_status = ?, chord_repo = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
-                (entry_id, title, category, body, path)
+                (entry_id, title, category, body,
+                 needs_chord, chord_name, chord_scope,
+                 chord_id, chord_status, chord_repo, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -258,13 +279,16 @@ class LibrarySync:
             # Create new entry
             self.conn.execute(
                 """
-                INSERT INTO knowledge_entries (entry_id, title, category, content, file_path)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (entry_id, title, category, body, path)
+                (entry_id, title, category, body, path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}")
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
             return 'created'
 
     def sync_from_filesystem(self, library_path: str) -> Dict:
@@ -335,6 +359,14 @@ class LibrarySync:
         # Always generate entry_id from hash to ensure URL-safe format
         entry_id = generate_entry_id(category, title)
 
+        # Extract chord fields
+        needs_chord = 1 if frontmatter.get('needs_chord') else 0
+        chord_name = frontmatter.get('chord_name')
+        chord_scope = frontmatter.get('chord_scope')
+        chord_id = frontmatter.get('chord_id')
+        chord_status = frontmatter.get('chord_status')
+        chord_repo = frontmatter.get('chord_repo')
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -345,10 +377,15 @@ class LibrarySync:
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
-                SET entry_id = ?, title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                SET entry_id = ?, title = ?, category = ?, content = ?,
+                    needs_chord = ?, chord_name = ?, chord_scope = ?,
+                    chord_id = ?, chord_status = ?, chord_repo = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
-                (entry_id, title, category, body, relative_path)
+                (entry_id, title, category, body,
+                 needs_chord, chord_name, chord_scope,
+                 chord_id, chord_status, chord_repo, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -356,13 +393,16 @@ class LibrarySync:
         else:
             self.conn.execute(
                 """
-                INSERT INTO knowledge_entries (entry_id, title, category, content, file_path)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (entry_id, title, category, body, relative_path)
+                (entry_id, title, category, body, relative_path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}")
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
             return 'created'
 
     def _log_sync(self, source: str, branch: str, stats: Dict):

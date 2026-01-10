@@ -64,7 +64,7 @@ def index():
     pending_rows = db.execute(
         """
         SELECT queue_id, project_name, project_type, title, description,
-               source_transcript, created_at
+               source_transcript, related_entry_id, created_at
         FROM agent_queue
         WHERE status = 'pending'
         ORDER BY created_at DESC
@@ -351,6 +351,7 @@ def api_approve_agent(queue_id: str):
     """Approve an agent and trigger spawn.
 
     This triggers the Conduct spawn-project workflow via repository_dispatch.
+    Also updates the linked Library entry's chord_status to 'active'.
 
     Response:
     {
@@ -360,10 +361,10 @@ def api_approve_agent(queue_id: str):
     }
     """
     try:
-        db = get_db()
+        agents_db = get_db()
 
         # Get the queued agent
-        row = db.execute(
+        row = agents_db.execute(
             "SELECT * FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
             (queue_id,)
         ).fetchone()
@@ -374,12 +375,13 @@ def api_approve_agent(queue_id: str):
         agent = dict(row)
         user = session.get('user', {})
         username = user.get('login', 'unknown')
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
         # Trigger Conduct spawn workflow
         dispatch_result = trigger_spawn_workflow(agent)
 
-        # Update status
-        db.execute(
+        # Update agent queue status
+        agents_db.execute(
             """
             UPDATE agent_queue
             SET status = 'approved',
@@ -391,7 +393,29 @@ def api_approve_agent(queue_id: str):
             """,
             (username, json.dumps(dispatch_result), queue_id)
         )
-        db.commit()
+        agents_db.commit()
+
+        # Update linked Library entry's chord_status and chord_repo
+        related_entry_id = agent.get('related_entry_id')
+        if related_entry_id:
+            try:
+                legato_db = get_legato_db()
+                chord_repo = f"{org}/{agent['project_name']}"
+                legato_db.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET chord_status = 'active',
+                        chord_repo = ?,
+                        needs_chord = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE entry_id = ?
+                    """,
+                    (chord_repo, related_entry_id)
+                )
+                legato_db.commit()
+                logger.info(f"Updated Library entry {related_entry_id}: chord_status=active, chord_repo={chord_repo}")
+            except Exception as e:
+                logger.warning(f"Failed to update Library entry {related_entry_id}: {e}")
 
         logger.info(f"Approved agent: {queue_id} by {username}")
 
@@ -628,6 +652,9 @@ def import_projects_from_routing(routing: list, run_id: int, db) -> dict:
     Only imports items with project_scope='chord'. Notes go to the Library,
     not the agent queue. Chords are queued for user approval before spawning.
 
+    Uses sync_history table to track processed items - this persists even when
+    the agent queue is cleared, preventing duplicate imports.
+
     Args:
         routing: Parsed routing.json list
         run_id: Workflow run ID (for source tracking)
@@ -642,27 +669,34 @@ def import_projects_from_routing(routing: list, run_id: int, db) -> dict:
         if item.get('type') != 'PROJECT':
             continue
 
+        item_id = item.get('id', 'unknown')
+
+        # Check sync_history first - this persists even when queue is cleared
+        already_processed = db.execute(
+            "SELECT id FROM sync_history WHERE run_id = ? AND item_id = ?",
+            (run_id, item_id)
+        ).fetchone()
+
+        if already_processed:
+            stats['skipped'] += 1
+            continue
+
         # Only queue chords - notes go to Library, not agent queue
         # A note can be escalated to a chord later via the from-entry API
         project_scope = item.get('project_scope', '').lower()
         if project_scope != 'chord':
+            # Record in sync_history so we don't check this item again
+            db.execute(
+                "INSERT OR IGNORE INTO sync_history (run_id, item_id) VALUES (?, ?)",
+                (run_id, item_id)
+            )
             stats['skipped_notes'] += 1
             continue
 
         stats['found'] += 1
 
         project_name = item.get('project_name', 'unnamed')
-        source_id = f"conduct-run:{run_id}:{item.get('id', 'unknown')}"
-
-        # Check if already imported
-        existing = db.execute(
-            "SELECT queue_id FROM agent_queue WHERE source_transcript = ?",
-            (source_id,)
-        ).fetchone()
-
-        if existing:
-            stats['skipped'] += 1
-            continue
+        source_id = f"conduct-run:{run_id}:{item_id}"
 
         try:
             # Build tasker body
@@ -705,13 +739,14 @@ From voice transcript:
             }
 
             queue_id = generate_queue_id()
+            related_knowledge_id = item.get('related_knowledge_id')
 
             db.execute(
                 """
                 INSERT INTO agent_queue
                 (queue_id, project_name, project_type, title, description,
-                 signal_json, tasker_body, source_transcript, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 signal_json, tasker_body, source_transcript, related_entry_id, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     queue_id,
@@ -722,8 +757,16 @@ From voice transcript:
                     json.dumps(signal_json),
                     tasker_body,
                     source_id,
+                    related_knowledge_id,
                 )
             )
+
+            # Record in sync_history so we don't re-import if queue is cleared
+            db.execute(
+                "INSERT OR IGNORE INTO sync_history (run_id, item_id) VALUES (?, ?)",
+                (run_id, item_id)
+            )
+
             stats['imported'] += 1
             logger.info(f"Imported project from Conduct: {queue_id} - {project_name}")
 
@@ -735,72 +778,167 @@ From voice transcript:
     return stats
 
 
+def import_chords_from_library(legato_db, agents_db) -> dict:
+    """Import chord escalations from Library entries into agent_queue.
+
+    Finds Library entries with needs_chord=1 and chord_status IS NULL,
+    and queues them for user approval. After queueing, updates the
+    Library entry's chord_status to 'pending'.
+
+    Args:
+        legato_db: Legato database connection (knowledge entries)
+        agents_db: Agents database connection (agent queue)
+
+    Returns:
+        Dict with import stats
+    """
+    stats = {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0}
+
+    # Find entries that need chord escalation
+    entries = legato_db.execute(
+        """
+        SELECT entry_id, title, category, content, chord_name, chord_scope, file_path
+        FROM knowledge_entries
+        WHERE needs_chord = 1 AND (chord_status IS NULL OR chord_status = '')
+        """
+    ).fetchall()
+
+    stats['found'] = len(entries)
+
+    for entry in entries:
+        entry = dict(entry)
+        entry_id = entry['entry_id']
+        chord_name = entry['chord_name'] or entry_id.split('-')[-1][:20]
+
+        # Check if already queued (by related_entry_id)
+        existing = agents_db.execute(
+            "SELECT queue_id FROM agent_queue WHERE related_entry_id = ? AND status = 'pending'",
+            (entry_id,)
+        ).fetchone()
+
+        if existing:
+            stats['already_queued'] += 1
+            continue
+
+        try:
+            # Build tasker body from entry content
+            content_preview = entry['content'][:500] if entry['content'] else ''
+            tasker_body = f"""## Tasker: {entry['title']}
+
+### Context
+From Library entry `{entry_id}`:
+"{content_preview}"
+
+### Objective
+Implement the project as described in the knowledge entry.
+
+### Acceptance Criteria
+- [ ] Core functionality implemented
+- [ ] Documentation updated
+- [ ] Tests written
+
+### Constraints
+- Follow patterns in `copilot-instructions.md`
+- Reference `SIGNAL.md` for project intent
+- Keep PRs focused and reviewable
+
+### References
+- Source entry: `{entry_id}`
+- Category: {entry.get('category', 'general')}
+
+---
+*Generated from Library entry | needs_chord escalation*
+"""
+
+            signal_json = {
+                "id": f"lab.chord.{chord_name}",
+                "type": "project",
+                "source": "library-escalation",
+                "category": entry.get('chord_scope', 'chord'),
+                "title": entry['title'],
+                "domain_tags": [],
+                "intent": content_preview[:200],
+                "key_phrases": [],
+            }
+
+            queue_id = generate_queue_id()
+
+            agents_db.execute(
+                """
+                INSERT INTO agent_queue
+                (queue_id, project_name, project_type, title, description,
+                 signal_json, tasker_body, source_transcript, related_entry_id, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    queue_id,
+                    chord_name,
+                    entry.get('chord_scope', 'chord'),
+                    entry['title'],
+                    content_preview[:500],
+                    json.dumps(signal_json),
+                    tasker_body,
+                    f"library:{entry_id}",
+                    entry_id,
+                )
+            )
+            agents_db.commit()
+
+            # Update Library entry to mark as pending
+            legato_db.execute(
+                """
+                UPDATE knowledge_entries
+                SET chord_status = 'pending', chord_id = ?
+                WHERE entry_id = ?
+                """,
+                (f"lab.chord.{chord_name}", entry_id)
+            )
+            legato_db.commit()
+
+            stats['queued'] += 1
+            logger.info(f"Queued chord from Library: {queue_id} - {chord_name} (from {entry_id})")
+
+        except Exception as e:
+            logger.error(f"Failed to queue chord for {entry_id}: {e}")
+            stats['errors'] += 1
+
+    return stats
+
+
 @agents_bp.route('/api/sync', methods=['POST'])
 @login_required
-def api_sync_from_conduct():
-    """Sync pending projects from Conduct workflow artifacts.
+def api_sync_from_library():
+    """Sync pending chord escalations from Library.
 
-    Fetches recent process-transcript workflow runs, downloads routing-decisions
-    artifacts, and imports PROJECT items into the agent queue.
+    Checks Library entries for needs_chord=true and chord_status=null,
+    and queues them for user approval.
 
     Response:
     {
         "status": "synced",
-        "runs_checked": 5,
-        "projects_found": 2,
-        "projects_imported": 1,
-        "projects_skipped": 1
+        "chords_found": 2,
+        "chords_queued": 1,
+        "already_queued": 1
     }
     """
-    token = current_app.config.get('SYSTEM_PAT')
-    if not token:
-        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
-
-    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
-    conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
-
     try:
-        db = get_db()
+        legato_db = get_legato_db()
+        agents_db = get_db()
 
-        # Fetch recent workflow runs
-        runs = fetch_conduct_workflow_runs(token, org, conduct_repo, limit=10)
+        stats = import_chords_from_library(legato_db, agents_db)
 
-        total_stats = {
-            'runs_checked': 0,
-            'projects_found': 0,
-            'projects_imported': 0,
-            'projects_skipped': 0,
-            'errors': 0,
-        }
-
-        for run in runs:
-            if run.get('conclusion') != 'success':
-                continue
-
-            total_stats['runs_checked'] += 1
-            run_id = run['id']
-
-            # Fetch and parse routing artifact
-            routing = fetch_routing_artifact(token, org, conduct_repo, run_id)
-            if not routing:
-                continue
-
-            # Import PROJECT items
-            stats = import_projects_from_routing(routing, run_id, db)
-            total_stats['projects_found'] += stats['found']
-            total_stats['projects_imported'] += stats['imported']
-            total_stats['projects_skipped'] += stats['skipped']
-            total_stats['errors'] += stats['errors']
-
-        logger.info(f"Sync complete: {total_stats}")
+        logger.info(f"Library chord sync complete: {stats}")
 
         return jsonify({
             'status': 'synced',
-            **total_stats,
+            'chords_found': stats['found'],
+            'chords_queued': stats['queued'],
+            'already_queued': stats['already_queued'],
+            'errors': stats['errors'],
         })
 
     except Exception as e:
-        logger.error(f"Sync failed: {e}")
+        logger.error(f"Library chord sync failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 

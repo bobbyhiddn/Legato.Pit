@@ -80,10 +80,42 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             source_thread TEXT,
             source_transcript TEXT,
             file_path TEXT,
+            needs_chord INTEGER DEFAULT 0,
+            chord_name TEXT,
+            chord_scope TEXT,
+            chord_id TEXT,
+            chord_status TEXT,
+            chord_repo TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Add chord columns to existing tables (migration)
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN needs_chord INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_name TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_scope TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_status TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN chord_repo TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     # Project entries from Lab
     cursor.execute("""
@@ -153,6 +185,7 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_needs_chord ON knowledge_entries(needs_chord, chord_status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
 
@@ -186,6 +219,7 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             signal_json TEXT NOT NULL,
             tasker_body TEXT NOT NULL,
             source_transcript TEXT,
+            related_entry_id TEXT,
             status TEXT DEFAULT 'pending',
             approved_by TEXT,
             approved_at DATETIME,
@@ -198,6 +232,18 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_status ON agent_queue(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_source ON agent_queue(source_transcript)")
+
+    # Sync history to track processed workflow runs (persists even when queue is cleared)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sync_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(run_id, item_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_run ON sync_history(run_id)")
 
     conn.commit()
     logger.info(f"Agents database initialized at {path}")
