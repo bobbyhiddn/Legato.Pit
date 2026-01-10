@@ -6,6 +6,8 @@ Dashboard and Transcript Dropbox for the LEGATO system.
 import os
 import logging
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -18,6 +20,23 @@ from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 logger = logging.getLogger(__name__)
+
+# Activity tracking for background sync
+_last_activity_time = time.time()
+_activity_lock = threading.Lock()
+
+
+def touch_activity():
+    """Update last activity timestamp (called on user interactions)."""
+    global _last_activity_time
+    with _activity_lock:
+        _last_activity_time = time.time()
+
+
+def get_last_activity() -> float:
+    """Get the last activity timestamp."""
+    with _activity_lock:
+        return _last_activity_time
 
 
 def create_app():
@@ -101,11 +120,8 @@ def create_app():
     # Background sync threads
     def start_background_sync():
         """Start background sync threads for library and agents."""
-        import threading
-        import time
-
         AGENT_SYNC_INTERVAL = 60  # seconds
-        AGENT_SYNC_DURATION = 15 * 60  # 15 minutes
+        AGENT_SYNC_DURATION = 15 * 60  # 15 minutes (inactivity timeout)
 
         def library_sync_task():
             """One-time library sync on startup."""
@@ -163,11 +179,18 @@ def create_app():
                 logger.error(f"Library sync failed: {e}")
 
         def agent_sync_task():
-            """Periodic agent sync - runs every minute for 15 minutes."""
-            time.sleep(10)  # Wait for app to initialize
-            start_time = time.time()
+            """Periodic agent sync - runs every minute while user is active.
 
-            while time.time() - start_time < AGENT_SYNC_DURATION:
+            Continues as long as there's been user activity within the last 15 minutes.
+            Any request (page load, button click, API call) resets the activity timer.
+            """
+            time.sleep(10)  # Wait for app to initialize
+
+            while True:
+                # Check if there's been activity in the last 15 minutes
+                seconds_since_activity = time.time() - get_last_activity()
+                if seconds_since_activity > AGENT_SYNC_DURATION:
+                    break
                 try:
                     with app.app_context():
                         from .rag.database import init_agents_db
@@ -205,14 +228,21 @@ def create_app():
 
                 time.sleep(AGENT_SYNC_INTERVAL)
 
-            logger.info("Agent sync loop ended (15 min duration reached)")
+            logger.info("Agent sync loop ended (no activity for 15 min)")
 
         # Start both threads
         threading.Thread(target=library_sync_task, daemon=True).start()
         threading.Thread(target=agent_sync_task, daemon=True).start()
-        logger.info("Started background sync threads (library once, agents every 60s for 15min)")
+        logger.info("Started background sync threads (library once, agents every 60s while active)")
 
     start_background_sync()
+
+    # Track user activity to keep sync running
+    @app.before_request
+    def track_activity():
+        """Update activity timestamp on user requests (not health checks)."""
+        if request.endpoint != 'health':
+            touch_activity()
 
     # Context processor for templates
     @app.context_processor

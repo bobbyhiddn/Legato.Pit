@@ -11,7 +11,10 @@
 
     {% if pending_agents %}
     <section class="card">
-        <h2>Pending Approval</h2>
+        <div class="section-header">
+            <h2>Pending Approval</h2>
+            <button class="btn btn-secondary btn-sm" onclick="rejectAll()">Clear All</button>
+        </div>
         <div class="agent-list">
             {% for agent in pending_agents %}
             <div class="agent-item" data-queue-id="{{ agent.queue_id }}">
@@ -118,6 +121,30 @@ async function approveAgent(queueId) {
         alert(`Error: ${error.message}`);
         btn.disabled = false;
         btn.textContent = 'Approve';
+    }
+}
+
+async function rejectAll() {
+    const count = document.querySelectorAll('.agent-item').length;
+    if (!confirm(`Clear all ${count} pending agents? This will delete them from the queue.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/agents/api/reject-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'cleared') {
+            window.location.reload();
+        } else {
+            alert(`Error: ${data.error}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
     }
 }
 

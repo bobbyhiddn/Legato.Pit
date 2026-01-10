@@ -218,6 +218,17 @@ body {
     color: var(--text-secondary);
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.section-header h2 {
+    margin: 0;
+}
+
 /* Stats Row */
 .stats-row {
     display: grid;

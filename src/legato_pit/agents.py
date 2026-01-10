@@ -406,6 +406,43 @@ def api_approve_agent(queue_id: str):
         return jsonify({'error': str(e)}), 500
 
 
+@agents_bp.route('/api/reject-all', methods=['POST'])
+@login_required
+def api_reject_all():
+    """Delete all pending agents from the queue.
+
+    Response:
+    {
+        "status": "cleared",
+        "count": 5
+    }
+    """
+    try:
+        db = get_db()
+        user = session.get('user', {})
+        username = user.get('login', 'unknown')
+
+        # Count before delete
+        count = db.execute(
+            "SELECT COUNT(*) as cnt FROM agent_queue WHERE status = 'pending'"
+        ).fetchone()['cnt']
+
+        # Delete all pending
+        db.execute("DELETE FROM agent_queue WHERE status = 'pending'")
+        db.commit()
+
+        logger.info(f"Cleared {count} pending agents by {username}")
+
+        return jsonify({
+            'status': 'cleared',
+            'count': count,
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to clear pending agents: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @agents_bp.route('/api/<queue_id>/reject', methods=['POST'])
 @login_required
 def api_reject_agent(queue_id: str):
@@ -586,7 +623,10 @@ def fetch_routing_artifact(token: str, org: str, repo: str, run_id: int) -> dict
 
 
 def import_projects_from_routing(routing: list, run_id: int, db) -> dict:
-    """Import PROJECT items from routing data into agent_queue.
+    """Import CHORD projects from routing data into agent_queue.
+
+    Only imports items with project_scope='chord'. Notes go to the Library,
+    not the agent queue. Chords are queued for user approval before spawning.
 
     Args:
         routing: Parsed routing.json list
@@ -596,10 +636,17 @@ def import_projects_from_routing(routing: list, run_id: int, db) -> dict:
     Returns:
         Dict with import stats
     """
-    stats = {'found': 0, 'imported': 0, 'skipped': 0, 'errors': 0}
+    stats = {'found': 0, 'imported': 0, 'skipped': 0, 'skipped_notes': 0, 'errors': 0}
 
     for item in routing:
         if item.get('type') != 'PROJECT':
+            continue
+
+        # Only queue chords - notes go to Library, not agent queue
+        # A note can be escalated to a chord later via the from-entry API
+        project_scope = item.get('project_scope', '').lower()
+        if project_scope != 'chord':
+            stats['skipped_notes'] += 1
             continue
 
         stats['found'] += 1
