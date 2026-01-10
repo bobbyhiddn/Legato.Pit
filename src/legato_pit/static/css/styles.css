@@ -190,6 +190,18 @@ body {
     margin: 0;
 }
 
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 1rem;
+}
+
+.header-row .btn {
+    white-space: nowrap;
+}
+
 /* Cards */
 .card {
     background: var(--bg-secondary);

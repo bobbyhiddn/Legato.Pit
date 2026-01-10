@@ -98,13 +98,17 @@ def create_app():
         init_chat_db()   # chat.db - chat sessions/messages
         logger.info("All databases initialized (legato.db, agents.db, chat.db)")
 
-    # Auto-sync library on startup (background thread)
-    def startup_sync():
-        """Sync library from GitHub on app startup."""
+    # Background sync threads
+    def start_background_sync():
+        """Start background sync threads for library and agents."""
         import threading
         import time
 
-        def sync_task():
+        AGENT_SYNC_INTERVAL = 60  # seconds
+        AGENT_SYNC_DURATION = 15 * 60  # 15 minutes
+
+        def library_sync_task():
+            """One-time library sync on startup."""
             time.sleep(5)  # Wait for app to fully initialize
             try:
                 with app.app_context():
@@ -122,7 +126,6 @@ def create_app():
 
                     # Clean up invalid/duplicate entries first
                     cleanup_count = 0
-                    # Remove entries with invalid entry_ids
                     invalid = db.execute(
                         "SELECT id FROM knowledge_entries WHERE entry_id NOT LIKE 'kb-%' OR LENGTH(entry_id) != 11"
                     ).fetchall()
@@ -130,7 +133,6 @@ def create_app():
                         db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
                         db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
                         cleanup_count += 1
-                    # Remove duplicates by file_path
                     dups = db.execute("""
                         SELECT id FROM knowledge_entries
                         WHERE file_path IS NOT NULL AND id NOT IN (
@@ -145,7 +147,6 @@ def create_app():
                         db.commit()
                         logger.info(f"Cleaned up {cleanup_count} invalid/duplicate entries")
 
-                    # Create embedding service if OpenAI key available
                     embedding_service = None
                     if os.getenv('OPENAI_API_KEY'):
                         try:
@@ -156,15 +157,62 @@ def create_app():
 
                     sync = LibrarySync(db, embedding_service)
                     stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
-                    logger.info(f"Startup library sync complete: {stats}")
+                    logger.info(f"Library sync complete: {stats}")
+
             except Exception as e:
-                logger.error(f"Startup library sync failed: {e}")
+                logger.error(f"Library sync failed: {e}")
 
-        thread = threading.Thread(target=sync_task, daemon=True)
-        thread.start()
-        logger.info("Started background library sync")
+        def agent_sync_task():
+            """Periodic agent sync - runs every minute for 15 minutes."""
+            time.sleep(10)  # Wait for app to initialize
+            start_time = time.time()
 
-    startup_sync()
+            while time.time() - start_time < AGENT_SYNC_DURATION:
+                try:
+                    with app.app_context():
+                        from .rag.database import init_agents_db
+                        from .agents import (
+                            fetch_conduct_workflow_runs,
+                            fetch_routing_artifact,
+                            import_projects_from_routing,
+                        )
+
+                        token = os.getenv('SYSTEM_PAT')
+                        if not token:
+                            logger.warning("SYSTEM_PAT not set, skipping agent sync")
+                            break
+
+                        agents_db = init_agents_db()
+                        org = os.getenv('LEGATO_ORG', 'bobbyhiddn')
+                        conduct_repo = os.getenv('CONDUCT_REPO', 'Legato.Conduct')
+
+                        runs = fetch_conduct_workflow_runs(token, org, conduct_repo, limit=10)
+                        total_imported = 0
+
+                        for run in runs:
+                            if run.get('conclusion') != 'success':
+                                continue
+                            routing = fetch_routing_artifact(token, org, conduct_repo, run['id'])
+                            if routing:
+                                stats = import_projects_from_routing(routing, run['id'], agents_db)
+                                total_imported += stats['imported']
+
+                        if total_imported > 0:
+                            logger.info(f"Agent sync: imported {total_imported} projects")
+
+                except Exception as e:
+                    logger.error(f"Agent sync failed: {e}")
+
+                time.sleep(AGENT_SYNC_INTERVAL)
+
+            logger.info("Agent sync loop ended (15 min duration reached)")
+
+        # Start both threads
+        threading.Thread(target=library_sync_task, daemon=True).start()
+        threading.Thread(target=agent_sync_task, daemon=True).start()
+        logger.info("Started background sync threads (library once, agents every 60s for 15min)")
+
+    start_background_sync()
 
     # Context processor for templates
     @app.context_processor

@@ -493,6 +493,270 @@ def api_get_agent(queue_id: str):
         return jsonify({'error': str(e)}), 500
 
 
+# ============ GitHub Artifact Sync ============
+
+def fetch_conduct_workflow_runs(token: str, org: str, repo: str, limit: int = 10) -> list:
+    """Fetch recent process-transcript workflow runs from Conduct.
+
+    Args:
+        token: GitHub PAT
+        org: GitHub org
+        repo: Conduct repo name
+        limit: Max runs to fetch
+
+    Returns:
+        List of workflow run dicts
+    """
+    try:
+        response = requests.get(
+            f'https://api.github.com/repos/{org}/{repo}/actions/workflows/process-transcript.yml/runs',
+            params={'per_page': limit, 'status': 'completed'},
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get('workflow_runs', [])
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch workflow runs: {e}")
+        return []
+
+
+def fetch_routing_artifact(token: str, org: str, repo: str, run_id: int) -> dict | None:
+    """Download and parse routing-decisions artifact from a workflow run.
+
+    Args:
+        token: GitHub PAT
+        org: GitHub org
+        repo: Conduct repo name
+        run_id: Workflow run ID
+
+    Returns:
+        Parsed routing.json dict, or None if not found
+    """
+    import zipfile
+    import io
+
+    try:
+        # List artifacts for the run
+        response = requests.get(
+            f'https://api.github.com/repos/{org}/{repo}/actions/runs/{run_id}/artifacts',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        artifacts = response.json().get('artifacts', [])
+
+        # Find routing-decisions artifact
+        routing_artifact = None
+        for artifact in artifacts:
+            if artifact['name'] == 'routing-decisions':
+                routing_artifact = artifact
+                break
+
+        if not routing_artifact:
+            return None
+
+        # Download the artifact (it's a zip file)
+        download_url = routing_artifact['archive_download_url']
+        response = requests.get(
+            download_url,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        # Extract routing.json from zip
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            with zf.open('routing.json') as f:
+                return json.load(f)
+
+    except Exception as e:
+        logger.error(f"Failed to fetch routing artifact for run {run_id}: {e}")
+        return None
+
+
+def import_projects_from_routing(routing: list, run_id: int, db) -> dict:
+    """Import PROJECT items from routing data into agent_queue.
+
+    Args:
+        routing: Parsed routing.json list
+        run_id: Workflow run ID (for source tracking)
+        db: Database connection
+
+    Returns:
+        Dict with import stats
+    """
+    stats = {'found': 0, 'imported': 0, 'skipped': 0, 'errors': 0}
+
+    for item in routing:
+        if item.get('type') != 'PROJECT':
+            continue
+
+        stats['found'] += 1
+
+        project_name = item.get('project_name', 'unnamed')
+        source_id = f"conduct-run:{run_id}:{item.get('id', 'unknown')}"
+
+        # Check if already imported
+        existing = db.execute(
+            "SELECT queue_id FROM agent_queue WHERE source_transcript = ?",
+            (source_id,)
+        ).fetchone()
+
+        if existing:
+            stats['skipped'] += 1
+            continue
+
+        try:
+            # Build tasker body
+            description = item.get('project_description') or item.get('description') or ''
+            raw_text = item.get('raw_text', '')[:500]
+
+            tasker_body = f"""## Tasker: {item.get('knowledge_title') or item.get('title', 'Untitled')}
+
+### Context
+From voice transcript:
+"{raw_text}"
+
+### Objective
+{description or 'Implement the project as described.'}
+
+### Acceptance Criteria
+{chr(10).join(f"- [ ] {kp}" for kp in item.get('key_phrases', [])[:5]) or '- [ ] Core functionality implemented'}
+
+### Constraints
+- Follow patterns in `copilot-instructions.md`
+- Reference `SIGNAL.md` for project intent
+- Keep PRs focused and reviewable
+
+### References
+- Source: Conduct workflow run {run_id}
+- Thread: {item.get('id', 'unknown')}
+
+---
+*Generated from Conduct pipeline*
+"""
+
+            signal_json = {
+                "id": f"lab.{item.get('project_scope', 'chord')}.{project_name}",
+                "type": "project",
+                "source": "conduct",
+                "category": item.get('project_scope', 'chord'),
+                "title": item.get('knowledge_title') or item.get('title', 'Untitled'),
+                "domain_tags": item.get('domain_tags', []),
+                "key_phrases": item.get('key_phrases', []),
+            }
+
+            queue_id = generate_queue_id()
+
+            db.execute(
+                """
+                INSERT INTO agent_queue
+                (queue_id, project_name, project_type, title, description,
+                 signal_json, tasker_body, source_transcript, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    queue_id,
+                    project_name,
+                    item.get('project_scope', 'chord'),
+                    item.get('knowledge_title') or item.get('title', 'Untitled'),
+                    description[:500],
+                    json.dumps(signal_json),
+                    tasker_body,
+                    source_id,
+                )
+            )
+            stats['imported'] += 1
+            logger.info(f"Imported project from Conduct: {queue_id} - {project_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to import project {project_name}: {e}")
+            stats['errors'] += 1
+
+    db.commit()
+    return stats
+
+
+@agents_bp.route('/api/sync', methods=['POST'])
+@login_required
+def api_sync_from_conduct():
+    """Sync pending projects from Conduct workflow artifacts.
+
+    Fetches recent process-transcript workflow runs, downloads routing-decisions
+    artifacts, and imports PROJECT items into the agent queue.
+
+    Response:
+    {
+        "status": "synced",
+        "runs_checked": 5,
+        "projects_found": 2,
+        "projects_imported": 1,
+        "projects_skipped": 1
+    }
+    """
+    token = current_app.config.get('SYSTEM_PAT')
+    if not token:
+        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+    conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
+
+    try:
+        db = get_db()
+
+        # Fetch recent workflow runs
+        runs = fetch_conduct_workflow_runs(token, org, conduct_repo, limit=10)
+
+        total_stats = {
+            'runs_checked': 0,
+            'projects_found': 0,
+            'projects_imported': 0,
+            'projects_skipped': 0,
+            'errors': 0,
+        }
+
+        for run in runs:
+            if run.get('conclusion') != 'success':
+                continue
+
+            total_stats['runs_checked'] += 1
+            run_id = run['id']
+
+            # Fetch and parse routing artifact
+            routing = fetch_routing_artifact(token, org, conduct_repo, run_id)
+            if not routing:
+                continue
+
+            # Import PROJECT items
+            stats = import_projects_from_routing(routing, run_id, db)
+            total_stats['projects_found'] += stats['found']
+            total_stats['projects_imported'] += stats['imported']
+            total_stats['projects_skipped'] += stats['skipped']
+            total_stats['errors'] += stats['errors']
+
+        logger.info(f"Sync complete: {total_stats}")
+
+        return jsonify({
+            'status': 'synced',
+            **total_stats,
+        })
+
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def trigger_spawn_workflow(agent: dict) -> dict:
     """Trigger the Conduct spawn-project workflow via repository_dispatch.
 

@@ -76,7 +76,8 @@
         <h2>How It Works</h2>
         <ol class="how-it-works">
             <li>Submit a transcript via <a href="{{ url_for('dropbox.index') }}">Dropbox</a> describing a project idea</li>
-            <li>Conduct classifies it and queues the agent here</li>
+            <li>Conduct classifies it as a PROJECT and saves the routing artifact</li>
+            <li>Pit auto-syncs projects from Conduct on startup</li>
             <li>Review the project details and click <strong>Approve</strong> to spawn the Lab repository</li>
             <li>A new repo is created with an initial issue assigned to Copilot</li>
         </ol>
