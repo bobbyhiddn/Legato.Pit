@@ -106,6 +106,74 @@ def index():
 
 # ============ API Endpoints (called by Pit UI) ============
 
+@agents_bp.route('/api/queue-chord', methods=['POST'])
+@login_required
+def api_queue_chord():
+    """Mark a library entry as needing a chord (lightweight flagging).
+
+    This just sets needs_chord=1 on the entry. The actual agent creation
+    happens later via /api/from-entry when the user provides a project name.
+
+    Request body:
+    {
+        "entry_id": "kb-abc123"
+    }
+
+    Response:
+    {
+        "status": "success",
+        "entry_id": "kb-abc123",
+        "needs_chord": true
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    entry_id = data.get('entry_id')
+    if not entry_id:
+        return jsonify({'error': 'Missing entry_id'}), 400
+
+    try:
+        legato_db = get_legato_db()
+
+        # Check entry exists
+        entry = legato_db.execute(
+            "SELECT id, title, needs_chord FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': 'Entry not found'}), 404
+
+        if entry['needs_chord']:
+            return jsonify({
+                'status': 'already_flagged',
+                'entry_id': entry_id,
+                'message': 'Entry is already flagged for chord'
+            })
+
+        # Flag entry as needing chord
+        legato_db.execute("""
+            UPDATE knowledge_entries
+            SET needs_chord = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+        """, (entry_id,))
+        legato_db.commit()
+
+        logger.info(f"Flagged entry for chord: {entry_id}")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'needs_chord': True
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to flag entry for chord: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @agents_bp.route('/api/from-entry', methods=['POST'])
 @login_required
 def api_queue_from_entry():

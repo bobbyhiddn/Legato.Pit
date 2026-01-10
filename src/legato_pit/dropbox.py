@@ -48,6 +48,28 @@ def sanitize_source_id(source_id):
     return sanitized[:100]  # Limit length
 
 
+def get_category_definitions():
+    """Get user category definitions for classifier."""
+    from flask import g
+    from .rag.database import init_db, get_user_categories
+
+    if 'legato_db_conn' not in g:
+        g.legato_db_conn = init_db()
+
+    categories = get_user_categories(g.legato_db_conn, 'default')
+
+    # Format for classifier: list of {name, display_name, description, folder_name}
+    return [
+        {
+            'name': cat['name'],
+            'display_name': cat['display_name'],
+            'description': cat.get('description', ''),
+            'folder_name': cat['folder_name'],
+        }
+        for cat in categories
+    ]
+
+
 def dispatch_transcript(transcript_text, source_id):
     """
     Dispatch transcript to Legato.Conduct via repository_dispatch.
@@ -67,6 +89,10 @@ def dispatch_transcript(transcript_text, source_id):
     org = current_app.config['LEGATO_ORG']
     repo = current_app.config['CONDUCT_REPO']
 
+    # Get user-defined categories for dynamic classification
+    category_definitions = get_category_definitions()
+    logger.info(f"Sending {len(category_definitions)} category definitions to classifier")
+
     # Prepare dispatch payload
     # Include both 'transcript' and 'text' fields for compatibility with Conduct
     # Conduct's classifier may expect either field name depending on version
@@ -76,7 +102,8 @@ def dispatch_transcript(transcript_text, source_id):
             'transcript': transcript_text,
             'text': transcript_text,  # Alias for compatibility
             'raw_text': transcript_text,  # For routing.json compatibility
-            'source': source_id
+            'source': source_id,
+            'category_definitions': category_definitions,  # User-defined categories for classifier
         }
     }
 

@@ -390,6 +390,9 @@
                 <a href="{{ url_for('library.index') }}" class="sidebar-link active">
                     <span>Overview</span>
                 </a>
+                <a href="{{ url_for('library.graph_view') }}" class="sidebar-link">
+                    <span>Graph View</span>
+                </a>
                 <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
                     <span>Daily View</span>
                 </a>
@@ -556,12 +559,11 @@
         btn.disabled = true;
 
         try {
-            const response = await fetch('/agents/api/queue', {
+            const response = await fetch('/agents/api/queue-chord', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    entry_id: entryId,
-                    title: title
+                    entry_id: entryId
                 })
             });
 

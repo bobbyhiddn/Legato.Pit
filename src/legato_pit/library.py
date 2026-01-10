@@ -1494,6 +1494,151 @@ def api_delete_entry(entry_id: str):
         return jsonify({'error': str(e)}), 500
 
 
+@library_bp.route('/graph')
+@login_required
+def graph_view():
+    """Graph visualization of library entries by embedding similarity."""
+    # Get categories for the legend
+    categories = get_categories_with_counts()
+
+    return render_template(
+        'library_graph.html',
+        categories=categories,
+    )
+
+
+@library_bp.route('/api/graph')
+@login_required
+def api_graph():
+    """Get graph data for visualization.
+
+    Returns nodes (entries with category info) and edges (embedding similarity).
+    Categories are the primary organization for nodes.
+
+    Query params:
+    - threshold: Minimum similarity to create edge (default 0.3)
+    - limit: Max entries to include (default 200)
+
+    Response:
+    {
+        "nodes": [
+            {"id": "kb-abc123", "title": "...", "category": "concept", "color": "#6366f1"},
+            ...
+        ],
+        "edges": [
+            {"source": "kb-abc123", "target": "kb-def456", "weight": 0.75},
+            ...
+        ],
+        "categories": [
+            {"name": "concept", "color": "#6366f1", "count": 10},
+            ...
+        ]
+    }
+    """
+    import numpy as np
+    from .rag.database import get_user_categories
+
+    threshold = float(request.args.get('threshold', 0.3))
+    limit = int(request.args.get('limit', 200))
+
+    try:
+        db = get_db()
+
+        # Get user categories for colors
+        user_cats = get_user_categories(db, 'default')
+        category_colors = {c['name']: c.get('color', '#6366f1') for c in user_cats}
+
+        # Get entries with embeddings
+        rows = db.execute(
+            """
+            SELECT
+                ke.entry_id,
+                ke.title,
+                ke.category,
+                e.embedding
+            FROM knowledge_entries ke
+            INNER JOIN embeddings e ON e.entry_id = ke.id AND e.entry_type = 'knowledge'
+            ORDER BY ke.created_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+
+        if not rows:
+            return jsonify({
+                'nodes': [],
+                'edges': [],
+                'categories': []
+            })
+
+        # Build nodes list
+        nodes = []
+        embeddings = []
+        entry_ids = []
+
+        for row in rows:
+            entry_id = row['entry_id']
+            category = row['category'] or 'uncategorized'
+            color = category_colors.get(category, '#9ca3af')
+
+            nodes.append({
+                'id': entry_id,
+                'title': row['title'],
+                'category': category,
+                'color': color,
+            })
+
+            # Decode embedding
+            if row['embedding']:
+                embedding = np.frombuffer(row['embedding'], dtype=np.float32)
+                embeddings.append(embedding)
+                entry_ids.append(entry_id)
+
+        # Compute pairwise cosine similarities
+        edges = []
+        if len(embeddings) >= 2:
+            # Stack embeddings into matrix
+            matrix = np.vstack(embeddings)
+
+            # Normalize for cosine similarity
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1  # Avoid division by zero
+            normalized = matrix / norms
+
+            # Compute similarity matrix
+            similarity_matrix = np.dot(normalized, normalized.T)
+
+            # Extract edges above threshold
+            n = len(entry_ids)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    sim = float(similarity_matrix[i, j])
+                    if sim >= threshold:
+                        edges.append({
+                            'source': entry_ids[i],
+                            'target': entry_ids[j],
+                            'weight': round(sim, 3),
+                        })
+
+        # Category summary
+        category_counts = {}
+        for node in nodes:
+            cat = node['category']
+            if cat not in category_counts:
+                category_counts[cat] = {'name': cat, 'color': node['color'], 'count': 0}
+            category_counts[cat]['count'] += 1
+
+        return jsonify({
+            'nodes': nodes,
+            'edges': edges,
+            'categories': list(category_counts.values()),
+        })
+
+    except Exception as e:
+        logger.error(f"Graph API failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @library_bp.route('/api/cleanup-orphans', methods=['POST'])
 @login_required
 def api_cleanup_orphans():

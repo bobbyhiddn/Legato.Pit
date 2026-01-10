@@ -24,3 +24,6 @@ boto3>=1.34.0
 # Markdown rendering for Library browser
 markdown>=3.5.0
 pygments>=2.17.0
+
+# Numerical computation for embeddings
+numpy>=1.24.0
