@@ -305,15 +305,15 @@ class LibrarySync:
                     final_chord_status = chord_status
                     final_chord_repo = chord_repo
                     final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] in ('pending', 'active'):
-                    # Preserve 'pending' or 'active' status from DB
-                    # (GitHub frontmatter may not have propagated yet after agent approval)
+                elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+                    # Preserve 'pending', 'active', or 'rejected' status from DB
+                    # (GitHub frontmatter may not have propagated yet after agent approval/rejection)
                     final_chord_status = existing_data['chord_status']
                     final_chord_repo = existing_data['chord_repo']
                     final_chord_id = existing_data['chord_id']
                 else:
-                    # No frontmatter chord_status, not pending/active in DB
-                    # Reset to null so it can be re-queued (handles deleted repos)
+                    # No frontmatter chord_status, not pending/active/rejected in DB
+                    # Reset to null so it can be queued
                     final_chord_status = None
                     final_chord_repo = None
                     final_chord_id = None
@@ -481,8 +481,8 @@ class LibrarySync:
                     final_chord_status = chord_status
                     final_chord_repo = chord_repo
                     final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] in ('pending', 'active'):
-                    # Preserve 'pending' or 'active' status from DB
+                elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+                    # Preserve 'pending', 'active', or 'rejected' status from DB
                     final_chord_status = existing_data['chord_status']
                     final_chord_repo = existing_data['chord_repo']
                     final_chord_id = existing_data['chord_id']

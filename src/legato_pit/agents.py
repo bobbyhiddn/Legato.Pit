@@ -519,7 +519,9 @@ def api_approve_agent(queue_id: str):
 @agents_bp.route('/api/reject-all', methods=['POST'])
 @login_required
 def api_reject_all():
-    """Delete all pending agents from the queue and reset linked notes.
+    """Reject all pending agents (mark as rejected, not delete).
+
+    This keeps the rejection records so agents won't be re-queued on next sync.
 
     Response:
     {
@@ -527,10 +529,15 @@ def api_reject_all():
         "count": 5
     }
     """
+    import re
+    from .rag.github_service import get_file_content, commit_file
+
     try:
         db = get_db()
         user = session.get('user', {})
         username = user.get('login', 'unknown')
+        token = current_app.config.get('SYSTEM_PAT')
+        library_repo = 'bobbyhiddn/Legato.Library'
 
         # Get all pending agents with their linked entries
         pending = db.execute(
@@ -546,26 +553,78 @@ def api_reject_all():
                 entry_ids = [eid.strip() for eid in agent['related_entry_id'].split(',') if eid.strip()]
                 all_entry_ids.extend(entry_ids)
 
-        # Delete all pending
-        db.execute("DELETE FROM agent_queue WHERE status = 'pending'")
+        # Mark all as rejected (NOT delete - keeps record to prevent re-queueing)
+        db.execute(
+            """
+            UPDATE agent_queue
+            SET status = 'rejected',
+                approved_by = ?,
+                approved_at = CURRENT_TIMESTAMP,
+                spawn_result = '{"rejected": true, "reason": "bulk reject"}',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'pending'
+            """,
+            (username,)
+        )
         db.commit()
 
-        # Reset chord_status AND needs_chord on all linked notes to prevent re-queueing
+        # Reset chord_status AND needs_chord on all linked notes
         if all_entry_ids:
             legato_db = get_legato_db()
             for entry_id in all_entry_ids:
+                # Update local DB
                 legato_db.execute(
                     """
                     UPDATE knowledge_entries
-                    SET chord_status = NULL, needs_chord = 0
+                    SET chord_status = 'rejected', needs_chord = 0
                     WHERE entry_id = ?
                     """,
                     (entry_id,)
                 )
+
+                # Update GitHub frontmatter to remove needs_chord
+                if token:
+                    try:
+                        entry = legato_db.execute(
+                            "SELECT file_path FROM knowledge_entries WHERE entry_id = ?",
+                            (entry_id,)
+                        ).fetchone()
+
+                        if entry and entry['file_path']:
+                            file_path = entry['file_path']
+                            content = get_file_content(library_repo, file_path, token)
+
+                            if content and content.startswith('---'):
+                                parts = content.split('---', 2)
+                                if len(parts) >= 3:
+                                    frontmatter = parts[1]
+                                    body = parts[2]
+
+                                    # Remove chord-related fields
+                                    new_frontmatter = re.sub(r'^needs_chord:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_name:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_scope:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_status:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+
+                                    if new_frontmatter != frontmatter:
+                                        new_content = f'---{new_frontmatter}---{body}'
+                                        commit_file(
+                                            repo=library_repo,
+                                            path=file_path,
+                                            content=new_content,
+                                            message=f'Reset chord fields: bulk rejection',
+                                            token=token
+                                        )
+                                        logger.info(f"Updated frontmatter for {entry_id}: removed chord fields")
+                    except Exception as e:
+                        logger.warning(f"Could not update frontmatter for {entry_id}: {e}")
+
             legato_db.commit()
             logger.info(f"Reset chord_status and needs_chord for {len(all_entry_ids)} entries")
 
-        logger.info(f"Cleared {count} pending agents by {username}")
+        logger.info(f"Rejected {count} pending agents by {username}")
 
         return jsonify({
             'status': 'cleared',
@@ -573,7 +632,7 @@ def api_reject_all():
         })
 
     except Exception as e:
-        logger.error(f"Failed to clear pending agents: {e}")
+        logger.error(f"Failed to reject pending agents: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -626,7 +685,7 @@ def api_reject_agent(queue_id: str):
         )
         db.commit()
 
-        # Reset chord_status AND needs_chord on linked notes to prevent re-queueing
+        # Reset chord_status to 'rejected' AND needs_chord=0 on linked notes to prevent re-queueing
         if related_entry_id:
             import re
             from .rag.github_service import get_file_content, commit_file
@@ -637,11 +696,11 @@ def api_reject_agent(queue_id: str):
             entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
 
             for entry_id in entry_ids:
-                # Update local DB
+                # Update local DB - set chord_status='rejected' to prevent re-queueing
                 legato_db.execute(
                     """
                     UPDATE knowledge_entries
-                    SET chord_status = NULL, needs_chord = 0
+                    SET chord_status = 'rejected', needs_chord = 0
                     WHERE entry_id = ?
                     """,
                     (entry_id,)
@@ -975,23 +1034,48 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
     stats = {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0, 'multi_note_chords': 0}
 
     # Find entries that need chord escalation
+    # Only include entries where:
+    # - needs_chord = 1 (flagged for chord)
+    # - chord_status is NULL or empty (not yet processed, not rejected, not active)
     entries = legato_db.execute(
         """
-        SELECT entry_id, title, category, content, chord_name, chord_scope, file_path
+        SELECT entry_id, title, category, content, chord_name, chord_scope, file_path, source_transcript
         FROM knowledge_entries
-        WHERE needs_chord = 1 AND (chord_status IS NULL OR chord_status = '')
+        WHERE needs_chord = 1
+        AND (chord_status IS NULL OR chord_status = '')
         """
     ).fetchall()
 
     stats['found'] = len(entries)
 
-    # Group entries by chord_name for multi-note chord support
+    # Group entries by source_transcript for multi-note chord support
+    # If multiple notes from the same transcript all need chords, they're related
     from collections import defaultdict
-    chord_groups = defaultdict(list)
+    transcript_groups = defaultdict(list)
     for entry in entries:
         entry = dict(entry)
-        chord_name = entry['chord_name'] or entry['entry_id'].split('-')[-1][:20]
-        chord_groups[chord_name].append(entry)
+        # Group by source_transcript (notes from same transcript are related)
+        source = entry.get('source_transcript') or 'unknown'
+        transcript_groups[source].append(entry)
+
+    # Process each transcript group
+    chord_groups = {}
+    for source, group_entries in transcript_groups.items():
+        if len(group_entries) == 1:
+            # Single entry - use its chord_name
+            entry = group_entries[0]
+            chord_name = entry['chord_name'] or entry['entry_id'].split('-')[-1][:20]
+        else:
+            # Multiple entries from same transcript - create combined chord name
+            # Use the most specific chord_name or create a combined one
+            chord_names = [e.get('chord_name') for e in group_entries if e.get('chord_name')]
+            if chord_names:
+                chord_name = f"{chord_names[0]}-multi"
+            else:
+                # Derive from source transcript
+                chord_name = f"{source.replace('dropbox-', '')[:15]}-multi"
+
+        chord_groups[chord_name] = group_entries
 
     for chord_name, group_entries in chord_groups.items():
         # Collect all entry IDs in this group

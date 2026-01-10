@@ -240,8 +240,104 @@
 
     .entry-actions {
         display: flex;
-        gap: 0.5rem;
-        margin-left: 0.75rem;
+        gap: 0.75rem;
+        align-items: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+
+    .entry-card:hover .entry-actions {
+        opacity: 1;
+    }
+
+    /* Category as editable pill */
+    .category-pill {
+        position: relative;
+    }
+
+    .category-select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding: 0.25rem 1.25rem 0.25rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        border: none;
+        border-radius: 12px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .category-pill::after {
+        content: '▾';
+        position: absolute;
+        right: 0.4rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.6rem;
+        color: var(--text-secondary);
+        pointer-events: none;
+    }
+
+    .category-select:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .category-select:focus {
+        outline: none;
+        background: var(--accent-color);
+        color: white;
+    }
+
+    /* Action button group */
+    .action-group {
+        display: flex;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .action-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.35rem 0.5rem;
+        font-size: 0.75rem;
+        background: transparent;
+        color: var(--text-secondary);
+        border: none;
+        border-right: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all 0.15s;
+        gap: 0.25rem;
+    }
+
+    .action-btn:last-child {
+        border-right: none;
+    }
+
+    .action-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .action-btn.btn-chord:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .action-btn.btn-delete:hover {
+        background: var(--danger-color, #dc3545);
+        color: white;
+    }
+
+    .action-btn svg {
+        width: 14px;
+        height: 14px;
     }
 
     .chord-badge {
@@ -334,11 +430,25 @@
                 </div>
                 <div class="entry-actions">
                     {% if entry.chord_status == 'active' %}
-                    <span class="chord-badge">Active</span>
+                    <span class="chord-badge">Chord</span>
                     {% elif entry.chord_status == 'pending' %}
-                    <span class="chord-badge pending">Pending</span>
+                    <span class="chord-badge pending">Queued</span>
                     {% endif %}
-                    <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
+                    <span class="category-pill">
+                        <select class="category-select" onchange="changeCategory('{{ entry.entry_id }}', this.value)" title="Change category">
+                            {% for cat in categories %}
+                            <option value="{{ cat.category }}" {% if cat.category == category %}selected{% endif %}>{{ cat.category }}</option>
+                            {% endfor %}
+                        </select>
+                    </span>
+                    <div class="action-group">
+                        <button class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                        </button>
+                        <button class="action-btn btn-delete" onclick="deleteEntry('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Delete note">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
             {% else %}
@@ -437,5 +547,89 @@
     document.getElementById('createNoteModal').addEventListener('click', (e) => {
         if (e.target.id === 'createNoteModal') closeCreateNoteModal();
     });
+
+    async function changeCategory(entryId, newCategory) {
+        if (newCategory === currentCategory) return;
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}/category`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCategory })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                // Remove the card from current view since it moved to a different category
+                const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+                if (card) {
+                    card.style.opacity = '0.5';
+                    card.style.transition = 'opacity 0.3s';
+                    setTimeout(() => {
+                        card.remove();
+                        // Update entry count
+                        const subtitle = document.querySelector('.subtitle');
+                        const currentCount = document.querySelectorAll('.entry-card').length;
+                        subtitle.textContent = `${currentCount} entries`;
+                    }, 300);
+                }
+            } else {
+                alert(`Error: ${data.error}`);
+                // Reset dropdown to current category
+                const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+                const select = card.querySelector('.category-select');
+                select.value = currentCategory;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+
+    async function deleteEntry(entryId, title) {
+        if (!confirm(`Delete "${title}"?\n\nThis will remove the note from GitHub and the local database.`)) {
+            return;
+        }
+
+        const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+        const deleteBtn = card.querySelector('.btn-delete');
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = '...';
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                card.style.opacity = '0';
+                card.style.transition = 'opacity 0.3s';
+                setTimeout(() => {
+                    card.remove();
+                    // Update entry count
+                    const subtitle = document.querySelector('.subtitle');
+                    const currentCount = document.querySelectorAll('.entry-card').length;
+                    subtitle.textContent = `${currentCount} entries`;
+
+                    // Show empty state if no more entries
+                    if (currentCount === 0) {
+                        const entryList = document.querySelector('.entry-list');
+                        entryList.innerHTML = '<p class="empty-state">No entries in this category</p>';
+                    }
+                }, 300);
+            } else {
+                alert(`Error: ${data.error}`);
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = '✕';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = '✕';
+        }
+    }
 </script>
 {% endblock %}

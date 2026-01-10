@@ -214,7 +214,7 @@ def api_delete_repo(repo_name: str):
     """Delete a Chord repository.
 
     This permanently deletes the GitHub repository and resets any linked
-    Library entries to needs_chord state.
+    Library entries to NOT need a chord (needs_chord = false).
 
     Args:
         repo_name: Full repo name (org/repo)
@@ -268,13 +268,14 @@ def api_delete_repo(repo_name: str):
             (repo_name,)
         ).fetchall()
 
-        # Reset linked entries in local DB
+        # Reset linked entries in local DB - set needs_chord = 0 so they don't re-queue
         result = db.execute(
             """
             UPDATE knowledge_entries
             SET chord_status = NULL,
                 chord_repo = NULL,
                 chord_id = NULL,
+                needs_chord = 0,
                 updated_at = CURRENT_TIMESTAMP
             WHERE chord_repo = ?
             """,
@@ -303,8 +304,11 @@ def api_delete_repo(repo_name: str):
                         frontmatter = parts[1]
                         body = parts[2]
 
-                        # Remove chord fields from frontmatter
-                        new_frontmatter = re.sub(r'^chord_status:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                        # Remove all chord-related fields from frontmatter
+                        new_frontmatter = re.sub(r'^needs_chord:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r'^chord_name:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r'^chord_scope:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r'^chord_status:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
                         new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
                         new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
 

@@ -14,6 +14,14 @@
     .agent-note-link code {
         color: inherit;
     }
+    .badge-chord {
+        background: var(--accent-color);
+        color: white;
+    }
+    .badge-multi {
+        background: var(--success-color);
+        color: white;
+    }
 </style>
 <div class="agents-container">
     <header class="page-header">
@@ -25,7 +33,7 @@
     <section class="card">
         <div class="section-header">
             <h2>Pending Approval</h2>
-            <button class="btn btn-secondary btn-sm" onclick="rejectAll()">Clear All</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectAll()">Reject All</button>
         </div>
         <div class="agent-list">
             {% for agent in pending_agents %}
@@ -33,14 +41,24 @@
                 <div class="agent-info">
                     <span class="agent-title">{{ agent.title }}</span>
                     <span class="agent-meta">
-                        <span class="badge badge-{{ agent.project_type }}">{{ agent.project_type }}</span>
+                        {% set note_count = agent.related_entry_id.split(',') | length if agent.related_entry_id else 0 %}
+                        {% if note_count > 1 %}
+                        <span class="badge badge-multi">{{ note_count }}-note chord</span>
+                        {% else %}
+                        <span class="badge badge-chord">chord</span>
+                        {% endif %}
                         <code>{{ agent.project_name }}</code>
                     </span>
                     {% if agent.description %}
                     <p class="agent-desc">{{ agent.description }}</p>
                     {% endif %}
                     {% if agent.related_entry_id %}
-                    <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=agent.related_entry_id.split(',')[0]) }}" class="agent-note-link">{{ agent.related_note_title or agent.related_entry_id }}</a></span>
+                    {% set note_ids = agent.related_entry_id.split(',') %}
+                    {% if note_ids | length > 1 %}
+                    <span class="agent-source">Linked notes: {{ note_ids | length }} notes from this transcript</span>
+                    {% else %}
+                    <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=note_ids[0]) }}" class="agent-note-link">{{ agent.related_note_title or note_ids[0] }}</a></span>
+                    {% endif %}
                     {% elif agent.source_transcript %}
                     <span class="agent-source">Source: {{ agent.source_transcript }}</span>
                     {% endif %}
@@ -140,7 +158,7 @@ async function approveAgent(queueId) {
 
 async function rejectAll() {
     const count = document.querySelectorAll('.agent-item').length;
-    if (!confirm(`Clear all ${count} pending agents? This will delete them from the queue.`)) {
+    if (!confirm(`Reject all ${count} pending agents? This will remove them from the queue and reset linked notes.`)) {
         return;
     }
 

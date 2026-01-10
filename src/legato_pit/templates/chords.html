@@ -167,7 +167,7 @@
             const warning = document.createElement('div');
             warning.className = 'delete-warning';
             warning.id = `warning-${index}`;
-            warning.innerHTML = '<strong>Warning:</strong> This will permanently delete the GitHub repository. Linked notes will be reset to "needs chord" state.';
+            warning.innerHTML = '<strong>Warning:</strong> This will permanently delete the GitHub repository. Linked notes will be unlinked (no longer flagged for chord).';
             card.querySelector('.chord-actions').before(warning);
         }
 
