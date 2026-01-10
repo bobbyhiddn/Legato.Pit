@@ -146,6 +146,21 @@
         font-size: 0.75rem;
     }
 
+    .legend-item:hover {
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+    }
+
+    .legend-item.active {
+        background: var(--accent-color);
+        border-radius: 4px;
+        color: white;
+    }
+
+    .legend-item.active .legend-count {
+        color: rgba(255,255,255,0.8);
+    }
+
     /* Tooltip */
     .graph-tooltip {
         position: absolute;
@@ -235,12 +250,12 @@
         <div class="graph-controls">
             <div class="control-group">
                 <label>Similarity Threshold:</label>
-                <input type="range" id="thresholdSlider" min="0.1" max="0.8" step="0.05" value="0.3">
-                <span class="value" id="thresholdValue">0.3</span>
+                <input type="range" id="thresholdSlider" min="0.1" max="0.9" step="0.05" value="0.65">
+                <span class="value" id="thresholdValue">0.65</span>
             </div>
             <div class="control-group">
                 <label>Node Size:</label>
-                <input type="range" id="nodeSizeSlider" min="4" max="16" step="1" value="8">
+                <input type="range" id="nodeSizeSlider" min="4" max="16" step="1" value="4">
             </div>
             <button class="btn btn-secondary btn-sm" onclick="resetZoom()">Reset View</button>
         </div>
@@ -271,8 +286,9 @@
     let svg = null;
     let g = null;
     let zoom = null;
-    let currentThreshold = 0.3;
-    let currentNodeSize = 8;
+    let currentThreshold = 0.65;
+    let currentNodeSize = 4;
+    let activeCategory = null;  // For filtering
 
     // Initialize
     document.addEventListener('DOMContentLoaded', () => {
@@ -351,15 +367,28 @@
     function renderLegend() {
         const legend = document.getElementById('graphLegend');
         legend.innerHTML = `
-            <div class="legend-title">Categories</div>
+            <div class="legend-title">Categories <span style="font-size:0.65rem;font-weight:normal;opacity:0.7">(click to filter)</span></div>
+            <div class="legend-item legend-all ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)" style="cursor:pointer">
+                <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
+                <span class="legend-label">All</span>
+                <span class="legend-count">${graphData.nodes.length}</span>
+            </div>
             ${graphData.categories.map(cat => `
-                <div class="legend-item">
+                <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
+                     onclick="filterByCategory('${cat.name}')"
+                     style="cursor:pointer">
                     <span class="legend-dot" style="background: ${cat.color}"></span>
                     <span class="legend-label">${cat.name}</span>
                     <span class="legend-count">${cat.count}</span>
                 </div>
             `).join('')}
         `;
+    }
+
+    function filterByCategory(category) {
+        activeCategory = category;
+        renderLegend();
+        renderGraph();
     }
 
     function renderGraph() {
@@ -376,50 +405,60 @@
         g.select('.links-layer').selectAll('*').remove();
         g.select('.nodes-layer').selectAll('*').remove();
 
-        // Create node map for edge references
-        const nodeMap = new Map(graphData.nodes.map(n => [n.id, n]));
+        // Filter nodes by active category
+        let filteredNodes = graphData.nodes;
+        if (activeCategory) {
+            filteredNodes = graphData.nodes.filter(n => n.category === activeCategory);
+        }
 
-        // Process edges to have node references
-        const links = graphData.edges.map(e => ({
-            source: e.source,
-            target: e.target,
-            weight: e.weight
-        }));
+        // Create node ID set for filtering edges
+        const nodeIds = new Set(filteredNodes.map(n => n.id));
+
+        // Process edges - only include edges between visible nodes
+        const links = graphData.edges
+            .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+            .map(e => ({
+                source: e.source,
+                target: e.target,
+                weight: e.weight
+            }));
 
         // Create simulation with category-based clustering
-        simulation = d3.forceSimulation(graphData.nodes)
+        simulation = d3.forceSimulation(filteredNodes)
             .force('link', d3.forceLink(links)
                 .id(d => d.id)
-                .distance(d => 100 * (1 - d.weight))  // Closer for higher similarity
-                .strength(d => d.weight * 0.5))
+                .distance(d => 80 * (1 - d.weight))  // Closer for higher similarity
+                .strength(d => d.weight * 0.6))
             .force('charge', d3.forceManyBody()
-                .strength(-150)
-                .distanceMax(300))
+                .strength(-120)
+                .distanceMax(250))
             .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(currentNodeSize + 5))
-            .force('x', d3.forceX(width / 2).strength(0.05))
-            .force('y', d3.forceY(height / 2).strength(0.05));
+            .force('collision', d3.forceCollide().radius(currentNodeSize + 3))
+            .force('x', d3.forceX(width / 2).strength(0.03))
+            .force('y', d3.forceY(height / 2).strength(0.03));
 
-        // Add category clustering force
-        const categoryPositions = {};
-        const categoryCount = graphData.categories.length;
-        graphData.categories.forEach((cat, i) => {
-            const angle = (i / categoryCount) * 2 * Math.PI;
-            categoryPositions[cat.name] = {
-                x: width / 2 + Math.cos(angle) * 150,
-                y: height / 2 + Math.sin(angle) * 150
-            };
-        });
-
-        simulation.force('category', (alpha) => {
-            graphData.nodes.forEach(node => {
-                const target = categoryPositions[node.category];
-                if (target) {
-                    node.vx += (target.x - node.x) * alpha * 0.1;
-                    node.vy += (target.y - node.y) * alpha * 0.1;
-                }
+        // Add category clustering force (only when showing all categories)
+        if (!activeCategory) {
+            const categoryPositions = {};
+            const categoryCount = graphData.categories.length;
+            graphData.categories.forEach((cat, i) => {
+                const angle = (i / categoryCount) * 2 * Math.PI;
+                categoryPositions[cat.name] = {
+                    x: width / 2 + Math.cos(angle) * 120,
+                    y: height / 2 + Math.sin(angle) * 120
+                };
             });
-        });
+
+            simulation.force('category', (alpha) => {
+                filteredNodes.forEach(node => {
+                    const target = categoryPositions[node.category];
+                    if (target) {
+                        node.vx += (target.x - node.x) * alpha * 0.08;
+                        node.vy += (target.y - node.y) * alpha * 0.08;
+                    }
+                });
+            });
+        }
 
         // Draw edges
         const link = g.select('.links-layer')
@@ -433,7 +472,7 @@
         // Draw nodes
         const node = g.select('.nodes-layer')
             .selectAll('.node')
-            .data(graphData.nodes)
+            .data(filteredNodes)
             .join('g')
             .attr('class', 'node')
             .call(drag(simulation))
@@ -453,11 +492,11 @@
             .attr('stroke', d => d3.color(d.color).darker(0.5))
             .attr('stroke-width', 1.5);
 
-        // Add labels for larger nodes
+        // Add labels - show immediately with slight transparency, full opacity on hover
         node.append('text')
-            .attr('dy', currentNodeSize + 12)
-            .text(d => d.title.length > 20 ? d.title.slice(0, 18) + '...' : d.title)
-            .style('opacity', 0);
+            .attr('dy', currentNodeSize + 10)
+            .text(d => d.title.length > 25 ? d.title.slice(0, 23) + '...' : d.title)
+            .style('opacity', 0.8);
 
         // Update positions on tick
         simulation.on('tick', () => {
@@ -468,11 +507,6 @@
                 .attr('y2', d => d.target.y);
 
             node.attr('transform', d => `translate(${d.x}, ${d.y})`);
-        });
-
-        // Show labels after simulation settles
-        simulation.on('end', () => {
-            node.selectAll('text').style('opacity', 1);
         });
     }
 

@@ -204,35 +204,6 @@
         opacity: 0.9;
     }
 
-    /* Entry footer (source info) */
-    .entry-footer {
-        margin-top: 2rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--border-color);
-    }
-
-    .entry-footer h3 {
-        font-size: 0.875rem;
-        color: var(--text-secondary);
-        margin-bottom: 0.5rem;
-    }
-
-    .source-info {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 0.25rem 1rem;
-        font-size: 0.875rem;
-    }
-
-    .source-info dt {
-        color: var(--text-secondary);
-    }
-
-    .source-info dd {
-        margin: 0;
-        color: var(--text-primary);
-    }
-
     /* Entry actions (buttons) */
     .entry-actions {
         display: flex;
@@ -482,28 +453,20 @@
                         <dt>Updated</dt>
                         <dd>{{ entry.updated_at }}</dd>
                         {% endif %}
+                        {% if entry.source_transcript %}
+                        <dt>Source Transcript</dt>
+                        <dd>{{ entry.source_transcript }}</dd>
+                        {% endif %}
+                        {% if entry.source_thread %}
+                        <dt>Source Thread</dt>
+                        <dd>{{ entry.source_thread }}</dd>
+                        {% endif %}
                     </dl>
                 </details>
 
                 <div class="entry-content markdown-body">
                     {{ entry.content_html|safe }}
                 </div>
-
-                {% if entry.source_thread or entry.source_transcript %}
-                <footer class="entry-footer">
-                    <h3>Source</h3>
-                    <dl class="source-info">
-                        {% if entry.source_transcript %}
-                        <dt>Transcript</dt>
-                        <dd>{{ entry.source_transcript }}</dd>
-                        {% endif %}
-                        {% if entry.source_thread %}
-                        <dt>Thread</dt>
-                        <dd>{{ entry.source_thread }}</dd>
-                        {% endif %}
-                    </dl>
-                </footer>
-                {% endif %}
             </article>
 
             <div class="entry-actions">
