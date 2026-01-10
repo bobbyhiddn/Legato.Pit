@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}Categories - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .categories-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .categories-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    .categories-header h1 {
+        margin: 0;
+    }
+
+    .categories-description {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+    }
+
+    .category-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .category-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        cursor: grab;
+        transition: border-color 0.2s;
+    }
+
+    .category-card:hover {
+        border-color: var(--accent-color);
+    }
+
+    .category-card.dragging {
+        opacity: 0.5;
+    }
+
+    .category-drag-handle {
+        color: var(--text-secondary);
+        cursor: grab;
+        padding-top: 0.25rem;
+    }
+
+    .category-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .category-name {
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+
+    .category-slug {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        font-family: monospace;
+    }
+
+    .category-description {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .category-folder {
+        font-size: 0.75rem;
+        color: var(--accent-color);
+        font-family: monospace;
+        margin-top: 0.25rem;
+    }
+
+    .category-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-shrink: 0;
+    }
+
+    .category-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 200;
+    }
+
+    .category-modal.visible {
+        display: flex;
+    }
+
+    .modal-content {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 1.5rem;
+        max-width: 450px;
+        width: 90%;
+    }
+
+    .modal-content h3 {
+        margin: 0 0 1rem 0;
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group textarea {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .form-group textarea {
+        resize: vertical;
+        min-height: 60px;
+    }
+
+    .form-group .hint {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+
+    .btn-sm {
+        padding: 0.375rem 0.75rem;
+        font-size: 0.8125rem;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="categories-container">
+    <div class="categories-header">
+        <h1>Categories</h1>
+        <button class="btn btn-primary" onclick="showCreateModal()">+ New Category</button>
+    </div>
+
+    <p class="categories-description">
+        Customize how your knowledge is organized. These categories are used when classifying transcripts
+        and organizing your Library. Drag to reorder.
+    </p>
+
+    <div class="category-list" id="categoryList">
+        {% for cat in categories %}
+        <div class="category-card" data-id="{{ cat.id }}" draggable="true">
+            <span class="category-drag-handle">&#9776;</span>
+            <div class="category-info">
+                <div class="category-name">{{ cat.display_name }}</div>
+                <div class="category-slug">{{ cat.name }}</div>
+                {% if cat.description %}
+                <div class="category-description">{{ cat.description }}</div>
+                {% endif %}
+                <div class="category-folder">{{ cat.folder_name }}/</div>
+            </div>
+            <div class="category-actions">
+                <button class="btn btn-secondary btn-sm" onclick="showEditModal({{ cat.id }}, '{{ cat.name }}', '{{ cat.display_name }}', `{{ cat.description|default('', true)|e }}`, '{{ cat.folder_name }}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="deleteCategory({{ cat.id }}, '{{ cat.display_name }}')">Delete</button>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No categories defined. Click "New Category" to create one.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="category-modal" id="categoryModal">
+    <div class="modal-content">
+        <h3 id="modalTitle">New Category</h3>
+        <form id="categoryForm" onsubmit="submitCategory(event)">
+            <input type="hidden" id="categoryId" value="">
+
+            <div class="form-group">
+                <label for="displayName">Display Name</label>
+                <input type="text" id="displayName" required placeholder="e.g., Research Notes">
+            </div>
+
+            <div class="form-group">
+                <label for="categoryName">Slug</label>
+                <input type="text" id="categoryName" required placeholder="e.g., research" pattern="[a-z][a-z0-9-]*">
+                <div class="hint">Lowercase letters, numbers, hyphens. Used in URLs and classification.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" placeholder="What type of knowledge belongs here? This helps the classifier."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="folderName">GitHub Folder</label>
+                <input type="text" id="folderName" placeholder="e.g., research-notes">
+                <div class="hint">Leave empty to auto-generate from slug (adds 's' suffix).</div>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="submitBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Auto-generate slug from display name
+    document.getElementById('displayName').addEventListener('input', function() {
+        const nameInput = document.getElementById('categoryName');
+        if (!document.getElementById('categoryId').value && !nameInput.dataset.manual) {
+            nameInput.value = this.value.toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '');
+        }
+    });
+
+    // Mark name as manually edited
+    document.getElementById('categoryName').addEventListener('input', function() {
+        this.dataset.manual = 'true';
+    });
+
+    function showCreateModal() {
+        document.getElementById('modalTitle').textContent = 'New Category';
+        document.getElementById('categoryId').value = '';
+        document.getElementById('categoryForm').reset();
+        document.getElementById('categoryName').readOnly = false;
+        document.getElementById('categoryName').dataset.manual = '';
+        document.getElementById('submitBtn').textContent = 'Create';
+        document.getElementById('categoryModal').classList.add('visible');
+        document.getElementById('displayName').focus();
+    }
+
+    function showEditModal(id, name, displayName, description, folderName) {
+        document.getElementById('modalTitle').textContent = 'Edit Category';
+        document.getElementById('categoryId').value = id;
+        document.getElementById('categoryName').value = name;
+        document.getElementById('categoryName').readOnly = true;  // Can't change slug
+        document.getElementById('displayName').value = displayName;
+        document.getElementById('description').value = description;
+        document.getElementById('folderName').value = folderName;
+        document.getElementById('submitBtn').textContent = 'Save';
+        document.getElementById('categoryModal').classList.add('visible');
+        document.getElementById('displayName').focus();
+    }
+
+    function closeModal() {
+        document.getElementById('categoryModal').classList.remove('visible');
+        document.getElementById('categoryName').readOnly = false;
+    }
+
+    async function submitCategory(event) {
+        event.preventDefault();
+
+        const id = document.getElementById('categoryId').value;
+        const isEdit = !!id;
+
+        const data = {
+            name: document.getElementById('categoryName').value,
+            display_name: document.getElementById('displayName').value,
+            description: document.getElementById('description').value,
+            folder_name: document.getElementById('folderName').value,
+        };
+
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = true;
+        submitBtn.textContent = isEdit ? 'Saving...' : 'Creating...';
+
+        try {
+            const url = isEdit ? `/categories/api/${id}` : '/categories/api/create';
+            const method = isEdit ? 'PUT' : 'POST';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                alert(`Error: ${result.error}`);
+                submitBtn.disabled = false;
+                submitBtn.textContent = isEdit ? 'Save' : 'Create';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            submitBtn.disabled = false;
+            submitBtn.textContent = isEdit ? 'Save' : 'Create';
+        }
+    }
+
+    async function deleteCategory(id, name) {
+        if (!confirm(`Delete category "${name}"?\n\nExisting entries will keep their category but it won't appear in dropdowns.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/categories/api/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                const result = await response.json();
+                alert(`Error: ${result.error}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+
+    // Drag and drop reordering
+    const list = document.getElementById('categoryList');
+    let draggedItem = null;
+
+    list.querySelectorAll('.category-card').forEach(card => {
+        card.addEventListener('dragstart', () => {
+            draggedItem = card;
+            setTimeout(() => card.classList.add('dragging'), 0);
+        });
+
+        card.addEventListener('dragend', () => {
+            card.classList.remove('dragging');
+            saveOrder();
+        });
+
+        card.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(list, e.clientY);
+            if (afterElement == null) {
+                list.appendChild(draggedItem);
+            } else {
+                list.insertBefore(draggedItem, afterElement);
+            }
+        });
+    });
+
+    function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('.category-card:not(.dragging)')];
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    async function saveOrder() {
+        const order = [...list.querySelectorAll('.category-card')].map(c => parseInt(c.dataset.id));
+
+        try {
+            await fetch('/categories/api/reorder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order })
+            });
+        } catch (error) {
+            console.error('Failed to save order:', error);
+        }
+    }
+
+    // Close modal on escape or clicking outside
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    document.getElementById('categoryModal').addEventListener('click', (e) => {
+        if (e.target.id === 'categoryModal') closeModal();
+    });
+</script>
+{% endblock %}
