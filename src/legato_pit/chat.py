@@ -2,6 +2,7 @@
 Chat Blueprint - RAG-Enabled Conversational Interface
 
 Provides web UI and API for chatting with the knowledge base.
+Uses ChatSessionManager for in-memory buffering with periodic flush.
 """
 
 import os
@@ -16,6 +17,7 @@ from flask import (
 )
 
 from .core import login_required
+from .rag.chat_session_manager import get_chat_manager
 
 logger = logging.getLogger(__name__)
 
@@ -73,62 +75,48 @@ def get_services():
 
 
 def get_or_create_session(db_conn) -> str:
-    """Get current chat session or create a new one."""
+    """Get current chat session or create a new one.
+
+    Uses ChatSessionManager - session header is written to DB immediately,
+    messages are buffered in memory.
+    """
     session_id = session.get('chat_session_id')
+    user = session.get('user', {})
+    manager = get_chat_manager()
 
     if not session_id:
         session_id = secrets.token_urlsafe(16)
         session['chat_session_id'] = session_id
 
-        # Create session in database
-        user = session.get('user', {})
-        db_conn.execute(
-            """
-            INSERT INTO chat_sessions (session_id, user_id)
-            VALUES (?, ?)
-            """,
-            (session_id, user.get('username')),
-        )
-        db_conn.commit()
+    # Ensure session exists in manager (creates in DB if new)
+    manager.get_or_create_session(session_id, user.get('username'), db_conn)
 
     return session_id
 
 
 def get_chat_history(db_conn, session_id: str, limit: int = 20):
-    """Get recent chat history for a session."""
-    rows = db_conn.execute(
-        """
-        SELECT role, content, context_used, created_at
-        FROM chat_messages
-        WHERE session_id = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-        """,
-        (session_id, limit),
-    ).fetchall()
+    """Get recent chat history for a session.
 
-    # Reverse to get chronological order
+    Combines messages from DB and in-memory buffer.
+    """
+    manager = get_chat_manager()
+    messages = manager.get_messages(session_id, limit, db_conn)
+
     return [
         {
-            'role': r['role'],
-            'content': r['content'],
-            'context': json.loads(r['context_used']) if r['context_used'] else None,
-            'timestamp': r['created_at'],
+            'role': m['role'],
+            'content': m['content'],
+            'context': m.get('context_used'),
+            'timestamp': None,  # Not tracked in buffer
         }
-        for r in reversed(rows)
+        for m in messages
     ]
 
 
 def save_message(db_conn, session_id: str, role: str, content: str, context=None, model=None):
-    """Save a chat message to the database."""
-    db_conn.execute(
-        """
-        INSERT INTO chat_messages (session_id, role, content, context_used, model_used)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (session_id, role, content, json.dumps(context) if context else None, model),
-    )
-    db_conn.commit()
+    """Save a chat message (buffered in memory, flushed periodically)."""
+    manager = get_chat_manager()
+    manager.add_message(session_id, role, content, context, model, db_conn)
 
 
 @chat_bp.route('/')
@@ -205,13 +193,13 @@ def send_message():
         prompt_data = services['context'].build_prompt(message)
         context_entries = prompt_data.get('context_entries', [])
 
-        # Save user message
+        # Save user message (buffered)
         save_message(services['chat_db'], session_id, 'user', message)
 
         # Get LLM response
         response = chat_service.chat(messages)
 
-        # Save assistant message with context
+        # Save assistant message with context (buffered)
         save_message(
             services['chat_db'],
             session_id,
@@ -220,6 +208,10 @@ def send_message():
             context=context_entries,
             model=chat_service.model,
         )
+
+        # Flush turn to disk - ensures complete turns are never lost
+        manager = get_chat_manager()
+        manager.flush_session(session_id, services['chat_db'])
 
         return jsonify({
             'response': response,
@@ -307,8 +299,14 @@ def new_session():
     """Start a new chat session."""
     try:
         services = get_services()
+        manager = get_chat_manager()
 
-        # Clear current session
+        # Flush current session before clearing
+        old_session_id = session.get('chat_session_id')
+        if old_session_id:
+            manager.end_session(old_session_id, services['chat_db'])
+
+        # Clear from flask session
         session.pop('chat_session_id', None)
 
         # Create new one
@@ -330,6 +328,7 @@ def delete_session(session_id):
     """Delete a chat session."""
     try:
         services = get_services()
+        manager = get_chat_manager()
         user = session.get('user', {})
 
         # Verify ownership
@@ -341,7 +340,10 @@ def delete_session(session_id):
         if not row or row['user_id'] != user.get('username'):
             return jsonify({'error': 'Session not found'}), 404
 
-        # Delete messages and session
+        # Remove from memory cache (don't flush - we're deleting anyway)
+        manager._sessions.pop(session_id, None)
+
+        # Delete messages and session from DB
         services['chat_db'].execute(
             "DELETE FROM chat_messages WHERE session_id = ?",
             (session_id,),
@@ -352,7 +354,7 @@ def delete_session(session_id):
         )
         services['chat_db'].commit()
 
-        # Clear from session if current
+        # Clear from flask session if current
         if session.get('chat_session_id') == session_id:
             session.pop('chat_session_id', None)
 

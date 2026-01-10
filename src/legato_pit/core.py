@@ -4,6 +4,7 @@ Legato.Pit Core Application
 Dashboard and Transcript Dropbox for the LEGATO system.
 """
 import os
+import atexit
 import logging
 import secrets
 import threading
@@ -116,6 +117,23 @@ def create_app():
         init_agents_db() # agents.db - agent queue
         init_chat_db()   # chat.db - chat sessions/messages
         logger.info("All databases initialized (legato.db, agents.db, chat.db)")
+
+    # Initialize chat session manager (in-memory caching with periodic flush)
+    from .rag.chat_session_manager import init_chat_manager, shutdown_chat_manager
+    chat_manager = init_chat_manager(app)
+
+    # Register shutdown handler to flush all chat sessions
+    def cleanup_chat_sessions():
+        """Flush all chat sessions on shutdown."""
+        try:
+            with app.app_context():
+                from .rag.database import init_chat_db
+                db = init_chat_db()
+                shutdown_chat_manager(db)
+        except Exception as e:
+            logger.error(f"Error flushing chat sessions on shutdown: {e}")
+
+    atexit.register(cleanup_chat_sessions)
 
     # Background sync threads
     def start_background_sync():
