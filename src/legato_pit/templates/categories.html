@@ -204,6 +204,51 @@
         opacity: 0.9;
     }
 
+    /* Inactive categories section */
+    .inactive-section {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .inactive-section h2 {
+        font-size: 1rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+    }
+
+    .inactive-section p {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin-bottom: 1rem;
+    }
+
+    .inactive-card {
+        background: var(--card-bg);
+        border: 1px dashed var(--warning-color, #f59e0b);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+        opacity: 0.8;
+    }
+
+    .inactive-card:hover {
+        opacity: 1;
+    }
+
+    .btn-reactivate {
+        background: var(--warning-color, #f59e0b);
+        color: white;
+        border: none;
+    }
+
+    .btn-reactivate:hover {
+        filter: brightness(1.1);
+    }
+
     .form-input {
         width: 100%;
         padding: 0.5rem 0.75rem;
@@ -258,6 +303,22 @@
         </div>
         {% endfor %}
     </div>
+
+    {% if inactive_categories %}
+    <div class="inactive-section">
+        <h2>Inactive Categories</h2>
+        <p>These categories were deleted but may still have notes. Reactivate to restore them.</p>
+        {% for cat in inactive_categories %}
+        <div class="inactive-card">
+            <div class="category-info">
+                <div class="category-name">{{ cat.display_name }}</div>
+                <div class="category-slug">{{ cat.name }}</div>
+            </div>
+            <button class="btn btn-reactivate btn-sm" onclick="reactivateCategory('{{ cat.name }}')">Reactivate</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 
 <!-- Create/Edit Modal -->
@@ -550,6 +611,35 @@
             });
         } catch (error) {
             console.error('Failed to save order:', error);
+        }
+    }
+
+    // Reactivate an inactive category
+    async function reactivateCategory(categoryName) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Reactivating...';
+
+        try {
+            const response = await fetch('/categories/api/adopt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: categoryName })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+                btn.disabled = false;
+                btn.textContent = 'Reactivate';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Reactivate';
         }
     }
 

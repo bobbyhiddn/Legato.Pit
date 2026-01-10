@@ -46,21 +46,29 @@ def get_agents_db():
 
 
 def get_categories_with_counts():
-    """Get all user categories with entry counts, including orphaned categories.
+    """Get all user categories with entry counts, including orphaned/inactive categories.
 
     Returns categories from user_categories table (not just categories with entries),
     with a count of how many entries exist in each category.
 
-    Also detects "orphaned" categories - categories used in knowledge_entries but
-    not defined in user_categories - and includes them with a warning flag.
+    Also detects:
+    - "inactive" categories - exist in user_categories but is_active=0
+    - "orphaned" categories - used in knowledge_entries but not in user_categories at all
 
     Returns:
-        List of dicts with: category (name), display_name, count, folder_name, color, orphaned
+        List of dicts with: category (name), display_name, count, folder_name, color, orphaned, inactive
     """
     from .rag.database import get_user_categories
 
     db = get_db()
-    user_categories = get_user_categories(db, 'default')
+    user_categories = get_user_categories(db, 'default')  # Only active categories
+
+    # Also get inactive categories
+    inactive_categories = db.execute("""
+        SELECT id, name, display_name, folder_name, color
+        FROM user_categories
+        WHERE user_id = 'default' AND is_active = 0
+    """).fetchall()
 
     # Get entry counts per category
     counts = db.execute(
@@ -73,34 +81,107 @@ def get_categories_with_counts():
     ).fetchall()
     count_map = {row['category']: row['count'] for row in counts}
 
-    # Track which categories are defined
+    # Track all known categories (active + inactive)
     defined_categories = {cat['name'] for cat in user_categories}
+    defined_categories.update(cat['name'] for cat in inactive_categories)
 
-    # Merge categories with counts
+    # Merge active categories with counts
     result = []
     for cat in user_categories:
         result.append({
-            'category': cat['name'],  # Use 'name' as 'category' for template compatibility
+            'category': cat['name'],
             'display_name': cat['display_name'],
             'count': count_map.get(cat['name'], 0),
             'folder_name': cat['folder_name'],
             'color': cat.get('color', '#6366f1'),
             'orphaned': False,
+            'inactive': False,
         })
 
-    # Find orphaned categories (in entries but not in user_categories)
+    # Auto-reactivate inactive categories that have entries
+    for cat in inactive_categories:
+        count = count_map.get(cat['name'], 0)
+        if count > 0:  # Has entries - auto-reactivate
+            try:
+                db.execute("""
+                    UPDATE user_categories
+                    SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (cat['id'],))
+                db.commit()
+
+                logger.info(f"Auto-reactivated category: '{cat['name']}' ({count} entries)")
+
+                # Add as regular category
+                result.append({
+                    'category': cat['name'],
+                    'display_name': cat['display_name'],
+                    'count': count,
+                    'folder_name': cat['folder_name'],
+                    'color': cat['color'] or '#9ca3af',
+                    'orphaned': False,
+                    'inactive': False,
+                })
+                defined_categories.add(cat['name'])
+
+            except Exception as e:
+                logger.error(f"Failed to auto-reactivate category '{cat['name']}': {e}")
+                # Fall back to showing as inactive
+                result.append({
+                    'category': cat['name'],
+                    'display_name': cat['display_name'],
+                    'count': count,
+                    'folder_name': cat['folder_name'],
+                    'color': cat['color'] or '#9ca3af',
+                    'orphaned': True,
+                    'inactive': True,
+                })
+
+    # Find truly orphaned categories (in entries but not in user_categories at all)
+    # Auto-adopt them to ensure permanence
     for category_name, count in count_map.items():
         if category_name and category_name not in defined_categories:
-            # This category exists in entries but not in user_categories
-            result.append({
-                'category': category_name,
-                'display_name': category_name.replace('-', ' ').title(),  # Best guess display name
-                'count': count,
-                'folder_name': f"{category_name}s",  # Best guess folder
-                'color': '#9ca3af',  # Gray for orphaned
-                'orphaned': True,
-            })
-            logger.warning(f"Orphaned category detected: '{category_name}' with {count} entries")
+            # Auto-create the category record
+            display_name = category_name.replace('-', ' ').title()
+            folder_name = f"{category_name}s"
+
+            try:
+                max_order = db.execute(
+                    "SELECT MAX(sort_order) FROM user_categories WHERE user_id = 'default'"
+                ).fetchone()[0] or 0
+
+                db.execute("""
+                    INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
+                    VALUES ('default', ?, ?, 'Auto-created from existing entries', ?, ?, '#9ca3af')
+                """, (category_name, display_name, folder_name, max_order + 1))
+                db.commit()
+
+                logger.info(f"Auto-adopted orphaned category: '{category_name}' ({count} entries)")
+
+                # Add as regular category now
+                result.append({
+                    'category': category_name,
+                    'display_name': display_name,
+                    'count': count,
+                    'folder_name': folder_name,
+                    'color': '#9ca3af',
+                    'orphaned': False,
+                    'inactive': False,
+                })
+                defined_categories.add(category_name)
+
+            except Exception as e:
+                logger.error(f"Failed to auto-adopt category '{category_name}': {e}")
+                # Fall back to showing as orphaned
+                result.append({
+                    'category': category_name,
+                    'display_name': display_name,
+                    'count': count,
+                    'folder_name': folder_name,
+                    'color': '#9ca3af',
+                    'orphaned': True,
+                    'inactive': False,
+                })
 
     return result
 

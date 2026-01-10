@@ -231,7 +231,36 @@ def api_adopt_category():
     try:
         user_id = get_user_id()
 
-        # Get next sort_order
+        # Check if category exists but is inactive (soft-deleted)
+        existing = db.execute(
+            "SELECT id, is_active FROM user_categories WHERE user_id = ? AND name = ?",
+            (user_id, name)
+        ).fetchone()
+
+        if existing:
+            if existing['is_active'] == 1:
+                # Already active - this shouldn't happen but handle it
+                return jsonify({'error': f'Category "{name}" is already active'}), 409
+
+            # Reactivate the inactive category
+            db.execute("""
+                UPDATE user_categories
+                SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (existing['id'],))
+            db.commit()
+
+            logger.info(f"Reactivated category: {name} (id={existing['id']}, {entry_count} entries)")
+
+            return jsonify({
+                'success': True,
+                'id': existing['id'],
+                'name': name,
+                'reactivated': True,
+                'entry_count': entry_count,
+            })
+
+        # Category doesn't exist at all - create it
         max_order = db.execute(
             "SELECT MAX(sort_order) FROM user_categories WHERE user_id = ?",
             (user_id,)
@@ -256,8 +285,6 @@ def api_adopt_category():
         })
 
     except Exception as e:
-        if 'UNIQUE constraint' in str(e):
-            return jsonify({'error': f'Category "{name}" already exists in database'}), 409
         logger.error(f"Failed to adopt category: {e}")
         return jsonify({'error': str(e)}), 500
 
@@ -560,7 +587,16 @@ def index():
     user_id = get_user_id()
     categories = get_user_categories(db, user_id)
 
-    return render_template('categories.html', categories=categories)
+    # Also get inactive categories so users can reactivate them
+    inactive_rows = db.execute("""
+        SELECT id, name, display_name, description, folder_name, color, sort_order
+        FROM user_categories
+        WHERE user_id = ? AND is_active = 0
+        ORDER BY name
+    """, (user_id,)).fetchall()
+    inactive_categories = [dict(row) for row in inactive_rows]
+
+    return render_template('categories.html', categories=categories, inactive_categories=inactive_categories)
 
 
 @categories_bp.route('/api/debug', methods=['GET'])
@@ -583,9 +619,27 @@ def api_debug_categories():
         ORDER BY sort_order
     """, (user_id,)).fetchall()
 
+    # Get categories used in entries
+    entry_categories = db.execute("""
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE category IS NOT NULL AND category != ''
+        GROUP BY category
+    """).fetchall()
+
+    # Find mismatches
+    db_category_names = {row['name'] for row in all_categories}
+    entry_category_names = {row['category'] for row in entry_categories}
+    orphaned = entry_category_names - db_category_names
+    unused = db_category_names - entry_category_names
+
     return jsonify({
         'db_path': str(get_db_path('legato.db')),
         'user_id': user_id,
-        'total_categories': len(all_categories),
-        'categories': [dict(row) for row in all_categories]
+        'total_in_db': len(all_categories),
+        'total_in_entries': len(entry_categories),
+        'categories_in_db': [dict(row) for row in all_categories],
+        'categories_in_entries': [{'name': row['category'], 'count': row['count']} for row in entry_categories],
+        'orphaned_in_entries': list(orphaned),
+        'unused_in_db': list(unused),
     })
