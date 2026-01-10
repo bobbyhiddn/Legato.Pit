@@ -4,12 +4,106 @@
 
 {% block head %}
 <style>
-    .category-header {
+    .library-layout {
+        display: flex;
+        gap: 1.5rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .library-sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 80px;
+        height: fit-content;
+        max-height: calc(100vh - 100px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        flex-wrap: wrap;
-        gap: 1rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .sidebar-link.active .sidebar-count {
+        background: rgba(255,255,255,0.2);
+        color: white;
+    }
+
+    .sidebar-search {
+        margin-bottom: 1rem;
+    }
+
+    .sidebar-search input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .category-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .category-header h1 {
+        margin: 0 0 0.25rem 0;
+        text-transform: capitalize;
+    }
+
+    .category-header .subtitle {
+        color: var(--text-secondary);
+        margin: 0;
     }
 
     .entry-list {
@@ -82,49 +176,87 @@
     .chord-badge.pending {
         background: var(--warning-color);
     }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .sidebar-nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="category-container">
-    <nav class="breadcrumb">
-        <a href="{{ url_for('library.index') }}">Library</a>
-        <span class="separator">/</span>
-        <span class="current">{{ category }}</span>
-    </nav>
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-search">
+            <form action="{{ url_for('library.search') }}" method="GET">
+                <input type="text" name="q" placeholder="Search...">
+            </form>
+        </div>
 
-    <header class="category-header">
-        <div>
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}"
+                   class="sidebar-link {% if cat.category == category %}active{% endif %}">
+                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Quick Links</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Overview</span>
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <header class="category-header">
             <h1>{{ category }}</h1>
             <p class="subtitle">{{ entries|length }} entries</p>
-        </div>
-    </header>
+        </header>
 
-    <div class="entry-list">
-        {% for entry in entries %}
-        <div class="entry-card" data-entry-id="{{ entry.entry_id }}">
-            <div class="entry-info">
-                <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
-                    <span class="entry-title">{{ entry.title }}</span>
-                    <span class="entry-date">{{ entry.created_at[:10] }}</span>
-                </a>
+        <div class="entry-list">
+            {% for entry in entries %}
+            <div class="entry-card" data-entry-id="{{ entry.entry_id }}">
+                <div class="entry-info">
+                    <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="entry-link">
+                        <span class="entry-title">{{ entry.title }}</span>
+                        <span class="entry-date">{{ entry.created_at[:10] }}</span>
+                    </a>
+                </div>
+                <div class="entry-actions">
+                    {% if entry.chord_status == 'active' %}
+                    <span class="chord-badge">Active</span>
+                    {% elif entry.chord_status == 'pending' %}
+                    <span class="chord-badge pending">Pending</span>
+                    {% endif %}
+                    <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
+                </div>
             </div>
-            <div class="entry-actions">
-                {% if entry.chord_status == 'active' %}
-                <span class="chord-badge">Active</span>
-                {% elif entry.chord_status == 'pending' %}
-                <span class="chord-badge pending">Pending</span>
-                {% endif %}
-                <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
-            </div>
+            {% else %}
+            <p class="empty-state">No entries in this category</p>
+            {% endfor %}
         </div>
-        {% else %}
-        <p class="empty-state">No entries in this category</p>
-        {% endfor %}
-    </div>
-
-    <div class="category-actions">
-        <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
-    </div>
+    </main>
 </div>
 {% endblock %}

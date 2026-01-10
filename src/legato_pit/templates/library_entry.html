@@ -2,112 +2,338 @@
 
 {% block title %}{{ entry.title }} - {{ app_name }}{% endblock %}
 
-{% block content %}
-<div class="entry-container">
-    <nav class="breadcrumb">
-        <a href="{{ url_for('library.index') }}">Library</a>
-        <span class="separator">/</span>
-        {% if entry.category %}
-        <a href="{{ url_for('library.view_category', category=entry.category) }}">{{ entry.category }}</a>
-        <span class="separator">/</span>
-        {% endif %}
-        <span class="current">{{ entry.title }}</span>
-    </nav>
+{% block head %}
+<style>
+    .library-layout {
+        display: flex;
+        gap: 1.5rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
 
-    <!-- View Mode -->
-    <div id="viewMode">
-        <article class="entry-article">
-            <header class="entry-header">
-                <h1>{{ entry.title }}</h1>
-                <div class="entry-meta">
-                    {% if entry.category %}
-                    <span class="entry-category badge">{{ entry.category }}</span>
-                    {% endif %}
-                    <span class="entry-date">{{ entry.created_at[:10] }}</span>
+    .library-sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 80px;
+        height: fit-content;
+        max-height: calc(100vh - 100px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .sidebar-link.active .sidebar-count {
+        background: rgba(255,255,255,0.2);
+        color: white;
+    }
+
+    .sidebar-search {
+        margin-bottom: 1rem;
+    }
+
+    .sidebar-search input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    /* Category selector */
+    .category-selector {
+        position: relative;
+        display: inline-block;
+    }
+
+    .category-badge {
+        cursor: pointer;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: capitalize;
+        background: var(--accent-color);
+        color: white;
+        border: none;
+        transition: opacity 0.2s;
+    }
+
+    .category-badge:hover {
+        opacity: 0.8;
+    }
+
+    .category-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 0.25rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 100;
+        display: none;
+        min-width: 200px;
+    }
+
+    .category-dropdown.open {
+        display: block;
+    }
+
+    .category-option {
+        display: block;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.875rem;
+        text-transform: capitalize;
+    }
+
+    .category-option:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .category-option.current {
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+
+    .category-option .category-desc {
+        display: block;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        font-weight: normal;
+        text-transform: none;
+    }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .sidebar-nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-search">
+            <form action="{{ url_for('library.search') }}" method="GET">
+                <input type="text" name="q" placeholder="Search...">
+            </form>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}"
+                   class="sidebar-link {% if cat.category == entry.category %}active{% endif %}">
+                    <span>{{ cat.category or 'Uncategorized' }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Quick Links</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Overview</span>
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <!-- View Mode -->
+        <div id="viewMode">
+            <article class="entry-article">
+                <header class="entry-header">
+                    <h1>{{ entry.title }}</h1>
+                    <div class="entry-meta">
+                        {% if entry.category %}
+                        <div class="category-selector">
+                            <button class="category-badge" onclick="toggleCategoryDropdown(event)">{{ entry.category }}</button>
+                            <div class="category-dropdown" id="categoryDropdown">
+                                <button class="category-option {% if entry.category == 'epiphany' %}current{% endif %}" onclick="changeCategory('epiphany')">
+                                    epiphany
+                                    <span class="category-desc">Major breakthrough or insight</span>
+                                </button>
+                                <button class="category-option {% if entry.category == 'concept' %}current{% endif %}" onclick="changeCategory('concept')">
+                                    concept
+                                    <span class="category-desc">Technical definition or explanation</span>
+                                </button>
+                                <button class="category-option {% if entry.category == 'reflection' %}current{% endif %}" onclick="changeCategory('reflection')">
+                                    reflection
+                                    <span class="category-desc">Personal thought or observation</span>
+                                </button>
+                                <button class="category-option {% if entry.category == 'glimmer' %}current{% endif %}" onclick="changeCategory('glimmer')">
+                                    glimmer
+                                    <span class="category-desc">Captured moment, photographing a feeling</span>
+                                </button>
+                                <button class="category-option {% if entry.category == 'reminder' %}current{% endif %}" onclick="changeCategory('reminder')">
+                                    reminder
+                                    <span class="category-desc">Action item or follow-up</span>
+                                </button>
+                                <button class="category-option {% if entry.category == 'worklog' %}current{% endif %}" onclick="changeCategory('worklog')">
+                                    worklog
+                                    <span class="category-desc">Summary of work done</span>
+                                </button>
+                            </div>
+                        </div>
+                        {% endif %}
+                        <span class="entry-date">{{ entry.created_at[:10] }}</span>
+                    </div>
+                </header>
+
+                <details class="entry-metadata">
+                    <summary>Metadata</summary>
+                    <dl class="metadata-list">
+                        <dt>Entry ID</dt>
+                        <dd><code>{{ entry.entry_id }}</code></dd>
+                        {% if entry.file_path %}
+                        <dt>File Path</dt>
+                        <dd><code>{{ entry.file_path }}</code></dd>
+                        {% endif %}
+                        <dt>Created</dt>
+                        <dd>{{ entry.created_at }}</dd>
+                        {% if entry.updated_at and entry.updated_at != entry.created_at %}
+                        <dt>Updated</dt>
+                        <dd>{{ entry.updated_at }}</dd>
+                        {% endif %}
+                    </dl>
+                </details>
+
+                <div class="entry-content markdown-body">
+                    {{ entry.content_html|safe }}
                 </div>
+
+                {% if entry.source_thread or entry.source_transcript %}
+                <footer class="entry-footer">
+                    <h3>Source</h3>
+                    <dl class="source-info">
+                        {% if entry.source_transcript %}
+                        <dt>Transcript</dt>
+                        <dd>{{ entry.source_transcript }}</dd>
+                        {% endif %}
+                        {% if entry.source_thread %}
+                        <dt>Thread</dt>
+                        <dd>{{ entry.source_thread }}</dd>
+                        {% endif %}
+                    </dl>
+                </footer>
+                {% endif %}
+            </article>
+
+            <div class="entry-actions">
+                {% if entry.file_path %}
+                <button type="button" onclick="showEditPane()" class="btn btn-primary">Edit</button>
+                {% endif %}
+                {% if entry.chord %}
+                <a href="{{ entry.chord.url }}" target="_blank" class="btn btn-accent">
+                    View Chord: {{ entry.chord.repo }}
+                </a>
+                {% endif %}
+                <button type="button" class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Add to Chord</button>
+            </div>
+        </div>
+
+        <!-- Edit Mode -->
+        <div id="editMode" style="display: none;">
+            <header class="entry-header">
+                <h1>Editing: {{ entry.title }}</h1>
             </header>
 
-            <details class="entry-metadata">
-                <summary>Metadata</summary>
-                <dl class="metadata-list">
-                    <dt>Entry ID</dt>
-                    <dd><code>{{ entry.entry_id }}</code></dd>
-                    {% if entry.category %}
-                    <dt>Category</dt>
-                    <dd>{{ entry.category }}</dd>
-                    {% endif %}
-                    {% if entry.file_path %}
-                    <dt>File Path</dt>
-                    <dd><code>{{ entry.file_path }}</code></dd>
-                    {% endif %}
-                    <dt>Created</dt>
-                    <dd>{{ entry.created_at }}</dd>
-                    {% if entry.updated_at and entry.updated_at != entry.created_at %}
-                    <dt>Updated</dt>
-                    <dd>{{ entry.updated_at }}</dd>
-                    {% endif %}
-                </dl>
-            </details>
+            <div class="edit-pane">
+                <textarea id="contentEditor" class="editor-textarea">{{ entry.content }}</textarea>
 
-            <div class="entry-content markdown-body">
-                {{ entry.content_html|safe }}
+                <div class="edit-actions">
+                    <input type="text" id="commitMessage"
+                           placeholder="Commit message (e.g., Fix typo, Update section...)"
+                           class="form-input">
+                    <button type="button" onclick="saveEntry()" class="btn btn-primary" id="saveBtn">
+                        Save & Commit
+                    </button>
+                    <button type="button" onclick="cancelEdit()" class="btn btn-secondary">
+                        Cancel
+                    </button>
+                </div>
+
+                <div id="editStatus" class="edit-status" style="display: none;"></div>
             </div>
-
-            {% if entry.source_thread or entry.source_transcript %}
-            <footer class="entry-footer">
-                <h3>Source</h3>
-                <dl class="source-info">
-                    {% if entry.source_transcript %}
-                    <dt>Transcript</dt>
-                    <dd>{{ entry.source_transcript }}</dd>
-                    {% endif %}
-                    {% if entry.source_thread %}
-                    <dt>Thread</dt>
-                    <dd>{{ entry.source_thread }}</dd>
-                    {% endif %}
-                </dl>
-            </footer>
-            {% endif %}
-        </article>
-
-        <div class="entry-actions">
-            {% if entry.file_path %}
-            <button type="button" onclick="showEditPane()" class="btn btn-primary">Edit</button>
-            {% endif %}
-            {% if entry.chord %}
-            <a href="{{ entry.chord.url }}" target="_blank" class="btn btn-accent">
-                View Chord: {{ entry.chord.repo }}
-            </a>
-            {% endif %}
-            <button type="button" class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Add to Chord</button>
-            <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
         </div>
-    </div>
-
-    <!-- Edit Mode -->
-    <div id="editMode" style="display: none;">
-        <header class="entry-header">
-            <h1>Editing: {{ entry.title }}</h1>
-        </header>
-
-        <div class="edit-pane">
-            <textarea id="contentEditor" class="editor-textarea">{{ entry.content }}</textarea>
-
-            <div class="edit-actions">
-                <input type="text" id="commitMessage"
-                       placeholder="Commit message (e.g., Fix typo, Update section...)"
-                       class="form-input">
-                <button type="button" onclick="saveEntry()" class="btn btn-primary" id="saveBtn">
-                    Save & Commit
-                </button>
-                <button type="button" onclick="cancelEdit()" class="btn btn-secondary">
-                    Cancel
-                </button>
-            </div>
-
-            <div id="editStatus" class="edit-status" style="display: none;"></div>
-        </div>
-    </div>
+    </main>
 </div>
 {% endblock %}
 
@@ -121,6 +347,47 @@
     const saveBtn = document.getElementById('saveBtn');
     const editStatus = document.getElementById('editStatus');
 
+    // Category selector
+    function toggleCategoryDropdown(event) {
+        event.stopPropagation();
+        const dropdown = document.getElementById('categoryDropdown');
+        dropdown.classList.toggle('open');
+    }
+
+    document.addEventListener('click', () => {
+        const dropdown = document.getElementById('categoryDropdown');
+        if (dropdown) dropdown.classList.remove('open');
+    });
+
+    async function changeCategory(newCategory) {
+        const dropdown = document.getElementById('categoryDropdown');
+        dropdown.classList.remove('open');
+
+        const badge = document.querySelector('.category-badge');
+        const originalText = badge.textContent;
+        badge.textContent = 'Moving...';
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}/category`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCategory })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+                badge.textContent = originalText;
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            badge.textContent = originalText;
+        }
+    }
+
     function showEditPane() {
         viewMode.style.display = 'none';
         editMode.style.display = 'block';
@@ -130,7 +397,6 @@
     function cancelEdit() {
         editMode.style.display = 'none';
         viewMode.style.display = 'block';
-        // Reset content to original
         contentEditor.value = {{ entry.content|tojson }};
         commitMessage.value = '';
         editStatus.style.display = 'none';
@@ -160,7 +426,6 @@
 
             if (data.status === 'success') {
                 showStatus(`Saved! Commit: ${data.commit_sha.slice(0, 7)}`, 'success');
-                // Reload page after short delay to show updated content
                 setTimeout(() => window.location.reload(), 1000);
             } else {
                 showStatus(`Error: ${data.error}`, 'error');
@@ -178,61 +443,6 @@
         editStatus.textContent = message;
         editStatus.className = `edit-status ${type}`;
         editStatus.style.display = 'block';
-    }
-
-    async function generateChord() {
-        // Prompt for a concise project name
-        const projectName = prompt(
-            'Enter a short project name (lowercase, hyphens ok):\n\n' +
-            'Examples: voice-notes, dark-mode, api-cache',
-            ''
-        );
-
-        if (!projectName) {
-            return;
-        }
-
-        // Validate the name
-        const cleanName = projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-        if (!cleanName || cleanName.length < 2) {
-            alert('Please enter a valid project name (at least 2 characters)');
-            return;
-        }
-
-        if (cleanName.length > 30) {
-            alert('Project name too long. Please use 30 characters or less.');
-            return;
-        }
-
-        const chordBtn = document.getElementById('chordBtn');
-        chordBtn.disabled = true;
-        chordBtn.textContent = 'Queueing...';
-
-        try {
-            const response = await fetch('/agents/api/from-entry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    entry_id: entryId,
-                    project_name: cleanName
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.status === 'queued') {
-                alert(`Queued as agent: ${data.queue_id}\n\nGo to Agents tab to approve.`);
-                chordBtn.textContent = 'Queued!';
-            } else {
-                alert(`Error: ${data.error}`);
-                chordBtn.disabled = false;
-                chordBtn.textContent = 'Generate Chord';
-            }
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-            chordBtn.disabled = false;
-            chordBtn.textContent = 'Generate Chord';
-        }
     }
 </script>
 {% endblock %}

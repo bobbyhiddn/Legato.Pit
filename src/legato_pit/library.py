@@ -49,6 +49,7 @@ def trigger_background_sync():
     """Trigger a background library sync if not already running.
 
     This is called when the library page is loaded to ensure fresh data.
+    Also cleans up orphaned chord references.
     """
     global _sync_in_progress
 
@@ -65,6 +66,7 @@ def trigger_background_sync():
             from .rag.library_sync import LibrarySync
             from .rag.embedding_service import EmbeddingService
             from .rag.openai_provider import OpenAIEmbeddingProvider
+            from .chords import fetch_chord_repos
 
             token = os.environ.get('SYSTEM_PAT')
             if not token:
@@ -86,6 +88,42 @@ def trigger_background_sync():
 
             if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
                 logger.info(f"On-load library sync: {stats}")
+
+            # Cleanup orphaned chord references
+            org = os.environ.get('LEGATO_ORG', 'bobbyhiddn')
+            try:
+                notes_with_chords = db.execute(
+                    """
+                    SELECT entry_id, chord_repo FROM knowledge_entries
+                    WHERE chord_status = 'active' AND chord_repo IS NOT NULL
+                    """
+                ).fetchall()
+
+                if notes_with_chords:
+                    valid_repos = fetch_chord_repos(token, org)
+                    valid_repo_names = {r['name'] for r in valid_repos}
+
+                    orphan_count = 0
+                    for note in notes_with_chords:
+                        chord_repo = note['chord_repo']
+                        repo_name = chord_repo.split('/')[-1] if '/' in chord_repo else chord_repo
+                        if repo_name not in valid_repo_names:
+                            db.execute(
+                                """
+                                UPDATE knowledge_entries
+                                SET chord_status = NULL, chord_repo = NULL, chord_id = NULL
+                                WHERE entry_id = ?
+                                """,
+                                (note['entry_id'],)
+                            )
+                            orphan_count += 1
+
+                    if orphan_count > 0:
+                        db.commit()
+                        logger.info(f"Cleaned up {orphan_count} orphaned chord references")
+
+            except Exception as e:
+                logger.warning(f"Orphan cleanup failed: {e}")
 
         except Exception as e:
             logger.error(f"On-load library sync failed: {e}")
@@ -254,7 +292,21 @@ def view_entry(entry_id: str):
             'approved_at': chord_info['approved_at'],
         }
 
-    return render_template('library_entry.html', entry=entry_dict)
+    # Get categories for sidebar
+    categories = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
+    return render_template(
+        'library_entry.html',
+        entry=entry_dict,
+        categories=[dict(c) for c in categories],
+    )
 
 
 @library_bp.route('/category/<category>')
@@ -273,10 +325,21 @@ def view_category(category: str):
         (category,),
     ).fetchall()
 
+    # Get categories for sidebar
+    categories = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
     return render_template(
         'library_category.html',
         category=category,
         entries=[dict(e) for e in entries],
+        categories=[dict(c) for c in categories],
     )
 
 
@@ -846,3 +909,244 @@ def api_save_entry(entry_id: str):
             'status': 'error',
             'error': str(e),
         }), 500
+
+
+@library_bp.route('/api/entry/<path:entry_id>/category', methods=['POST'])
+@login_required
+def api_update_category(entry_id: str):
+    """Update an entry's category.
+
+    This moves the file to the new category folder in GitHub and updates frontmatter.
+
+    Request body:
+    {
+        "category": "concept"
+    }
+
+    Valid categories: epiphany, concept, reflection, glimmer, reminder, worklog
+
+    Response:
+    {
+        "status": "success",
+        "entry_id": "kb-abc123",
+        "old_category": "glimmer",
+        "new_category": "concept"
+    }
+    """
+    import re
+
+    VALID_CATEGORIES = {'epiphany', 'concept', 'reflection', 'glimmer', 'reminder', 'worklog'}
+    # Category folder names (plural)
+    CATEGORY_FOLDERS = {
+        'epiphany': 'epiphanys',
+        'concept': 'concepts',
+        'reflection': 'reflections',
+        'glimmer': 'glimmers',
+        'reminder': 'reminders',
+        'worklog': 'worklogs',
+    }
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    new_category = data.get('category', '').lower().strip()
+    if new_category not in VALID_CATEGORIES:
+        return jsonify({
+            'error': f'Invalid category. Must be one of: {", ".join(sorted(VALID_CATEGORIES))}'
+        }), 400
+
+    try:
+        db = get_db()
+
+        # Get current category and file path
+        entry = db.execute(
+            "SELECT category, file_path FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': 'Entry not found'}), 404
+
+        old_category = entry['category']
+        old_file_path = entry['file_path']
+
+        if old_category == new_category:
+            return jsonify({
+                'status': 'success',
+                'message': 'Category unchanged',
+                'entry_id': entry_id,
+                'category': new_category
+            })
+
+        new_file_path = old_file_path
+        github_updated = False
+
+        # Move file in GitHub if file_path exists
+        if old_file_path:
+            try:
+                from .rag.github_service import get_file_content, delete_file, create_file
+
+                token = current_app.config.get('SYSTEM_PAT')
+                repo = 'bobbyhiddn/Legato.Library'
+
+                # Get current content
+                content = get_file_content(repo, old_file_path, token)
+                if content:
+                    # Update category in frontmatter
+                    if content.startswith('---'):
+                        parts = content.split('---', 2)
+                        if len(parts) >= 3:
+                            frontmatter = parts[1]
+                            body = parts[2]
+
+                            # Replace category line
+                            new_frontmatter = re.sub(
+                                r'^category:\s*.*$',
+                                f'category: {new_category}',
+                                frontmatter,
+                                flags=re.MULTILINE
+                            )
+
+                            content = f'---{new_frontmatter}---{body}'
+
+                    # Calculate new file path
+                    # Old: glimmers/2024-01-10-something.md -> New: concepts/2024-01-10-something.md
+                    filename = old_file_path.split('/')[-1]
+                    new_folder = CATEGORY_FOLDERS.get(new_category, f'{new_category}s')
+                    new_file_path = f'{new_folder}/{filename}'
+
+                    # Create file in new location
+                    create_file(
+                        repo=repo,
+                        path=new_file_path,
+                        content=content,
+                        message=f'Move to {new_category}: {filename}',
+                        token=token
+                    )
+
+                    # Delete from old location
+                    delete_file(
+                        repo=repo,
+                        path=old_file_path,
+                        message=f'Moved to {new_folder}/',
+                        token=token
+                    )
+
+                    github_updated = True
+                    logger.info(f"Moved {old_file_path} -> {new_file_path} in GitHub")
+
+            except Exception as e:
+                logger.warning(f"Could not move file in GitHub: {e}")
+                # Continue anyway - DB will be updated
+
+        # Update in database
+        db.execute(
+            "UPDATE knowledge_entries SET category = ?, file_path = ? WHERE entry_id = ?",
+            (new_category, new_file_path, entry_id)
+        )
+        db.commit()
+
+        logger.info(f"Changed category for {entry_id}: {old_category} -> {new_category}")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'old_category': old_category,
+            'new_category': new_category,
+            'old_path': old_file_path,
+            'new_path': new_file_path,
+            'github_updated': github_updated
+        })
+
+    except Exception as e:
+        logger.error(f"Update category failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@library_bp.route('/api/cleanup-orphans', methods=['POST'])
+@login_required
+def api_cleanup_orphans():
+    """Find and reset notes with orphaned chord references.
+
+    Checks notes with chord_status='active' against actual chord repos.
+    If the chord repo no longer exists, resets the note's chord fields.
+
+    Response:
+    {
+        "status": "success",
+        "orphans_found": 2,
+        "orphans_reset": ["kb-abc123", "kb-def456"]
+    }
+    """
+    from .chords import fetch_chord_repos
+
+    try:
+        db = get_db()
+        token = current_app.config.get('SYSTEM_PAT')
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+
+        if not token:
+            return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+        # Get all notes with active chord status
+        notes_with_chords = db.execute(
+            """
+            SELECT entry_id, title, chord_repo, chord_status
+            FROM knowledge_entries
+            WHERE chord_status = 'active' AND chord_repo IS NOT NULL
+            """
+        ).fetchall()
+
+        if not notes_with_chords:
+            return jsonify({
+                'status': 'success',
+                'orphans_found': 0,
+                'orphans_reset': [],
+                'message': 'No notes with active chords found'
+            })
+
+        # Fetch all valid chord repos from GitHub
+        valid_repos = fetch_chord_repos(token, org)
+        valid_repo_names = {r['name'] for r in valid_repos}
+
+        # Find orphaned notes
+        orphans = []
+        for note in notes_with_chords:
+            chord_repo = note['chord_repo']
+            # chord_repo might be full name like "bobbyhiddn/Lab.foo.Chord" or just "Lab.foo.Chord"
+            repo_name = chord_repo.split('/')[-1] if '/' in chord_repo else chord_repo
+
+            if repo_name not in valid_repo_names:
+                orphans.append({
+                    'entry_id': note['entry_id'],
+                    'title': note['title'],
+                    'chord_repo': chord_repo
+                })
+
+        # Reset orphaned notes
+        reset_ids = []
+        for orphan in orphans:
+            db.execute(
+                """
+                UPDATE knowledge_entries
+                SET chord_status = NULL, chord_repo = NULL, chord_id = NULL
+                WHERE entry_id = ?
+                """,
+                (orphan['entry_id'],)
+            )
+            reset_ids.append(orphan['entry_id'])
+            logger.info(f"Reset orphaned note: {orphan['entry_id']} (was linked to {orphan['chord_repo']})")
+
+        db.commit()
+
+        return jsonify({
+            'status': 'success',
+            'orphans_found': len(orphans),
+            'orphans_reset': reset_ids,
+            'details': orphans
+        })
+
+    except Exception as e:
+        logger.error(f"Cleanup orphans failed: {e}")
+        return jsonify({'error': str(e)}), 500
