@@ -213,6 +213,19 @@ def send_message():
         manager = get_chat_manager()
         manager.flush_session(session_id, services['chat_db'])
 
+        # Auto-title the session if no title yet (use first 50 chars of first message)
+        session_row = services['chat_db'].execute(
+            "SELECT title FROM chat_sessions WHERE session_id = ?",
+            (session_id,)
+        ).fetchone()
+        if session_row and not session_row['title']:
+            title = message[:50] + ('...' if len(message) > 50 else '')
+            services['chat_db'].execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
+                (title, session_id)
+            )
+            services['chat_db'].commit()
+
         return jsonify({
             'response': response,
             'context': context_entries if include_context else [],
@@ -319,6 +332,40 @@ def new_session():
 
     except Exception as e:
         logger.error(f"New session failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/sessions/<session_id>/load', methods=['POST'])
+@login_required
+def load_session(session_id):
+    """Switch to/load a specific chat session.
+
+    Sets the current session in the Flask session and returns the session info.
+    """
+    try:
+        services = get_services()
+        user = session.get('user', {})
+
+        # Verify ownership
+        row = services['chat_db'].execute(
+            "SELECT user_id, title FROM chat_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+        if not row or row['user_id'] != user.get('username'):
+            return jsonify({'error': 'Session not found'}), 404
+
+        # Set as current session
+        session['chat_session_id'] = session_id
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'title': row['title'],
+        })
+
+    except Exception as e:
+        logger.error(f"Load session failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 

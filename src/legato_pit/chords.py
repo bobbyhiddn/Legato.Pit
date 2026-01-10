@@ -8,13 +8,21 @@ Fetches repos with 'legato-chord' topic from GitHub.
 import logging
 
 import requests
-from flask import Blueprint, render_template, jsonify, current_app
+from flask import Blueprint, render_template, jsonify, current_app, g
 
 from .core import login_required
 
 logger = logging.getLogger(__name__)
 
 chords_bp = Blueprint('chords', __name__, url_prefix='/chords')
+
+
+def get_legato_db():
+    """Get legato database connection."""
+    if 'legato_db_conn' not in g:
+        from .rag.database import init_db
+        g.legato_db_conn = init_db()
+    return g.legato_db_conn
 
 
 def fetch_chord_repos(token: str, org: str) -> list[dict]:
@@ -198,3 +206,111 @@ def api_repo_details(repo_name: str):
     details = fetch_repo_details(token, repo_name)
 
     return jsonify(details)
+
+
+@chords_bp.route('/api/repo/<path:repo_name>', methods=['DELETE'])
+@login_required
+def api_delete_repo(repo_name: str):
+    """Delete a Chord repository.
+
+    This permanently deletes the GitHub repository and resets any linked
+    Library entries to needs_chord state.
+
+    Args:
+        repo_name: Full repo name (org/repo)
+
+    Response:
+    {
+        "success": true,
+        "repo": "org/repo-name",
+        "notes_reset": 1
+    }
+    """
+    token = current_app.config.get('SYSTEM_PAT')
+
+    if not token:
+        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+    try:
+        # First, delete the GitHub repository
+        response = requests.delete(
+            f'https://api.github.com/repos/{repo_name}',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+            timeout=15,
+        )
+
+        if response.status_code == 204:
+            logger.info(f"Deleted chord repository: {repo_name}")
+        elif response.status_code == 404:
+            logger.warning(f"Repository not found (may already be deleted): {repo_name}")
+        elif response.status_code == 403:
+            return jsonify({
+                'error': 'Insufficient permissions to delete repository',
+                'detail': 'The SYSTEM_PAT token needs delete_repo scope'
+            }), 403
+        else:
+            return jsonify({
+                'error': f'Failed to delete repository: HTTP {response.status_code}',
+                'detail': response.text
+            }), response.status_code
+
+        # Reset linked Library entries
+        db = get_legato_db()
+        result = db.execute(
+            """
+            UPDATE knowledge_entries
+            SET chord_status = NULL,
+                chord_repo = NULL,
+                chord_id = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE chord_repo = ?
+            """,
+            (repo_name,)
+        )
+        notes_reset = result.rowcount
+        db.commit()
+
+        if notes_reset > 0:
+            logger.info(f"Reset chord status on {notes_reset} library entries for {repo_name}")
+
+        return jsonify({
+            'success': True,
+            'repo': repo_name,
+            'notes_reset': notes_reset,
+        })
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to delete repository {repo_name}: {e}")
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.error(f"Error deleting chord {repo_name}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@chords_bp.route('/api/linked-notes/<path:repo_name>')
+@login_required
+def api_linked_notes(repo_name: str):
+    """Get Library notes linked to a Chord repository."""
+    try:
+        db = get_legato_db()
+        rows = db.execute(
+            """
+            SELECT entry_id, title, category, chord_status
+            FROM knowledge_entries
+            WHERE chord_repo = ?
+            """,
+            (repo_name,)
+        ).fetchall()
+
+        return jsonify({
+            'notes': [dict(row) for row in rows],
+            'count': len(rows),
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get linked notes for {repo_name}: {e}")
+        return jsonify({'error': str(e)}), 500

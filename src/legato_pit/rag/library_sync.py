@@ -259,6 +259,40 @@ class LibrarySync:
 
         if existing:
             # Update existing entry (including entry_id if changed)
+            # Chord status logic:
+            # - If frontmatter sets needs_chord: false → clear chord fields (no chord needed)
+            # - If frontmatter sets needs_chord: true AND has explicit chord_status → use frontmatter
+            # - If frontmatter sets needs_chord: true AND no chord_status → check DB, but only preserve 'pending'
+            #   (If 'active' but not in frontmatter, it means the chord may have been deleted - reset to queue again)
+            existing_data = self.conn.execute(
+                "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
+                (path,)
+            ).fetchone()
+
+            if needs_chord:
+                # Entry needs a chord
+                if chord_status:
+                    # Frontmatter explicitly sets chord_status - use it
+                    final_chord_status = chord_status
+                    final_chord_repo = chord_repo
+                    final_chord_id = chord_id
+                elif existing_data and existing_data['chord_status'] == 'pending':
+                    # Preserve 'pending' status (agent is queued but not yet approved)
+                    final_chord_status = 'pending'
+                    final_chord_repo = existing_data['chord_repo']
+                    final_chord_id = existing_data['chord_id']
+                else:
+                    # No frontmatter chord_status, not pending in DB
+                    # Reset to null so it can be re-queued (handles deleted repos)
+                    final_chord_status = None
+                    final_chord_repo = None
+                    final_chord_id = None
+            else:
+                # Entry doesn't need a chord - clear chord fields
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
+
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
@@ -270,7 +304,7 @@ class LibrarySync:
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
-                 chord_id, chord_status, chord_repo, path)
+                 final_chord_id, final_chord_status, final_chord_repo, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")
@@ -374,6 +408,30 @@ class LibrarySync:
         ).fetchone()
 
         if existing:
+            # Same chord status logic as GitHub sync
+            existing_data = self.conn.execute(
+                "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
+                (relative_path,)
+            ).fetchone()
+
+            if needs_chord:
+                if chord_status:
+                    final_chord_status = chord_status
+                    final_chord_repo = chord_repo
+                    final_chord_id = chord_id
+                elif existing_data and existing_data['chord_status'] == 'pending':
+                    final_chord_status = 'pending'
+                    final_chord_repo = existing_data['chord_repo']
+                    final_chord_id = existing_data['chord_id']
+                else:
+                    final_chord_status = None
+                    final_chord_repo = None
+                    final_chord_id = None
+            else:
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
+
             self.conn.execute(
                 """
                 UPDATE knowledge_entries
@@ -385,7 +443,7 @@ class LibrarySync:
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
-                 chord_id, chord_status, chord_repo, relative_path)
+                 final_chord_id, final_chord_status, final_chord_repo, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}")

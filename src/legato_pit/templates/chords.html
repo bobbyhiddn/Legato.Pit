@@ -2,6 +2,61 @@
 
 {% block title %}Chords - {{ app_name }}{% endblock %}
 
+{% block head %}
+<style>
+    .chord-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-danger {
+        background: transparent;
+        color: var(--danger-color);
+        border: 1px solid var(--danger-color);
+    }
+
+    .btn-danger:hover {
+        background: var(--danger-color);
+        color: white;
+    }
+
+    .btn-danger-confirm {
+        background: var(--danger-color);
+        color: white;
+        border: 1px solid var(--danger-color);
+        animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+
+    .cancel-btn {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+    }
+
+    .chord-card.deleting {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    .delete-warning {
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        background: rgba(220, 53, 69, 0.1);
+        border: 1px solid var(--danger-color);
+        border-radius: 4px;
+        font-size: 0.875rem;
+        color: var(--danger-color);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="chords-container">
     <header class="page-header">
@@ -43,9 +98,28 @@
                     <div class="chord-loading">Loading...</div>
                 </div>
 
-                <button class="btn btn-small chord-expand" onclick="toggleDetails('{{ repo.full_name }}', {{ loop.index }})">
-                    Show Details
-                </button>
+                <div class="chord-actions">
+                    <button class="btn btn-small chord-expand" onclick="toggleDetails('{{ repo.full_name }}', {{ loop.index }})">
+                        Show Details
+                    </button>
+                    <button class="btn btn-small btn-danger delete-btn"
+                            id="delete-{{ loop.index }}"
+                            onclick="initiateDelete('{{ repo.full_name }}', {{ loop.index }})">
+                        Delete
+                    </button>
+                    <button class="btn btn-small btn-danger-confirm confirm-btn"
+                            id="confirm-{{ loop.index }}"
+                            style="display: none;"
+                            onclick="confirmDelete('{{ repo.full_name }}', {{ loop.index }})">
+                        Confirm Delete
+                    </button>
+                    <button class="btn btn-small cancel-btn"
+                            id="cancel-{{ loop.index }}"
+                            style="display: none;"
+                            onclick="cancelDelete({{ loop.index }})">
+                        Cancel
+                    </button>
+                </div>
             </div>
             {% endfor %}
         </div>
@@ -77,10 +151,129 @@
 {% block scripts %}
 <script>
     const loadedDetails = {};
+    let deleteTimeouts = {};
+
+    // ============ Delete Functionality ============
+
+    function initiateDelete(repoName, index) {
+        // Show confirm/cancel buttons, hide delete button
+        document.getElementById(`delete-${index}`).style.display = 'none';
+        document.getElementById(`confirm-${index}`).style.display = 'inline-block';
+        document.getElementById(`cancel-${index}`).style.display = 'inline-block';
+
+        // Add warning message
+        const card = document.querySelector(`[data-repo="${repoName}"]`);
+        if (!card.querySelector('.delete-warning')) {
+            const warning = document.createElement('div');
+            warning.className = 'delete-warning';
+            warning.id = `warning-${index}`;
+            warning.innerHTML = '<strong>Warning:</strong> This will permanently delete the GitHub repository. Linked notes will be reset to "needs chord" state.';
+            card.querySelector('.chord-actions').before(warning);
+        }
+
+        // Auto-cancel after 10 seconds
+        deleteTimeouts[index] = setTimeout(() => cancelDelete(index), 10000);
+    }
+
+    function cancelDelete(index) {
+        // Clear timeout
+        if (deleteTimeouts[index]) {
+            clearTimeout(deleteTimeouts[index]);
+            delete deleteTimeouts[index];
+        }
+
+        // Hide confirm/cancel, show delete
+        document.getElementById(`delete-${index}`).style.display = 'inline-block';
+        document.getElementById(`confirm-${index}`).style.display = 'none';
+        document.getElementById(`cancel-${index}`).style.display = 'none';
+
+        // Remove warning
+        const warning = document.getElementById(`warning-${index}`);
+        if (warning) warning.remove();
+    }
+
+    async function confirmDelete(repoName, index) {
+        // Clear timeout
+        if (deleteTimeouts[index]) {
+            clearTimeout(deleteTimeouts[index]);
+            delete deleteTimeouts[index];
+        }
+
+        const card = document.querySelector(`[data-repo="${repoName}"]`);
+        card.classList.add('deleting');
+
+        // Update button to show progress
+        const confirmBtn = document.getElementById(`confirm-${index}`);
+        confirmBtn.textContent = 'Deleting...';
+        confirmBtn.disabled = true;
+
+        try {
+            const response = await fetch(`/chords/api/repo/${repoName}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Success - remove the card with animation
+                card.style.transition = 'opacity 0.3s, transform 0.3s';
+                card.style.opacity = '0';
+                card.style.transform = 'translateX(20px)';
+
+                setTimeout(() => {
+                    card.remove();
+
+                    // Check if any chords remain
+                    const remaining = document.querySelectorAll('.chord-card').length;
+                    if (remaining === 0) {
+                        location.reload();
+                    }
+                }, 300);
+
+                // Show success message
+                showToast(`Deleted ${repoName.split('/')[1]}. ${data.notes_reset} note(s) reset.`, 'success');
+            } else {
+                throw new Error(data.error || 'Failed to delete');
+            }
+
+        } catch (error) {
+            card.classList.remove('deleting');
+            confirmBtn.textContent = 'Confirm Delete';
+            confirmBtn.disabled = false;
+            showToast(`Error: ${error.message}`, 'error');
+        }
+    }
+
+    function showToast(message, type = 'info') {
+        // Simple toast notification
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            background: ${type === 'error' ? 'var(--danger-color)' : 'var(--accent-color)'};
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        `;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // ============ Details Functionality ============
 
     async function toggleDetails(repoName, index) {
         const detailsEl = document.getElementById(`details-${index}`);
-        const btn = detailsEl.previousElementSibling;
+        const card = document.querySelector(`[data-repo="${repoName}"]`);
+        const btn = card.querySelector('.chord-expand');
 
         if (detailsEl.style.display === 'none') {
             detailsEl.style.display = 'block';

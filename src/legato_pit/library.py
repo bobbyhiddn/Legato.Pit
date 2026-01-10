@@ -595,6 +595,162 @@ def list_projects():
     )
 
 
+@library_bp.route('/api/create-chord', methods=['POST'])
+@login_required
+def api_create_chord():
+    """Create a Chord from one or more Notes.
+
+    Request body:
+    {
+        "entry_ids": ["kb-abc123", "kb-def456"],
+        "project_name": "my-project"
+    }
+
+    Response:
+    {
+        "status": "queued",
+        "queue_id": "aq-xyz789",
+        "project_name": "my-project",
+        "source_count": 2
+    }
+    """
+    import json
+    import re
+    import secrets
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    entry_ids = data.get('entry_ids', [])
+    project_name = data.get('project_name', '')
+
+    if not entry_ids:
+        return jsonify({'error': 'entry_ids is required'}), 400
+
+    if not project_name:
+        return jsonify({'error': 'project_name is required'}), 400
+
+    # Validate project name
+    project_name = re.sub(r'[^a-z0-9-]', '', project_name.lower())[:30]
+    if len(project_name) < 2:
+        return jsonify({'error': 'Project name must be at least 2 characters'}), 400
+
+    try:
+        legato_db = get_db()
+        agents_db = get_agents_db()
+
+        # Fetch all entries
+        placeholders = ','.join('?' * len(entry_ids))
+        entries = legato_db.execute(
+            f"""
+            SELECT entry_id, title, category, content
+            FROM knowledge_entries
+            WHERE entry_id IN ({placeholders})
+            """,
+            entry_ids
+        ).fetchall()
+
+        if not entries:
+            return jsonify({'error': 'No entries found'}), 404
+
+        entries = [dict(e) for e in entries]
+
+        # Build combined tasker body
+        combined_title = f"Multi-note Chord: {project_name}"
+        if len(entries) == 1:
+            combined_title = entries[0]['title']
+
+        context_sections = []
+        for entry in entries:
+            content_preview = entry['content'][:400] if entry['content'] else ''
+            context_sections.append(
+                f"### From: {entry['title']} ({entry['entry_id']})\n"
+                f'"{content_preview}..."'
+            )
+
+        tasker_body = f"""## Tasker: {combined_title}
+
+### Context
+This chord combines {len(entries)} note(s) from the Library:
+
+{chr(10).join(context_sections)}
+
+### Objective
+Implement the project incorporating ideas from all source notes.
+
+### Acceptance Criteria
+- [ ] Core functionality implemented
+- [ ] All source note concepts addressed
+- [ ] Documentation updated
+- [ ] Tests written
+
+### Constraints
+- Follow patterns in `copilot-instructions.md`
+- Reference `SIGNAL.md` for project intent
+- Keep PRs focused and reviewable
+
+### References
+{chr(10).join(f'- Source: `{e["entry_id"]}`' for e in entries)}
+
+---
+*Generated from {len(entries)} Library note(s) | Combined Chord*
+"""
+
+        # Build signal JSON
+        signal_json = {
+            "id": f"lab.chord.{project_name}",
+            "type": "project",
+            "source": "pit-library-multi",
+            "category": "chord",
+            "title": combined_title,
+            "domain_tags": [],
+            "intent": f"Combined from {len(entries)} notes",
+            "key_phrases": [],
+            "source_entries": [e['entry_id'] for e in entries],
+        }
+
+        # Generate queue ID
+        queue_id = f"aq-{secrets.token_hex(6)}"
+
+        # Store all entry IDs as comma-separated in related_entry_id
+        related_ids = ','.join(e['entry_id'] for e in entries)
+
+        agents_db.execute(
+            """
+            INSERT INTO agent_queue
+            (queue_id, project_name, project_type, title, description,
+             signal_json, tasker_body, source_transcript, related_entry_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (
+                queue_id,
+                project_name,
+                'chord',
+                combined_title,
+                f"Combined from {len(entries)} notes",
+                json.dumps(signal_json),
+                tasker_body,
+                f"library:multi:{len(entries)}",
+                related_ids,
+            )
+        )
+        agents_db.commit()
+
+        logger.info(f"Queued multi-note chord: {queue_id} - {project_name} from {len(entries)} notes")
+
+        return jsonify({
+            'status': 'queued',
+            'queue_id': queue_id,
+            'project_name': project_name,
+            'source_count': len(entries),
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to create multi-note chord: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @library_bp.route('/api/entry/<path:entry_id>/save', methods=['POST'])
 @login_required
 def api_save_entry(entry_id: str):

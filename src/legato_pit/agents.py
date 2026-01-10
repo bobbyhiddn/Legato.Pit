@@ -396,26 +396,32 @@ def api_approve_agent(queue_id: str):
         agents_db.commit()
 
         # Update linked Library entry's chord_status and chord_repo
+        # related_entry_id may be a single ID or comma-separated list for multi-note chords
         related_entry_id = agent.get('related_entry_id')
         if related_entry_id:
             try:
                 legato_db = get_legato_db()
                 chord_repo = f"{org}/{agent['project_name']}"
-                legato_db.execute(
-                    """
-                    UPDATE knowledge_entries
-                    SET chord_status = 'active',
-                        chord_repo = ?,
-                        needs_chord = 0,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE entry_id = ?
-                    """,
-                    (chord_repo, related_entry_id)
-                )
+
+                # Handle single or multiple entry IDs
+                entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
+
+                for entry_id in entry_ids:
+                    legato_db.execute(
+                        """
+                        UPDATE knowledge_entries
+                        SET chord_status = 'active',
+                            chord_repo = ?,
+                            needs_chord = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE entry_id = ?
+                        """,
+                        (chord_repo, entry_id)
+                    )
                 legato_db.commit()
-                logger.info(f"Updated Library entry {related_entry_id}: chord_status=active, chord_repo={chord_repo}")
+                logger.info(f"Updated {len(entry_ids)} Library entries with chord_status=active, chord_repo={chord_repo}")
             except Exception as e:
-                logger.warning(f"Failed to update Library entry {related_entry_id}: {e}")
+                logger.warning(f"Failed to update Library entries {related_entry_id}: {e}")
 
         logger.info(f"Approved agent: {queue_id} by {username}")
 

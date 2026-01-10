@@ -73,24 +73,43 @@ def health():
 @memory_api_bp.route('/correlate', methods=['POST'])
 @require_api_token
 def correlate():
-    """Check if similar content already exists.
+    """Check if similar content already exists (with chord-aware routing).
 
     Request body:
     {
         "title": "Entry title",
         "content": "Entry content",
-        "key_phrases": ["optional", "phrases"]  # Optional
+        "key_phrases": ["optional", "phrases"],  # Optional
+        "needs_chord": false  # Whether this thread wants implementation
     }
 
     Response:
     {
-        "action": "CREATE" | "SUGGEST" | "SKIP",
+        "action": "CREATE" | "APPEND" | "QUEUE" | "SKIP",
         "score": 0.85,
         "matches": [
-            {"entry_id": "kb-001", "title": "...", "similarity": 0.85}
-        ]
+            {
+                "entry_id": "kb-001",
+                "title": "...",
+                "similarity": 0.85,
+                "chord_status": "active",
+                "chord_repo": "org/repo-name"
+            }
+        ],
+        "recommendation": {
+            "entry_id": "kb-001",
+            "reason": "High similarity (0.85) with active chord - queue agent task"
+        }
     }
+
+    Action meanings:
+    - CREATE: No similar entries, create new note
+    - APPEND: Very similar entry exists, append content to it
+    - QUEUE: Similar entry exists with active chord, queue agent task instead of new chord
+    - SKIP: Exact/near-exact duplicate, skip processing
     """
+    from .rag.database import init_db
+
     data = request.get_json()
 
     if not data:
@@ -99,22 +118,304 @@ def correlate():
     title = data.get('title', '')
     content = data.get('content', '')
     key_phrases = data.get('key_phrases', [])
+    needs_chord = data.get('needs_chord', False)
 
     if not title and not content:
         return jsonify({'error': 'title or content required'}), 400
 
     # Include key phrases in content for better matching
+    query_text = f"{title}\n\n{content}"
     if key_phrases:
-        content = f"{content}\n\nKey phrases: {', '.join(key_phrases)}"
+        query_text = f"{query_text}\n\nKey phrases: {', '.join(key_phrases)}"
 
     try:
         service = get_embedding_service()
-        result = service.correlate(title, content)
-        logger.info(f"Correlation check: {title[:50]}... -> {result['action']} ({result['score']:.2f})")
-        return jsonify(result)
+        db = init_db()
+
+        # Find similar entries
+        similar = service.find_similar(
+            query_text=query_text,
+            entry_type='knowledge',
+            limit=5,
+            threshold=0.5,  # Lower threshold to catch more potential matches
+        )
+
+        # Enrich matches with chord status
+        matches = []
+        for s in similar:
+            row = db.execute(
+                """
+                SELECT entry_id, title, category, chord_status, chord_repo, needs_chord
+                FROM knowledge_entries
+                WHERE entry_id = ?
+                """,
+                (s['entry_id'],)
+            ).fetchone()
+
+            if row:
+                matches.append({
+                    'entry_id': row['entry_id'],
+                    'title': row['title'],
+                    'category': row['category'],
+                    'similarity': round(s['similarity'], 3),
+                    'chord_status': row['chord_status'],
+                    'chord_repo': row['chord_repo'],
+                    'needs_chord': bool(row['needs_chord']),
+                })
+
+        # Determine action based on similarity and chord status
+        action = 'CREATE'
+        recommendation = None
+        best_score = matches[0]['similarity'] if matches else 0.0
+
+        if matches:
+            best_match = matches[0]
+
+            if best_score >= 0.95:
+                # Near-exact duplicate
+                action = 'SKIP'
+                recommendation = {
+                    'entry_id': best_match['entry_id'],
+                    'reason': f'Near-exact duplicate (similarity={best_score:.2f})'
+                }
+            elif best_score >= 0.80:
+                # High similarity
+                if needs_chord and best_match.get('chord_status') == 'active':
+                    # This wants a chord, but similar entry already has one
+                    action = 'QUEUE'
+                    recommendation = {
+                        'entry_id': best_match['entry_id'],
+                        'chord_repo': best_match['chord_repo'],
+                        'reason': f'Similar note has active chord at {best_match["chord_repo"]} - queue agent task instead'
+                    }
+                elif needs_chord and best_match.get('chord_status') == 'pending':
+                    # Chord already pending
+                    action = 'SKIP'
+                    recommendation = {
+                        'entry_id': best_match['entry_id'],
+                        'reason': f'Similar note already has pending chord request'
+                    }
+                else:
+                    # Similar content, should append
+                    action = 'APPEND'
+                    recommendation = {
+                        'entry_id': best_match['entry_id'],
+                        'reason': f'High similarity (similarity={best_score:.2f}) - append to existing note'
+                    }
+            elif best_score >= 0.65:
+                # Moderate similarity - suggest but create
+                action = 'CREATE'
+                recommendation = {
+                    'entry_id': best_match['entry_id'],
+                    'reason': f'Related note exists (similarity={best_score:.2f}) but distinct enough to create new'
+                }
+
+        logger.info(f"Correlation check: {title[:50]}... -> {action} (score={best_score:.2f})")
+
+        return jsonify({
+            'action': action,
+            'score': round(best_score, 3),
+            'matches': matches,
+            'recommendation': recommendation,
+        })
 
     except Exception as e:
         logger.error(f"Correlation failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_api_bp.route('/append', methods=['POST'])
+@require_api_token
+def append_to_entry():
+    """Append content to an existing knowledge entry.
+
+    Used when the correlation check returns APPEND action.
+
+    Request body:
+    {
+        "entry_id": "kb-abc123",
+        "content": "New content to append",
+        "source_transcript": "transcript-123"
+    }
+
+    Response:
+    {
+        "success": true,
+        "entry_id": "kb-abc123",
+        "action": "appended"
+    }
+    """
+    from .rag.database import init_db
+    from .rag.github_service import commit_file
+    import os
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    entry_id = data.get('entry_id')
+    new_content = data.get('content', '')
+    source_transcript = data.get('source_transcript', 'unknown')
+
+    if not entry_id:
+        return jsonify({'error': 'entry_id required'}), 400
+
+    if not new_content:
+        return jsonify({'error': 'content required'}), 400
+
+    try:
+        db = init_db()
+
+        # Get existing entry
+        entry = db.execute(
+            "SELECT * FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': f'Entry {entry_id} not found'}), 404
+
+        entry_dict = dict(entry)
+        file_path = entry_dict.get('file_path')
+
+        # Append content with separator
+        from datetime import datetime
+        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+        appended = f"\n\n---\n\n## Appended ({timestamp})\n\n*Source: {source_transcript}*\n\n{new_content}"
+
+        new_full_content = entry_dict['content'] + appended
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET content = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+            """,
+            (new_full_content, entry_id)
+        )
+        db.commit()
+
+        # Commit to GitHub if file_path exists
+        if file_path:
+            token = os.environ.get('SYSTEM_PAT')
+            if token:
+                try:
+                    commit_file(
+                        repo='bobbyhiddn/Legato.Library',
+                        path=file_path,
+                        content=new_full_content,
+                        message=f'Append content from {source_transcript}',
+                        token=token
+                    )
+                    logger.info(f"Appended content to {entry_id} and committed to GitHub")
+                except Exception as e:
+                    logger.warning(f"Failed to commit append to GitHub: {e}")
+
+        logger.info(f"Appended content to entry {entry_id}")
+
+        return jsonify({
+            'success': True,
+            'entry_id': entry_id,
+            'action': 'appended',
+        })
+
+    except Exception as e:
+        logger.error(f"Append failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_api_bp.route('/queue-task', methods=['POST'])
+@require_api_token
+def queue_agent_task():
+    """Queue an agent task for an existing chord.
+
+    Used when correlation check returns QUEUE action - the note wants a chord
+    but a similar note already has an active chord. Instead of creating a
+    duplicate chord, we queue a task issue on the existing chord's repo.
+
+    Request body:
+    {
+        "chord_repo": "org/repo-name",
+        "title": "Add feature X",
+        "description": "Detailed description of the task",
+        "source_entry_id": "kb-abc123",
+        "source_transcript": "transcript-123"
+    }
+
+    Response:
+    {
+        "success": true,
+        "issue_url": "https://github.com/org/repo/issues/42"
+    }
+    """
+    import requests as http_requests
+    import os
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    chord_repo = data.get('chord_repo')
+    title = data.get('title')
+    description = data.get('description', '')
+    source_entry_id = data.get('source_entry_id')
+    source_transcript = data.get('source_transcript')
+
+    if not chord_repo or not title:
+        return jsonify({'error': 'chord_repo and title required'}), 400
+
+    try:
+        token = os.environ.get('SYSTEM_PAT')
+        if not token:
+            return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+        # Create issue on the chord repo
+        issue_body = f"""## Task Request
+
+{description}
+
+---
+
+**Source:** `{source_entry_id or 'unknown'}`
+**Transcript:** `{source_transcript or 'unknown'}`
+
+*Auto-generated by LEGATO Listen - similar request routed to existing chord*
+"""
+
+        response = http_requests.post(
+            f'https://api.github.com/repos/{chord_repo}/issues',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            json={
+                'title': f'[LEGATO] {title}',
+                'body': issue_body,
+                'labels': ['legato-task'],
+            },
+            timeout=15,
+        )
+
+        if response.status_code == 201:
+            issue_data = response.json()
+            logger.info(f"Created issue on {chord_repo}: {issue_data['html_url']}")
+
+            return jsonify({
+                'success': True,
+                'issue_url': issue_data['html_url'],
+                'issue_number': issue_data['number'],
+            })
+        else:
+            return jsonify({
+                'error': f'Failed to create issue: {response.status_code}',
+                'detail': response.text,
+            }), response.status_code
+
+    except Exception as e:
+        logger.error(f"Queue task failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 
