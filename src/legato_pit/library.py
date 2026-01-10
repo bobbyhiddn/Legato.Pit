@@ -6,6 +6,8 @@ Provides web UI for browsing and searching the knowledge base.
 
 import os
 import logging
+import threading
+from datetime import datetime
 from typing import Optional
 
 import markdown
@@ -19,6 +21,10 @@ from .core import login_required
 logger = logging.getLogger(__name__)
 
 library_bp = Blueprint('library', __name__, url_prefix='/library')
+
+# Track if a background sync is already running
+_sync_lock = threading.Lock()
+_sync_in_progress = False
 
 
 def get_db():
@@ -37,6 +43,88 @@ def get_agents_db():
         from .rag.database import init_agents_db
         g.agents_db_conn = init_agents_db()
     return g.agents_db_conn
+
+
+def trigger_background_sync():
+    """Trigger a background library sync if not already running.
+
+    This is called when the library page is loaded to ensure fresh data.
+    """
+    global _sync_in_progress
+
+    with _sync_lock:
+        if _sync_in_progress:
+            return  # Sync already running
+        _sync_in_progress = True
+
+    def do_sync():
+        global _sync_in_progress
+        try:
+            from flask import current_app
+            from .rag.database import init_db
+            from .rag.library_sync import LibrarySync
+            from .rag.embedding_service import EmbeddingService
+            from .rag.openai_provider import OpenAIEmbeddingProvider
+
+            token = os.environ.get('SYSTEM_PAT')
+            if not token:
+                logger.warning("SYSTEM_PAT not set, skipping on-load sync")
+                return
+
+            db = init_db()
+
+            embedding_service = None
+            if os.environ.get('OPENAI_API_KEY'):
+                try:
+                    provider = OpenAIEmbeddingProvider()
+                    embedding_service = EmbeddingService(provider, db)
+                except Exception as e:
+                    logger.warning(f"Could not create embedding service: {e}")
+
+            sync = LibrarySync(db, embedding_service)
+            stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+
+            if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
+                logger.info(f"On-load library sync: {stats}")
+
+        except Exception as e:
+            logger.error(f"On-load library sync failed: {e}")
+        finally:
+            with _sync_lock:
+                _sync_in_progress = False
+
+    # Run sync in background thread
+    thread = threading.Thread(target=do_sync, daemon=True)
+    thread.start()
+
+
+def should_sync() -> bool:
+    """Check if library sync is needed based on last sync time.
+
+    Returns True if last sync was more than 60 seconds ago or never happened.
+    """
+    try:
+        db = get_db()
+        row = db.execute(
+            """
+            SELECT synced_at FROM sync_log
+            ORDER BY synced_at DESC LIMIT 1
+            """
+        ).fetchone()
+
+        if not row:
+            return True  # Never synced
+
+        # Parse the timestamp
+        last_sync = datetime.fromisoformat(row['synced_at'].replace('Z', '+00:00'))
+        now = datetime.now(last_sync.tzinfo) if last_sync.tzinfo else datetime.now()
+
+        # Sync if more than 60 seconds have passed
+        return (now - last_sync).total_seconds() > 60
+
+    except Exception as e:
+        logger.warning(f"Error checking sync status: {e}")
+        return True  # Sync on error
 
 
 def strip_frontmatter(content: str) -> str:
@@ -75,6 +163,10 @@ def render_markdown(content: str) -> str:
 @login_required
 def index():
     """Library browser main page."""
+    # Trigger background sync if needed (doesn't block page load)
+    if should_sync():
+        trigger_background_sync()
+
     db = get_db()
 
     # Get categories

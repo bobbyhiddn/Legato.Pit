@@ -16,6 +16,44 @@ logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 
+
+def trigger_library_sync_if_new_artifacts(artifacts):
+    """Trigger library sync if there are new artifacts.
+
+    Compares dashboard artifacts with local DB to detect new files.
+    """
+    if not artifacts:
+        return
+
+    try:
+        from flask import g
+        from .rag.database import init_db
+
+        if 'legato_db_conn' not in g:
+            g.legato_db_conn = init_db()
+        db = g.legato_db_conn
+
+        # Get known file paths from local DB
+        rows = db.execute("SELECT file_path FROM knowledge_entries WHERE file_path IS NOT NULL").fetchall()
+        known_paths = {row['file_path'] for row in rows}
+
+        # Check if any dashboard artifacts are not in local DB
+        new_found = False
+        for artifact in artifacts:
+            if artifact.get('path') and artifact['path'] not in known_paths:
+                new_found = True
+                break
+
+        if new_found:
+            # Import and trigger sync from library module
+            from .library import should_sync, trigger_background_sync
+            if should_sync():
+                logger.info("Dashboard detected new artifacts, triggering library sync")
+                trigger_background_sync()
+
+    except Exception as e:
+        logger.warning(f"Error checking for new artifacts: {e}")
+
 # Repository names
 REPOS = {
     'conduct': 'Legato.Conduct',
@@ -224,12 +262,17 @@ def get_pending_agents():
 @login_required
 def index():
     """Main dashboard view."""
+    recent_artifacts = get_recent_artifacts()
+
+    # Check if there are new artifacts that need syncing
+    trigger_library_sync_if_new_artifacts(recent_artifacts)
+
     return render_template(
         'dashboard.html',
         title='Dashboard',
         system_status=get_system_status(),
         recent_jobs=get_recent_jobs(),
-        recent_artifacts=get_recent_artifacts(),
+        recent_artifacts=recent_artifacts,
         stats=get_stats(),
         pending_agents=get_pending_agents()
     )
@@ -239,10 +282,15 @@ def index():
 @login_required
 def api_status():
     """API endpoint for dashboard data (for live updates)."""
+    recent_artifacts = get_recent_artifacts()
+
+    # Check if there are new artifacts that need syncing
+    trigger_library_sync_if_new_artifacts(recent_artifacts)
+
     return jsonify({
         'system_status': get_system_status(),
         'recent_jobs': get_recent_jobs(),
-        'recent_artifacts': get_recent_artifacts(),
+        'recent_artifacts': recent_artifacts,
         'stats': get_stats(),
         'updated_at': datetime.now().isoformat()
     })
