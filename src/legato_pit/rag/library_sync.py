@@ -288,8 +288,8 @@ class LibrarySync:
             # Chord status logic:
             # - If frontmatter sets needs_chord: false → clear chord fields (no chord needed)
             # - If frontmatter sets needs_chord: true AND has explicit chord_status → use frontmatter
-            # - If frontmatter sets needs_chord: true AND no chord_status → check DB, but only preserve 'pending'
-            #   (If 'active' but not in frontmatter, it means the chord may have been deleted - reset to queue again)
+            # - If frontmatter sets needs_chord: true AND no chord_status → check DB, preserve 'pending' or 'active'
+            #   (GitHub frontmatter update may not have propagated yet after agent approval)
             existing_data = self.conn.execute(
                 "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
                 (path,)
@@ -302,13 +302,14 @@ class LibrarySync:
                     final_chord_status = chord_status
                     final_chord_repo = chord_repo
                     final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] == 'pending':
-                    # Preserve 'pending' status (agent is queued but not yet approved)
-                    final_chord_status = 'pending'
+                elif existing_data and existing_data['chord_status'] in ('pending', 'active'):
+                    # Preserve 'pending' or 'active' status from DB
+                    # (GitHub frontmatter may not have propagated yet after agent approval)
+                    final_chord_status = existing_data['chord_status']
                     final_chord_repo = existing_data['chord_repo']
                     final_chord_id = existing_data['chord_id']
                 else:
-                    # No frontmatter chord_status, not pending in DB
+                    # No frontmatter chord_status, not pending/active in DB
                     # Reset to null so it can be re-queued (handles deleted repos)
                     final_chord_status = None
                     final_chord_repo = None
@@ -474,8 +475,9 @@ class LibrarySync:
                     final_chord_status = chord_status
                     final_chord_repo = chord_repo
                     final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] == 'pending':
-                    final_chord_status = 'pending'
+                elif existing_data and existing_data['chord_status'] in ('pending', 'active'):
+                    # Preserve 'pending' or 'active' status from DB
+                    final_chord_status = existing_data['chord_status']
                     final_chord_repo = existing_data['chord_repo']
                     final_chord_id = existing_data['chord_id']
                 else:

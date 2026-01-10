@@ -478,12 +478,13 @@ def api_approve_agent(queue_id: str):
                                     body = parts[2]
 
                                     # Remove old chord fields if present
-                                    new_frontmatter = re.sub(r'^chord_status:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^needs_chord:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_status:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
                                     new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
                                     new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
 
-                                    # Add new chord fields before the closing ---
-                                    new_frontmatter = new_frontmatter.rstrip() + f"\nchord_status: active\nchord_repo: {chord_repo_full}\n"
+                                    # Add new chord fields (needs_chord: false since it's now active)
+                                    new_frontmatter = new_frontmatter.rstrip() + f"\nneeds_chord: false\nchord_status: active\nchord_repo: {chord_repo_full}\n"
 
                                     new_content = f'---{new_frontmatter}---{body}'
                                     commit_file(
@@ -971,7 +972,7 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
     Returns:
         Dict with import stats
     """
-    stats = {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0}
+    stats = {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0, 'multi_note_chords': 0}
 
     # Find entries that need chord escalation
     entries = legato_db.execute(
@@ -984,46 +985,66 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
 
     stats['found'] = len(entries)
 
+    # Group entries by chord_name for multi-note chord support
+    from collections import defaultdict
+    chord_groups = defaultdict(list)
     for entry in entries:
         entry = dict(entry)
-        entry_id = entry['entry_id']
-        chord_name = entry['chord_name'] or entry_id.split('-')[-1][:20]
+        chord_name = entry['chord_name'] or entry['entry_id'].split('-')[-1][:20]
+        chord_groups[chord_name].append(entry)
 
-        # Check if already queued or processed (by related_entry_id, any status)
-        existing = agents_db.execute(
-            "SELECT queue_id, status FROM agent_queue WHERE related_entry_id = ?",
-            (entry_id,)
-        ).fetchone()
+    for chord_name, group_entries in chord_groups.items():
+        # Collect all entry IDs in this group
+        entry_ids = [e['entry_id'] for e in group_entries]
+        related_entry_id = ','.join(entry_ids)  # Comma-separated for multi-note
 
-        if existing:
-            stats['already_queued'] += 1
-            # If it was previously rejected but needs_chord is still 1, fix the entry
-            if existing['status'] == 'rejected':
-                legato_db.execute(
-                    "UPDATE knowledge_entries SET needs_chord = 0 WHERE entry_id = ?",
-                    (entry_id,)
-                )
-                legato_db.commit()
+        # Check if any entry is already queued
+        already_queued = False
+        for entry_id in entry_ids:
+            existing = agents_db.execute(
+                "SELECT queue_id, status FROM agent_queue WHERE related_entry_id LIKE ?",
+                (f'%{entry_id}%',)
+            ).fetchone()
+            if existing:
+                already_queued = True
+                stats['already_queued'] += 1
+                if existing['status'] == 'rejected':
+                    legato_db.execute(
+                        "UPDATE knowledge_entries SET needs_chord = 0 WHERE entry_id = ?",
+                        (entry_id,)
+                    )
+                    legato_db.commit()
+
+        if already_queued:
             continue
 
-        # Mark as pending BEFORE inserting to prevent race conditions
-        legato_db.execute(
-            """
-            UPDATE knowledge_entries
-            SET chord_status = 'pending', chord_id = ?
-            WHERE entry_id = ? AND (chord_status IS NULL OR chord_status = '')
-            """,
-            (f"lab.chord.{chord_name}", entry_id)
-        )
+        # Mark ALL entries as pending
+        for entry_id in entry_ids:
+            legato_db.execute(
+                """
+                UPDATE knowledge_entries
+                SET chord_status = 'pending', chord_id = ?
+                WHERE entry_id = ? AND (chord_status IS NULL OR chord_status = '')
+                """,
+                (f"lab.chord.{chord_name}", entry_id)
+            )
         legato_db.commit()
 
+        # Track multi-note chords
+        if len(group_entries) > 1:
+            stats['multi_note_chords'] += 1
+
         try:
-            # Build tasker body from entry content
-            content_preview = entry['content'][:500] if entry['content'] else ''
-            tasker_body = f"""## Tasker: {entry['title']}
+            # Build combined tasker body from all entries
+            primary_entry = group_entries[0]
+
+            if len(group_entries) == 1:
+                # Single note chord
+                content_preview = primary_entry['content'][:500] if primary_entry['content'] else ''
+                tasker_body = f"""## Tasker: {primary_entry['title']}
 
 ### Context
-From Library entry `{entry_id}`:
+From Library entry `{primary_entry['entry_id']}`:
 "{content_preview}"
 
 ### Objective
@@ -1040,22 +1061,60 @@ Implement the project as described in the knowledge entry.
 - Keep PRs focused and reviewable
 
 ### References
-- Source entry: `{entry_id}`
-- Category: {entry.get('category', 'general')}
+- Source entry: `{primary_entry['entry_id']}`
+- Category: {primary_entry.get('category', 'general')}
 
 ---
 *Generated from Library entry | needs_chord escalation*
+"""
+            else:
+                # Multi-note chord - combine all entries
+                titles = [e['title'] for e in group_entries]
+                combined_title = f"Multi-note: {titles[0]} (+{len(titles)-1} related)"
+
+                context_sections = []
+                for e in group_entries:
+                    preview = e['content'][:300] if e['content'] else ''
+                    context_sections.append(f"**{e['title']}** (`{e['entry_id']}`):\n\"{preview}\"")
+
+                tasker_body = f"""## Tasker: {combined_title}
+
+### Context
+This chord combines {len(group_entries)} related notes:
+
+{chr(10).join(context_sections)}
+
+### Objective
+Implement a unified solution addressing all related notes above.
+
+### Acceptance Criteria
+- [ ] Core functionality addresses all {len(group_entries)} notes
+- [ ] Documentation updated
+- [ ] Tests written
+
+### Constraints
+- Follow patterns in `copilot-instructions.md`
+- Reference `SIGNAL.md` for project intent
+- Keep PRs focused and reviewable
+
+### References
+- Source entries: {', '.join(f'`{e["entry_id"]}`' for e in group_entries)}
+- Categories: {', '.join(set(e.get('category', 'general') for e in group_entries))}
+
+---
+*Generated from {len(group_entries)} Library entries | multi-note chord*
 """
 
             signal_json = {
                 "id": f"lab.chord.{chord_name}",
                 "type": "project",
                 "source": "library-escalation",
-                "category": entry.get('chord_scope', 'chord'),
-                "title": entry['title'],
+                "category": primary_entry.get('chord_scope', 'chord'),
+                "title": primary_entry['title'] if len(group_entries) == 1 else f"Multi-note: {primary_entry['title']}",
                 "domain_tags": [],
-                "intent": content_preview[:200],
+                "intent": primary_entry['content'][:200] if primary_entry['content'] else '',
                 "key_phrases": [],
+                "entry_count": len(group_entries),
             }
 
             queue_id = generate_queue_id()
@@ -1070,22 +1129,25 @@ Implement the project as described in the knowledge entry.
                 (
                     queue_id,
                     chord_name,
-                    entry.get('chord_scope', 'chord'),
-                    entry['title'],
-                    content_preview[:500],
+                    primary_entry.get('chord_scope', 'chord'),
+                    signal_json['title'],
+                    primary_entry['content'][:500] if primary_entry['content'] else '',
                     json.dumps(signal_json),
                     tasker_body,
-                    f"library:{entry_id}",
-                    entry_id,
+                    f"library:{primary_entry['entry_id']}",
+                    related_entry_id,  # Comma-separated for multi-note
                 )
             )
             agents_db.commit()
 
             stats['queued'] += 1
-            logger.info(f"Queued chord from Library: {queue_id} - {chord_name} (from {entry_id})")
+            if len(group_entries) > 1:
+                logger.info(f"Queued multi-note chord: {queue_id} - {chord_name} ({len(group_entries)} notes)")
+            else:
+                logger.info(f"Queued chord from Library: {queue_id} - {chord_name} (from {primary_entry['entry_id']})")
 
         except Exception as e:
-            logger.error(f"Failed to queue chord for {entry_id}: {e}")
+            logger.error(f"Failed to queue chord for {chord_name} ({len(group_entries)} notes): {e}")
             stats['errors'] += 1
 
     return stats
