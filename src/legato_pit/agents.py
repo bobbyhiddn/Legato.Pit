@@ -400,13 +400,18 @@ def api_approve_agent(queue_id: str):
         related_entry_id = agent.get('related_entry_id')
         if related_entry_id:
             try:
+                import re
+                from .rag.github_service import get_file_content, commit_file
+
                 legato_db = get_legato_db()
-                chord_repo = f"{org}/{agent['project_name']}"
+                chord_repo_name = f"Lab.{agent['project_name']}.Chord"
+                chord_repo_full = f"{org}/{chord_repo_name}"
 
                 # Handle single or multiple entry IDs
                 entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
 
                 for entry_id in entry_ids:
+                    # Update local DB
                     legato_db.execute(
                         """
                         UPDATE knowledge_entries
@@ -416,10 +421,50 @@ def api_approve_agent(queue_id: str):
                             updated_at = CURRENT_TIMESTAMP
                         WHERE entry_id = ?
                         """,
-                        (chord_repo, entry_id)
+                        (chord_repo_full, entry_id)
                     )
+
+                    # Update GitHub frontmatter
+                    try:
+                        entry = legato_db.execute(
+                            "SELECT file_path FROM knowledge_entries WHERE entry_id = ?",
+                            (entry_id,)
+                        ).fetchone()
+
+                        if entry and entry['file_path']:
+                            file_path = entry['file_path']
+                            library_repo = 'bobbyhiddn/Legato.Library'
+                            token = current_app.config.get('SYSTEM_PAT')
+
+                            content = get_file_content(library_repo, file_path, token)
+                            if content and content.startswith('---'):
+                                parts = content.split('---', 2)
+                                if len(parts) >= 3:
+                                    frontmatter = parts[1]
+                                    body = parts[2]
+
+                                    # Remove old chord fields if present
+                                    new_frontmatter = re.sub(r'^chord_status:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                                    new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+
+                                    # Add new chord fields before the closing ---
+                                    new_frontmatter = new_frontmatter.rstrip() + f"\nchord_status: active\nchord_repo: {chord_repo_full}\n"
+
+                                    new_content = f'---{new_frontmatter}---{body}'
+                                    commit_file(
+                                        repo=library_repo,
+                                        path=file_path,
+                                        content=new_content,
+                                        message=f'Link to chord: {chord_repo_name}',
+                                        token=token
+                                    )
+                                    logger.info(f"Updated frontmatter for {entry_id} with chord link")
+                    except Exception as e:
+                        logger.warning(f"Could not update frontmatter for {entry_id}: {e}")
+
                 legato_db.commit()
-                logger.info(f"Updated {len(entry_ids)} Library entries with chord_status=active, chord_repo={chord_repo}")
+                logger.info(f"Updated {len(entry_ids)} Library entries with chord_status=active, chord_repo={chord_repo_full}")
             except Exception as e:
                 logger.warning(f"Failed to update Library entries {related_entry_id}: {e}")
 

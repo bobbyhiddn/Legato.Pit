@@ -258,8 +258,17 @@ def api_delete_repo(repo_name: str):
                 'detail': response.text
             }), response.status_code
 
-        # Reset linked Library entries
+        # Get linked Library entries before resetting
         db = get_legato_db()
+        linked_entries = db.execute(
+            """
+            SELECT entry_id, file_path, title FROM knowledge_entries
+            WHERE chord_repo = ?
+            """,
+            (repo_name,)
+        ).fetchall()
+
+        # Reset linked entries in local DB
         result = db.execute(
             """
             UPDATE knowledge_entries
@@ -274,8 +283,47 @@ def api_delete_repo(repo_name: str):
         notes_reset = result.rowcount
         db.commit()
 
+        # Update GitHub frontmatter for each linked entry
+        library_repo = 'bobbyhiddn/Legato.Library'
+        frontmatter_updated = 0
+
+        for entry in linked_entries:
+            file_path = entry['file_path']
+            if not file_path:
+                continue
+
+            try:
+                from .rag.github_service import get_file_content, commit_file
+                import re
+
+                content = get_file_content(library_repo, file_path, token)
+                if content and content.startswith('---'):
+                    parts = content.split('---', 2)
+                    if len(parts) >= 3:
+                        frontmatter = parts[1]
+                        body = parts[2]
+
+                        # Remove chord fields from frontmatter
+                        new_frontmatter = re.sub(r'^chord_status:.*\n?', '', frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+
+                        if new_frontmatter != frontmatter:
+                            new_content = f'---{new_frontmatter}---{body}'
+                            commit_file(
+                                repo=library_repo,
+                                path=file_path,
+                                content=new_content,
+                                message=f'Reset chord fields: chord deleted',
+                                token=token
+                            )
+                            frontmatter_updated += 1
+
+            except Exception as e:
+                logger.warning(f"Could not update frontmatter for {entry['entry_id']}: {e}")
+
         if notes_reset > 0:
-            logger.info(f"Reset chord status on {notes_reset} library entries for {repo_name}")
+            logger.info(f"Reset chord status on {notes_reset} library entries, {frontmatter_updated} frontmatter updated")
 
         return jsonify({
             'success': True,

@@ -1064,6 +1064,87 @@ def api_update_category(entry_id: str):
         return jsonify({'error': str(e)}), 500
 
 
+@library_bp.route('/api/entry/<path:entry_id>', methods=['DELETE'])
+@login_required
+def api_delete_entry(entry_id: str):
+    """Delete an entry from the Library.
+
+    Removes from:
+    - GitHub (Legato.Library repo)
+    - Local database
+    - Embeddings
+
+    Response:
+    {
+        "status": "success",
+        "entry_id": "kb-abc123",
+        "github_deleted": true
+    }
+    """
+    try:
+        db = get_db()
+
+        # Get entry info
+        entry = db.execute(
+            "SELECT id, title, file_path, category FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': 'Entry not found'}), 404
+
+        entry_dict = dict(entry)
+        file_path = entry_dict.get('file_path')
+        github_deleted = False
+
+        # Delete from GitHub if file_path exists
+        if file_path:
+            try:
+                from .rag.github_service import delete_file
+
+                token = current_app.config.get('SYSTEM_PAT')
+                repo = 'bobbyhiddn/Legato.Library'
+
+                delete_file(
+                    repo=repo,
+                    path=file_path,
+                    message=f"Delete: {entry_dict['title']}",
+                    token=token
+                )
+                github_deleted = True
+                logger.info(f"Deleted {file_path} from GitHub")
+
+            except Exception as e:
+                logger.warning(f"Could not delete from GitHub: {e}")
+                # Continue anyway - will delete from DB
+
+        # Delete embeddings
+        db.execute(
+            "DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'",
+            (entry_dict['id'],)
+        )
+
+        # Delete from database
+        db.execute(
+            "DELETE FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        )
+        db.commit()
+
+        logger.info(f"Deleted entry {entry_id}: {entry_dict['title']}")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'title': entry_dict['title'],
+            'github_deleted': github_deleted
+        })
+
+    except Exception as e:
+        logger.error(f"Delete entry failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @library_bp.route('/api/cleanup-orphans', methods=['POST'])
 @login_required
 def api_cleanup_orphans():
