@@ -231,6 +231,35 @@
         flex-shrink: 0;
     }
 
+    .sidebar-link.orphaned {
+        border: 1px dashed var(--warning-color, #f59e0b);
+        background: rgba(245, 158, 11, 0.1);
+    }
+
+    .sidebar-link.orphaned .category-dot {
+        animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+
+    .adopt-btn {
+        font-size: 0.65rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        background: var(--warning-color, #f59e0b);
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-left: 0.25rem;
+    }
+
+    .adopt-btn:hover {
+        filter: brightness(1.1);
+    }
+
     /* Action button group */
     .action-group {
         display: flex;
@@ -341,9 +370,14 @@
             <h3>Categories</h3>
             <nav class="sidebar-nav">
                 {% for cat in categories %}
-                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
+                <a href="{{ url_for('library.view_category', category=cat.category) }}"
+                   class="sidebar-link {% if cat.orphaned %}orphaned{% endif %}"
+                   {% if cat.orphaned %}title="Orphaned category - click Adopt to restore"{% endif %}>
                     <span class="category-dot" style="background: {{ cat.color or '#6366f1' }}"></span>
                     <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
+                    {% if cat.orphaned %}
+                    <button class="adopt-btn" onclick="event.preventDefault(); adoptCategory('{{ cat.category }}')" title="Restore this category">Adopt</button>
+                    {% endif %}
                     <span class="sidebar-count">{{ cat.count }}</span>
                 </a>
                 {% endfor %}
@@ -579,6 +613,35 @@
         } catch (error) {
             alert(`Error: ${error.message}`);
             btn.disabled = false;
+        }
+    }
+
+    async function adoptCategory(categoryName) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        try {
+            const response = await fetch('/categories/api/adopt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: categoryName })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Reload to show restored category
+                location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+                btn.disabled = false;
+                btn.textContent = 'Adopt';
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Adopt';
         }
     }
 </script>

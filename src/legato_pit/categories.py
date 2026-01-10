@@ -181,6 +181,87 @@ def api_create_category():
         return jsonify({'error': str(e)}), 500
 
 
+@categories_bp.route('/api/adopt', methods=['POST'])
+@login_required
+def api_adopt_category():
+    """Adopt an orphaned category by recreating its database record.
+
+    This is used when a category exists in knowledge_entries but not in
+    user_categories (e.g., after database loss).
+
+    Request body:
+    {
+        "name": "work-queue",           -- the orphaned category slug (required)
+        "display_name": "Work Queue",   -- human readable (optional, will guess from name)
+        "description": "...",           -- optional
+        "folder_name": "work-queues",   -- optional, will guess from name
+        "color": "#6366f1"              -- optional
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    name = data.get('name', '').lower().strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+
+    # Check that this category actually exists in entries (is truly orphaned)
+    db = get_db()
+    entry_count = db.execute(
+        "SELECT COUNT(*) FROM knowledge_entries WHERE category = ?",
+        (name,)
+    ).fetchone()[0]
+
+    if entry_count == 0:
+        return jsonify({'error': f'No entries found with category "{name}"'}), 404
+
+    # Use provided values or generate reasonable defaults
+    display_name = data.get('display_name', '').strip()
+    if not display_name:
+        display_name = name.replace('-', ' ').title()
+
+    folder_name = data.get('folder_name', '').strip()
+    if not folder_name:
+        folder_name = f"{name}s"
+
+    description = data.get('description', '').strip()
+    color = data.get('color', '#6366f1').strip()
+
+    try:
+        user_id = get_user_id()
+
+        # Get next sort_order
+        max_order = db.execute(
+            "SELECT MAX(sort_order) FROM user_categories WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()[0] or 0
+
+        cursor = db.execute("""
+            INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, name, display_name, description, folder_name, max_order + 1, color))
+
+        db.commit()
+        category_id = cursor.lastrowid
+
+        logger.info(f"Adopted orphaned category: {name} (id={category_id}, {entry_count} entries)")
+
+        return jsonify({
+            'success': True,
+            'id': category_id,
+            'name': name,
+            'display_name': display_name,
+            'entry_count': entry_count,
+        })
+
+    except Exception as e:
+        if 'UNIQUE constraint' in str(e):
+            return jsonify({'error': f'Category "{name}" already exists in database'}), 409
+        logger.error(f"Failed to adopt category: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @categories_bp.route('/api/<int:category_id>', methods=['PUT'])
 @login_required
 def api_update_category(category_id: int):
@@ -480,3 +561,31 @@ def index():
     categories = get_user_categories(db, user_id)
 
     return render_template('categories.html', categories=categories)
+
+
+@categories_bp.route('/api/debug', methods=['GET'])
+@login_required
+def api_debug_categories():
+    """Debug endpoint to check database state.
+
+    Returns all categories (including inactive) and database path info.
+    """
+    from .rag.database import get_db_path
+
+    db = get_db()
+    user_id = get_user_id()
+
+    # Get ALL categories (including inactive)
+    all_categories = db.execute("""
+        SELECT id, user_id, name, display_name, folder_name, is_active, color, created_at
+        FROM user_categories
+        WHERE user_id = ?
+        ORDER BY sort_order
+    """, (user_id,)).fetchall()
+
+    return jsonify({
+        'db_path': str(get_db_path('legato.db')),
+        'user_id': user_id,
+        'total_categories': len(all_categories),
+        'categories': [dict(row) for row in all_categories]
+    })

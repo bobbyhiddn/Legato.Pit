@@ -46,13 +46,16 @@ def get_agents_db():
 
 
 def get_categories_with_counts():
-    """Get all user categories with entry counts.
+    """Get all user categories with entry counts, including orphaned categories.
 
     Returns categories from user_categories table (not just categories with entries),
     with a count of how many entries exist in each category.
 
+    Also detects "orphaned" categories - categories used in knowledge_entries but
+    not defined in user_categories - and includes them with a warning flag.
+
     Returns:
-        List of dicts with: category (name), display_name, count, folder_name, color
+        List of dicts with: category (name), display_name, count, folder_name, color, orphaned
     """
     from .rag.database import get_user_categories
 
@@ -64,10 +67,14 @@ def get_categories_with_counts():
         """
         SELECT category, COUNT(*) as count
         FROM knowledge_entries
+        WHERE category IS NOT NULL AND category != ''
         GROUP BY category
         """
     ).fetchall()
     count_map = {row['category']: row['count'] for row in counts}
+
+    # Track which categories are defined
+    defined_categories = {cat['name'] for cat in user_categories}
 
     # Merge categories with counts
     result = []
@@ -78,7 +85,22 @@ def get_categories_with_counts():
             'count': count_map.get(cat['name'], 0),
             'folder_name': cat['folder_name'],
             'color': cat.get('color', '#6366f1'),
+            'orphaned': False,
         })
+
+    # Find orphaned categories (in entries but not in user_categories)
+    for category_name, count in count_map.items():
+        if category_name and category_name not in defined_categories:
+            # This category exists in entries but not in user_categories
+            result.append({
+                'category': category_name,
+                'display_name': category_name.replace('-', ' ').title(),  # Best guess display name
+                'count': count,
+                'folder_name': f"{category_name}s",  # Best guess folder
+                'color': '#9ca3af',  # Gray for orphaned
+                'orphaned': True,
+            })
+            logger.warning(f"Orphaned category detected: '{category_name}' with {count} entries")
 
     return result
 

@@ -50,8 +50,28 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Enable foreign keys and WAL mode for better concurrency
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    # Ensure writes are synced to disk (important for Fly.io)
+    conn.execute("PRAGMA synchronous = NORMAL")
 
     return conn
+
+
+def checkpoint_all_databases():
+    """Checkpoint all databases to ensure WAL changes are written to disk.
+
+    This is important for data persistence when running on Fly.io with
+    auto_stop_machines enabled.
+    """
+    for db_name in ['legato.db', 'agents.db', 'chat.db']:
+        try:
+            path = get_db_path(db_name)
+            if path.exists():
+                conn = sqlite3.connect(str(path))
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                logger.info(f"Checkpointed {db_name}")
+        except Exception as e:
+            logger.error(f"Failed to checkpoint {db_name}: {e}")
 
 
 # ============ Legato DB (Knowledge/Embeddings) ============

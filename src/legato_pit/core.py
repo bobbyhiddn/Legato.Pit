@@ -124,18 +124,23 @@ def create_app():
     from .rag.chat_session_manager import init_chat_manager, shutdown_chat_manager
     chat_manager = init_chat_manager(app)
 
-    # Register shutdown handler to flush all chat sessions
-    def cleanup_chat_sessions():
-        """Flush all chat sessions on shutdown."""
+    # Register shutdown handler to flush all chat sessions and checkpoint databases
+    def cleanup_on_shutdown():
+        """Flush chat sessions and checkpoint all databases on shutdown."""
         try:
             with app.app_context():
-                from .rag.database import init_chat_db
+                # Flush chat sessions
+                from .rag.database import init_chat_db, checkpoint_all_databases
                 db = init_chat_db()
                 shutdown_chat_manager(db)
-        except Exception as e:
-            logger.error(f"Error flushing chat sessions on shutdown: {e}")
 
-    atexit.register(cleanup_chat_sessions)
+                # Checkpoint all databases to ensure WAL changes are persisted
+                checkpoint_all_databases()
+                logger.info("Shutdown cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during shutdown cleanup: {e}")
+
+    atexit.register(cleanup_on_shutdown)
 
     # Background sync threads
     def start_background_sync():

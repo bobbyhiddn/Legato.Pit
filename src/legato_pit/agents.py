@@ -379,6 +379,40 @@ def api_pending_count():
         return jsonify({'count': 0})
 
 
+@agents_bp.route('/api/debug', methods=['GET'])
+@login_required
+def api_debug_agents():
+    """Debug endpoint to check agent queue database state.
+
+    Returns database path and queue summary.
+    """
+    from .rag.database import get_db_path
+
+    agents_db = get_db()
+
+    # Get status counts
+    status_counts = agents_db.execute("""
+        SELECT status, COUNT(*) as count
+        FROM agent_queue
+        GROUP BY status
+    """).fetchall()
+
+    # Get recent queue IDs
+    recent = agents_db.execute("""
+        SELECT queue_id, status, project_name, created_at
+        FROM agent_queue
+        ORDER BY created_at DESC
+        LIMIT 10
+    """).fetchall()
+
+    return jsonify({
+        'db_path': str(get_db_path('agents.db')),
+        'status_counts': {row['status']: row['count'] for row in status_counts},
+        'total_agents': sum(row['count'] for row in status_counts),
+        'recent_agents': [dict(row) for row in recent]
+    })
+
+
 @agents_bp.route('/api/<queue_id>/approve', methods=['POST'])
 @login_required
 def api_approve_agent(queue_id: str):
