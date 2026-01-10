@@ -196,12 +196,12 @@ def get_stats():
 def get_pending_agents():
     """Get pending agents from the queue."""
     from flask import g
-    from .rag.database import init_db
+    from .rag.database import init_agents_db
 
     try:
-        if 'db_conn' not in g:
-            g.db_conn = init_db()
-        db = g.db_conn
+        if 'agents_db_conn' not in g:
+            g.agents_db_conn = init_agents_db()
+        db = g.agents_db_conn
 
         rows = db.execute(
             """

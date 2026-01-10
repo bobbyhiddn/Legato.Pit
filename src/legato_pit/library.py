@@ -22,13 +22,21 @@ library_bp = Blueprint('library', __name__, url_prefix='/library')
 
 
 def get_db():
-    """Get database connection."""
-    if 'db_conn' not in g:
+    """Get legato database connection (knowledge entries)."""
+    if 'legato_db_conn' not in g:
         from .rag.database import init_db
-        g.db_conn = init_db()
+        g.legato_db_conn = init_db()
         # Force WAL checkpoint to ensure we see latest writes
-        g.db_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-    return g.db_conn
+        g.legato_db_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    return g.legato_db_conn
+
+
+def get_agents_db():
+    """Get agents database connection (agent queue)."""
+    if 'agents_db_conn' not in g:
+        from .rag.database import init_agents_db
+        g.agents_db_conn = init_agents_db()
+    return g.agents_db_conn
 
 
 def strip_frontmatter(content: str) -> str:
@@ -130,6 +138,29 @@ def view_entry(entry_id: str):
 
     entry_dict = dict(entry)
     entry_dict['content_html'] = render_markdown(entry_dict['content'])
+
+    # Check if a Chord was spawned from this Note (agent_queue is in agents.db)
+    agents_db = get_agents_db()
+    chord_info = agents_db.execute(
+        """
+        SELECT queue_id, project_name, status, approved_at
+        FROM agent_queue
+        WHERE source_transcript = ?
+        AND status = 'approved'
+        ORDER BY approved_at DESC
+        LIMIT 1
+        """,
+        (f"library:{entry_id}",),
+    ).fetchone()
+
+    if chord_info:
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+        entry_dict['chord'] = {
+            'name': chord_info['project_name'],
+            'repo': f"Lab.{chord_info['project_name']}.Chord",
+            'url': f"https://github.com/{org}/Lab.{chord_info['project_name']}.Chord",
+            'approved_at': chord_info['approved_at'],
+        }
 
     return render_template('library_entry.html', entry=entry_dict)
 

@@ -79,6 +79,7 @@ def create_app():
     from .chat import chat_bp
     from .memory_api import memory_api_bp
     from .agents import agents_bp
+    from .chords import chords_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -87,12 +88,15 @@ def create_app():
     app.register_blueprint(chat_bp)
     app.register_blueprint(memory_api_bp)
     app.register_blueprint(agents_bp)
+    app.register_blueprint(chords_bp)
 
-    # Initialize RAG database on startup
+    # Initialize all databases on startup
     with app.app_context():
-        from .rag.database import init_db
-        init_db()
-        logger.info("RAG database initialized")
+        from .rag.database import init_db, init_agents_db, init_chat_db
+        init_db()        # legato.db - knowledge entries, embeddings
+        init_agents_db() # agents.db - agent queue
+        init_chat_db()   # chat.db - chat sessions/messages
+        logger.info("All databases initialized (legato.db, agents.db, chat.db)")
 
     # Auto-sync library on startup (background thread)
     def startup_sync():

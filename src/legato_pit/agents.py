@@ -22,11 +22,19 @@ agents_bp = Blueprint('agents', __name__, url_prefix='/agents')
 
 
 def get_db():
-    """Get database connection."""
-    if 'db_conn' not in g:
+    """Get agents database connection."""
+    if 'agents_db_conn' not in g:
+        from .rag.database import init_agents_db
+        g.agents_db_conn = init_agents_db()
+    return g.agents_db_conn
+
+
+def get_legato_db():
+    """Get legato database connection (for knowledge entries)."""
+    if 'legato_db_conn' not in g:
         from .rag.database import init_db
-        g.db_conn = init_db()
-    return g.db_conn
+        g.legato_db_conn = init_db()
+    return g.legato_db_conn
 
 
 def generate_queue_id() -> str:
@@ -89,12 +97,11 @@ def index():
 @agents_bp.route('/api/from-entry', methods=['POST'])
 @login_required
 def api_queue_from_entry():
-    """Queue an agent from a library entry.
+    """Queue an agent to create a Chord (Lab repo) from a Note (library entry).
 
     Request body:
     {
-        "entry_id": "kb-abc123",
-        "project_scope": "note" or "chord"
+        "entry_id": "kb-abc123"
     }
 
     Response:
@@ -108,19 +115,26 @@ def api_queue_from_entry():
         return jsonify({'error': 'No data provided'}), 400
 
     entry_id = data.get('entry_id')
-    project_scope = data.get('project_scope', 'chord')
+    project_name = data.get('project_name')
 
     if not entry_id:
         return jsonify({'error': 'Missing entry_id'}), 400
 
-    if project_scope not in ('note', 'chord'):
-        return jsonify({'error': 'Invalid project_scope, must be "note" or "chord"'}), 400
+    if not project_name:
+        return jsonify({'error': 'Missing project_name'}), 400
+
+    # Validate project name
+    import re
+    project_name = re.sub(r'[^a-z0-9-]', '', project_name.lower())[:30]
+    if len(project_name) < 2:
+        return jsonify({'error': 'Project name must be at least 2 characters'}), 400
 
     try:
-        db = get_db()
+        legato_db = get_legato_db()
+        agents_db = get_db()
 
-        # Get the library entry
-        entry = db.execute(
+        # Get the library entry from legato.db
+        entry = legato_db.execute(
             "SELECT * FROM knowledge_entries WHERE entry_id = ?",
             (entry_id,)
         ).fetchone()
@@ -129,10 +143,6 @@ def api_queue_from_entry():
             return jsonify({'error': 'Entry not found'}), 404
 
         entry = dict(entry)
-
-        # Generate project name from title
-        import re
-        project_name = re.sub(r'[^a-zA-Z0-9]+', '-', entry['title'].lower()).strip('-')[:50]
 
         # Build tasker body from entry content
         content_preview = entry['content'][:500] if entry['content'] else ''
@@ -163,22 +173,22 @@ Implement the project as described in the knowledge entry.
 *Generated from Pit library entry | Source: {entry_id}*
 """
 
-        # Build signal JSON
+        # Build signal JSON - always creates a Chord (repo) from a Note (entry)
         signal_json = {
-            "id": f"lab.{project_scope}.{project_name}",
+            "id": f"lab.chord.{project_name}",
             "type": "project",
             "source": "pit-library",
-            "category": project_scope,
+            "category": "chord",
             "title": entry['title'],
             "domain_tags": [],
             "intent": entry.get('content', '')[:200],
             "key_phrases": [],
-            "path": f"Lab.{project_name}.{'Note' if project_scope == 'note' else 'Chord'}",
+            "path": f"Lab.{project_name}.Chord",
         }
 
         queue_id = generate_queue_id()
 
-        db.execute(
+        agents_db.execute(
             """
             INSERT INTO agent_queue
             (queue_id, project_name, project_type, title, description,
@@ -188,7 +198,7 @@ Implement the project as described in the knowledge entry.
             (
                 queue_id,
                 project_name,
-                project_scope,
+                'chord',  # Always chord - we're creating a repo from a note
                 entry['title'],
                 entry.get('content', '')[:500],
                 json.dumps(signal_json),
@@ -196,7 +206,7 @@ Implement the project as described in the knowledge entry.
                 f"library:{entry_id}",
             )
         )
-        db.commit()
+        agents_db.commit()
 
         logger.info(f"Queued agent from entry: {queue_id} - {project_name}")
 

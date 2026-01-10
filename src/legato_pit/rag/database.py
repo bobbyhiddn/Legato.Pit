@@ -1,12 +1,14 @@
 """
-SQLite Database Setup for Legato.Pit RAG
+SQLite Database Setup for Legato.Pit
 
-Schema includes:
-- knowledge_entries: Knowledge artifacts from Library
-- project_entries: Project metadata from Lab
-- embeddings: Vector embeddings (multi-provider)
-- chat_messages: Conversation history
-- transcript_hashes: Deduplication fingerprints
+Split database architecture:
+- legato.db: Knowledge entries, embeddings, sync tracking (RAG data)
+- agents.db: Agent queue for project spawns
+- chat.db: Chat sessions and messages
+
+Archive databases (for future):
+- agents_archive.db: Completed/old agent records
+- chat_archive.db: Old chat sessions
 """
 
 import os
@@ -22,14 +24,19 @@ DEFAULT_DB_DIR = Path(__file__).parent.parent.parent.parent / "data"
 FLY_VOLUME_PATH = os.environ.get("FLY_VOLUME_PATH", "/data")
 
 
-def get_db_path() -> Path:
-    """Get the database file path, preferring Fly volume if available."""
+def get_db_dir() -> Path:
+    """Get the database directory, preferring Fly volume if available."""
     if os.path.exists(FLY_VOLUME_PATH) and os.access(FLY_VOLUME_PATH, os.W_OK):
-        return Path(FLY_VOLUME_PATH) / "legato.db"
+        return Path(FLY_VOLUME_PATH)
 
     # Fallback to local data directory
     DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
-    return DEFAULT_DB_DIR / "legato.db"
+    return DEFAULT_DB_DIR
+
+
+def get_db_path(db_name: str = "legato.db") -> Path:
+    """Get path for a specific database file."""
+    return get_db_dir() / db_name
 
 
 def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
@@ -45,9 +52,21 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
+# ============ Legato DB (Knowledge/Embeddings) ============
+
 def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """Initialize the database with all required tables."""
-    conn = get_connection(db_path)
+    """Initialize legato.db with knowledge entries and embeddings.
+
+    This is the main RAG database containing:
+    - knowledge_entries: Library knowledge artifacts
+    - project_entries: Lab project metadata
+    - embeddings: Vector embeddings for similarity search
+    - transcript_hashes: Deduplication fingerprints
+    - sync_log: Sync tracking
+    - pipeline_runs: Pipeline run tracking
+    """
+    path = db_path or get_db_path("legato.db")
+    conn = get_connection(path)
     cursor = conn.cursor()
 
     # Knowledge entries from Library
@@ -94,31 +113,6 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
-    # Chat messages with context tracking
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            context_used TEXT,
-            model_used TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Chat sessions
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chat_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT UNIQUE NOT NULL,
-            title TEXT,
-            user_id TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
     # Transcript fingerprints for deduplication
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS transcript_hashes (
@@ -156,6 +150,30 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
+    # Create indexes for common queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
+
+    conn.commit()
+    logger.info(f"Legato database initialized at {path}")
+
+    return conn
+
+
+# ============ Agents DB ============
+
+def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    """Initialize agents.db for agent queue management.
+
+    Contains:
+    - agent_queue: Pending project spawns awaiting approval
+    """
+    path = db_path or get_db_path("agents.db")
+    conn = get_connection(path)
+    cursor = conn.cursor()
+
     # Agent queue for pending project spawns
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS agent_queue (
@@ -177,22 +195,73 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
-    # Create indexes for common queries
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
+    # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_status ON agent_queue(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_source ON agent_queue(source_transcript)")
 
     conn.commit()
-    logger.info(f"Database initialized at {db_path or get_db_path()}")
+    logger.info(f"Agents database initialized at {path}")
 
     return conn
 
 
-def backup_to_tigris(conn: sqlite3.Connection, bucket_name: str) -> bool:
-    """Backup database to Tigris S3-compatible storage."""
+# ============ Chat DB ============
+
+def init_chat_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    """Initialize chat.db for chat sessions and messages.
+
+    Contains:
+    - chat_sessions: User chat sessions
+    - chat_messages: Individual messages with context
+    """
+    path = db_path or get_db_path("chat.db")
+    conn = get_connection(path)
+    cursor = conn.cursor()
+
+    # Chat sessions
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT UNIQUE NOT NULL,
+            title TEXT,
+            user_id TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Chat messages with context tracking
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            context_used TEXT,
+            model_used TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+        )
+    """)
+
+    # Create indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
+
+    conn.commit()
+    logger.info(f"Chat database initialized at {path}")
+
+    return conn
+
+
+def backup_to_tigris(conn: sqlite3.Connection, bucket_name: str, db_name: str = "legato") -> bool:
+    """Backup a single database to Tigris S3-compatible storage.
+
+    Args:
+        conn: Database connection to backup
+        bucket_name: Tigris bucket name
+        db_name: Name prefix for backup file (e.g., 'legato', 'agents', 'chat')
+    """
     import boto3
     from datetime import datetime
 
@@ -207,8 +276,9 @@ def backup_to_tigris(conn: sqlite3.Connection, bucket_name: str) -> bool:
         )
 
         # Create backup
-        db_path = get_db_path()
-        backup_path = db_path.parent / f"legato_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        db_dir = get_db_dir()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = db_dir / f"{db_name}_backup_{timestamp}.db"
 
         # SQLite online backup
         backup_conn = sqlite3.connect(str(backup_path))
@@ -228,3 +298,27 @@ def backup_to_tigris(conn: sqlite3.Connection, bucket_name: str) -> bool:
     except Exception as e:
         logger.error(f"Backup to Tigris failed: {e}")
         return False
+
+
+def backup_all_to_tigris(bucket_name: str) -> dict:
+    """Backup all databases to Tigris S3-compatible storage.
+
+    Returns:
+        Dict with backup status for each database
+    """
+    results = {}
+
+    # Backup each database
+    for db_name, init_func in [
+        ("legato", init_db),
+        ("agents", init_agents_db),
+        ("chat", init_chat_db),
+    ]:
+        try:
+            conn = init_func()
+            success = backup_to_tigris(conn, bucket_name, db_name)
+            results[db_name] = {"success": success}
+        except Exception as e:
+            results[db_name] = {"success": False, "error": str(e)}
+
+    return results

@@ -74,9 +74,15 @@
             {% if entry.file_path %}
             <button type="button" onclick="showEditPane()" class="btn btn-primary">Edit</button>
             {% endif %}
+            {% if entry.chord %}
+            <a href="{{ entry.chord.url }}" target="_blank" class="btn btn-accent">
+                View Chord: {{ entry.chord.repo }}
+            </a>
+            {% else %}
             <button type="button" onclick="generateChord()" class="btn btn-accent" id="chordBtn">
                 Generate Chord
             </button>
+            {% endif %}
             <a href="{{ url_for('library.index') }}" class="btn btn-secondary">Back to Library</a>
         </div>
     </div>
@@ -178,9 +184,26 @@
     }
 
     async function generateChord() {
-        const scope = prompt('Project scope:\n- note: Single feature, quick implementation\n- chord: Multi-phase, complex project\n\nEnter "note" or "chord":', 'chord');
-        if (!scope || (scope !== 'note' && scope !== 'chord')) {
-            if (scope !== null) alert('Invalid scope. Please enter "note" or "chord".');
+        // Prompt for a concise project name
+        const projectName = prompt(
+            'Enter a short project name (lowercase, hyphens ok):\n\n' +
+            'Examples: voice-notes, dark-mode, api-cache',
+            ''
+        );
+
+        if (!projectName) {
+            return;
+        }
+
+        // Validate the name
+        const cleanName = projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        if (!cleanName || cleanName.length < 2) {
+            alert('Please enter a valid project name (at least 2 characters)');
+            return;
+        }
+
+        if (cleanName.length > 30) {
+            alert('Project name too long. Please use 30 characters or less.');
             return;
         }
 
@@ -194,7 +217,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     entry_id: entryId,
-                    project_scope: scope
+                    project_name: cleanName
                 })
             });
 

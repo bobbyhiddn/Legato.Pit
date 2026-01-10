@@ -25,15 +25,20 @@ chat_bp = Blueprint('chat', __name__, url_prefix='/chat')
 def get_services():
     """Get or create RAG services."""
     if 'chat_services' not in g:
-        from .rag.database import init_db
+        from .rag.database import init_db, init_chat_db
         from .rag.embedding_service import EmbeddingService
         from .rag.openai_provider import OpenAIEmbeddingProvider
         from .rag.context_builder import ContextBuilder
         from .rag.chat_service import ChatService, ChatProvider
 
-        # Initialize database
-        if 'db_conn' not in g:
-            g.db_conn = init_db()
+        # Initialize databases
+        # legato.db for embeddings/knowledge
+        if 'legato_db_conn' not in g:
+            g.legato_db_conn = init_db()
+
+        # chat.db for sessions/messages
+        if 'chat_db_conn' not in g:
+            g.chat_db_conn = init_chat_db()
 
         # Create embedding provider
         try:
@@ -42,7 +47,8 @@ def get_services():
             from .rag.ollama_provider import OllamaEmbeddingProvider
             provider = OllamaEmbeddingProvider()
 
-        embedding_service = EmbeddingService(provider, g.db_conn)
+        # Embedding service uses legato.db
+        embedding_service = EmbeddingService(provider, g.legato_db_conn)
         context_builder = ContextBuilder(embedding_service)
 
         # Create chat service
@@ -59,7 +65,8 @@ def get_services():
             'embedding': embedding_service,
             'context': context_builder,
             'chat': chat_service,
-            'db': g.db_conn,
+            'legato_db': g.legato_db_conn,  # For RAG/embeddings
+            'chat_db': g.chat_db_conn,       # For sessions/messages
         }
 
     return g.chat_services
@@ -179,10 +186,10 @@ def send_message():
             provider = ChatProvider.CLAUDE if requested_provider == 'claude' else ChatProvider.OPENAI if requested_provider == 'openai' else chat_service.provider
             chat_service = ChatService(provider=provider, model=requested_model)
 
-        session_id = get_or_create_session(services['db'])
+        session_id = get_or_create_session(services['chat_db'])
 
         # Get conversation history
-        history = get_chat_history(services['db'], session_id, limit=10)
+        history = get_chat_history(services['chat_db'], session_id, limit=10)
         history_messages = [
             {'role': h['role'], 'content': h['content']}
             for h in history
@@ -199,14 +206,14 @@ def send_message():
         context_entries = prompt_data.get('context_entries', [])
 
         # Save user message
-        save_message(services['db'], session_id, 'user', message)
+        save_message(services['chat_db'], session_id, 'user', message)
 
         # Get LLM response
         response = chat_service.chat(messages)
 
         # Save assistant message with context
         save_message(
-            services['db'],
+            services['chat_db'],
             session_id,
             'assistant',
             response,
@@ -250,7 +257,7 @@ def get_history():
         if not session_id:
             return jsonify({'messages': []})
 
-        history = get_chat_history(services['db'], session_id, limit=50)
+        history = get_chat_history(services['chat_db'], session_id, limit=50)
         return jsonify({'messages': history})
 
     except Exception as e:
@@ -266,7 +273,7 @@ def list_sessions():
         services = get_services()
         user = session.get('user', {})
 
-        rows = services['db'].execute(
+        rows = services['chat_db'].execute(
             """
             SELECT session_id, title, created_at, updated_at
             FROM chat_sessions
@@ -305,7 +312,7 @@ def new_session():
         session.pop('chat_session_id', None)
 
         # Create new one
-        session_id = get_or_create_session(services['db'])
+        session_id = get_or_create_session(services['chat_db'])
 
         return jsonify({
             'session_id': session_id,
@@ -326,7 +333,7 @@ def delete_session(session_id):
         user = session.get('user', {})
 
         # Verify ownership
-        row = services['db'].execute(
+        row = services['chat_db'].execute(
             "SELECT user_id FROM chat_sessions WHERE session_id = ?",
             (session_id,),
         ).fetchone()
@@ -335,15 +342,15 @@ def delete_session(session_id):
             return jsonify({'error': 'Session not found'}), 404
 
         # Delete messages and session
-        services['db'].execute(
+        services['chat_db'].execute(
             "DELETE FROM chat_messages WHERE session_id = ?",
             (session_id,),
         )
-        services['db'].execute(
+        services['chat_db'].execute(
             "DELETE FROM chat_sessions WHERE session_id = ?",
             (session_id,),
         )
-        services['db'].commit()
+        services['chat_db'].commit()
 
         # Clear from session if current
         if session.get('chat_session_id') == session_id:

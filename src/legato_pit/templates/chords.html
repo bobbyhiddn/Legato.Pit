@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Chords - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="chords-container">
+    <header class="page-header">
+        <h1>Chords</h1>
+        <p class="subtitle">Repositories spawned from Notes by LEGATO agents</p>
+    </header>
+
+    {% if repos %}
+    <section class="card">
+        <div class="chords-stats">
+            <span class="stat">{{ repos|length }} Chord{{ 's' if repos|length != 1 else '' }}</span>
+            <button class="btn btn-small" onclick="window.location.reload()">Refresh</button>
+        </div>
+
+        <div class="chords-list">
+            {% for repo in repos %}
+            <div class="chord-card" data-repo="{{ repo.full_name }}">
+                <div class="chord-header">
+                    <a href="{{ repo.html_url }}" target="_blank" class="chord-name">
+                        {{ repo.name }}
+                    </a>
+                    <span class="chord-date">{{ repo.created_at[:10] }}</span>
+                </div>
+
+                {% if repo.description %}
+                <p class="chord-description">{{ repo.description }}</p>
+                {% endif %}
+
+                <div class="chord-meta">
+                    {% if repo.open_issues_count > 0 %}
+                    <span class="badge badge-issues">{{ repo.open_issues_count }} open</span>
+                    {% endif %}
+                    {% for topic in repo.topics %}
+                    <span class="badge badge-topic">{{ topic }}</span>
+                    {% endfor %}
+                </div>
+
+                <div class="chord-details" id="details-{{ loop.index }}" style="display: none;">
+                    <div class="chord-loading">Loading...</div>
+                </div>
+
+                <button class="btn btn-small chord-expand" onclick="toggleDetails('{{ repo.full_name }}', {{ loop.index }})">
+                    Show Details
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% else %}
+    <section class="card">
+        <div class="empty-state-large">
+            <p>No Chords found</p>
+            <span class="empty-hint">
+                Chords are created when you approve agents. They're tagged with 'legato-chord' for tracking.
+            </span>
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>How Chords Work</h2>
+        <ol class="how-it-works">
+            <li>A Note (knowledge entry) captures a project idea</li>
+            <li>Click "Generate Chord" on the Note, or let Conduct classify it as a project</li>
+            <li>Review and approve in the <a href="{{ url_for('agents.index') }}">Agents</a> queue</li>
+            <li>A Chord repository is spawned with an initial issue for Copilot</li>
+            <li>Track progress here - the Note links back to its Chord</li>
+        </ol>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const loadedDetails = {};
+
+    async function toggleDetails(repoName, index) {
+        const detailsEl = document.getElementById(`details-${index}`);
+        const btn = detailsEl.previousElementSibling;
+
+        if (detailsEl.style.display === 'none') {
+            detailsEl.style.display = 'block';
+            btn.textContent = 'Hide Details';
+
+            if (!loadedDetails[repoName]) {
+                await loadRepoDetails(repoName, index);
+            }
+        } else {
+            detailsEl.style.display = 'none';
+            btn.textContent = 'Show Details';
+        }
+    }
+
+    async function loadRepoDetails(repoName, index) {
+        const detailsEl = document.getElementById(`details-${index}`);
+
+        try {
+            const response = await fetch(`/chords/api/repo/${repoName}`);
+            const data = await response.json();
+
+            loadedDetails[repoName] = data;
+
+            let html = '';
+
+            // Issues section
+            if (data.issues && data.issues.length > 0) {
+                html += '<div class="detail-section"><h4>Open Issues</h4><ul class="detail-list">';
+                for (const issue of data.issues) {
+                    const labels = issue.labels.map(l => `<span class="badge badge-small">${l}</span>`).join(' ');
+                    html += `<li>
+                        <a href="${issue.html_url}" target="_blank">#${issue.number}: ${issue.title}</a>
+                        ${labels}
+                        ${issue.assignee ? `<span class="assignee">@${issue.assignee}</span>` : ''}
+                    </li>`;
+                }
+                html += '</ul></div>';
+            }
+
+            // PRs section
+            if (data.pull_requests && data.pull_requests.length > 0) {
+                html += '<div class="detail-section"><h4>Open Pull Requests</h4><ul class="detail-list">';
+                for (const pr of data.pull_requests) {
+                    const draft = pr.draft ? '<span class="badge badge-draft">Draft</span>' : '';
+                    html += `<li>
+                        <a href="${pr.html_url}" target="_blank">#${pr.number}: ${pr.title}</a>
+                        ${draft}
+                        <span class="pr-author">by ${pr.user}</span>
+                    </li>`;
+                }
+                html += '</ul></div>';
+            }
+
+            // Recent commits
+            if (data.recent_commits && data.recent_commits.length > 0) {
+                html += '<div class="detail-section"><h4>Recent Commits</h4><ul class="detail-list commits">';
+                for (const commit of data.recent_commits) {
+                    html += `<li>
+                        <a href="${commit.html_url}" target="_blank"><code>${commit.sha}</code></a>
+                        <span class="commit-msg">${commit.message}</span>
+                        <span class="commit-author">${commit.author}</span>
+                    </li>`;
+                }
+                html += '</ul></div>';
+            }
+
+            if (!html) {
+                html = '<p class="empty-state">No activity yet</p>';
+            }
+
+            detailsEl.innerHTML = html;
+
+        } catch (error) {
+            detailsEl.innerHTML = `<p class="error">Failed to load details: ${error.message}</p>`;
+        }
+    }
+</script>
+{% endblock %}
