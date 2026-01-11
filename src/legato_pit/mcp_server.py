@@ -188,7 +188,7 @@ def handle_ping(params: dict) -> dict:
 TOOLS = [
     {
         "name": "search_library",
-        "description": "Semantic search across Legato library notes using AI embeddings. Returns the most relevant notes based on meaning, not just keywords.",
+        "description": "Hybrid search across Legato library notes using AI embeddings AND keyword matching. Returns results in two buckets: high-confidence matches and 'maybe related' lower-confidence matches.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -198,12 +198,22 @@ TOOLS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results (default: 10)",
+                    "description": "Maximum number of results per bucket (default: 10)",
                     "default": 10
                 },
                 "category": {
                     "type": "string",
                     "description": "Optional: filter to a specific category (e.g., 'concept', 'epiphany')"
+                },
+                "expand_query": {
+                    "type": "boolean",
+                    "description": "Whether to expand query with synonyms/related terms for better recall (default: true)",
+                    "default": True
+                },
+                "include_low_confidence": {
+                    "type": "boolean",
+                    "description": "Whether to include 'maybe related' lower-confidence results (default: true)",
+                    "default": True
                 }
             },
             "required": ["query"]
@@ -318,43 +328,71 @@ def handle_tool_call(params: dict) -> dict:
 # ============ Tool Implementations ============
 
 def tool_search_library(args: dict) -> dict:
-    """Semantic search across library notes."""
+    """Hybrid search across library notes with optional query expansion."""
     query = args.get('query', '')
     limit = args.get('limit', 10)
     category = args.get('category')
+    expand_query = args.get('expand_query', True)
+    include_low_confidence = args.get('include_low_confidence', True)
 
     if not query:
         return {"error": "Query is required", "results": []}
 
     service = get_embedding_service()
 
+    def format_result(r: dict) -> dict:
+        """Format a result for output."""
+        return {
+            "entry_id": r['entry_id'],
+            "title": r['title'],
+            "category": r.get('category'),
+            "similarity": round(r.get('similarity', 0), 3),
+            "match_types": r.get('match_types', []),
+            "snippet": (r.get('content', '')[:300] + '...') if r.get('content') else None
+        }
+
     if service:
-        # Use embedding-based semantic search
-        results = service.find_similar(
-            query_text=query,
-            entry_type='knowledge',
-            limit=limit,
-            threshold=0.4
-        )
+        # Use hybrid search with query expansion
+        if expand_query:
+            search_result = service.search_with_expansion(
+                query=query,
+                entry_type='knowledge',
+                limit=limit,
+                expand=True,
+            )
+        else:
+            search_result = service.hybrid_search(
+                query=query,
+                entry_type='knowledge',
+                limit=limit,
+                include_low_confidence=include_low_confidence,
+            )
+
+        results = search_result.get('results', [])
+        maybe_related = search_result.get('maybe_related', [])
 
         # Filter by category if specified
         if category:
             results = [r for r in results if r.get('category') == category]
+            maybe_related = [r for r in maybe_related if r.get('category') == category]
 
-        return {
+        response = {
             "query": query,
-            "results": [
-                {
-                    "entry_id": r['entry_id'],
-                    "title": r['title'],
-                    "category": r.get('category'),
-                    "similarity": round(r['similarity'], 3),
-                    "snippet": (r.get('content', '')[:300] + '...') if r.get('content') else None
-                }
-                for r in results[:limit]
-            ],
-            "search_type": "semantic"
+            "results": [format_result(r) for r in results[:limit]],
+            "search_type": "hybrid",
+            "total_found": search_result.get('total_found', len(results)),
         }
+
+        # Add query expansion info if used
+        if expand_query and 'queries_used' in search_result:
+            response["queries_used"] = search_result['queries_used']
+
+        # Add maybe_related bucket if requested and has results
+        if include_low_confidence and maybe_related:
+            response["maybe_related"] = [format_result(r) for r in maybe_related[:limit]]
+
+        return response
+
     else:
         # Fallback to text search
         db = get_db()

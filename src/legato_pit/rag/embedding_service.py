@@ -345,3 +345,266 @@ class EmbeddingService:
                 logger.error(f"Failed to generate embedding for {entry_type}:{entry_id}: {e}")
 
         return count
+
+    # ============ Enhanced Search ============
+
+    def keyword_search(
+        self,
+        query: str,
+        entry_type: str = 'knowledge',
+        limit: int = 20,
+    ) -> List[Dict]:
+        """Search entries using keyword matching on title, content, and tags.
+
+        Args:
+            query: Search query
+            entry_type: 'knowledge' or 'project'
+            limit: Maximum results
+
+        Returns:
+            List of matching entries with match_type='keyword'
+        """
+        if entry_type != 'knowledge':
+            return []
+
+        # Split query into terms and create LIKE patterns
+        terms = [t.strip().lower() for t in query.split() if len(t.strip()) >= 2]
+        if not terms:
+            return []
+
+        results = []
+
+        for term in terms:
+            pattern = f'%{term}%'
+
+            rows = self.conn.execute(
+                """
+                SELECT id, entry_id, title, category, content, domain_tags, key_phrases
+                FROM knowledge_entries
+                WHERE LOWER(title) LIKE ?
+                   OR LOWER(content) LIKE ?
+                   OR LOWER(domain_tags) LIKE ?
+                   OR LOWER(key_phrases) LIKE ?
+                LIMIT ?
+                """,
+                (pattern, pattern, pattern, pattern, limit * 2),
+            ).fetchall()
+
+            for row in rows:
+                # Count how many terms match for rough scoring
+                text = f"{row['title']} {row['content']} {row['domain_tags'] or ''} {row['key_phrases'] or ''}".lower()
+                term_hits = sum(1 for t in terms if t in text)
+                score = term_hits / len(terms)  # 0.0 to 1.0
+
+                results.append({
+                    'id': row['id'],
+                    'entry_id': row['entry_id'],
+                    'title': row['title'],
+                    'category': row['category'],
+                    'content': row['content'],
+                    'similarity': score,
+                    'match_type': 'keyword',
+                })
+
+        # Deduplicate by entry_id, keeping highest score
+        seen = {}
+        for r in results:
+            eid = r['entry_id']
+            if eid not in seen or r['similarity'] > seen[eid]['similarity']:
+                seen[eid] = r
+
+        results = sorted(seen.values(), key=lambda x: x['similarity'], reverse=True)
+        return results[:limit]
+
+    def hybrid_search(
+        self,
+        query: str,
+        entry_type: str = 'knowledge',
+        limit: int = 10,
+        semantic_threshold: float = 0.25,
+        keyword_boost: float = 0.15,
+        include_low_confidence: bool = True,
+    ) -> Dict:
+        """Hybrid search combining semantic and keyword matching.
+
+        Args:
+            query: Search query
+            entry_type: 'knowledge' or 'project'
+            limit: Maximum high-confidence results
+            semantic_threshold: Minimum semantic similarity for high-confidence
+            keyword_boost: Boost added when keyword also matches
+            include_low_confidence: Whether to return low-confidence bucket
+
+        Returns:
+            Dict with 'results' (high confidence) and 'maybe_related' (low confidence)
+        """
+        # Get semantic results with low threshold to capture more
+        semantic_results = self.find_similar(
+            query_text=query,
+            entry_type=entry_type,
+            limit=limit * 3,  # Get more than we need
+            threshold=0.15,   # Very low threshold to not miss anything
+        )
+
+        # Get keyword results
+        keyword_results = self.keyword_search(
+            query=query,
+            entry_type=entry_type,
+            limit=limit * 2,
+        )
+
+        # Build a map of entry_id -> best result with combined scoring
+        combined = {}
+
+        # Add semantic results
+        for r in semantic_results:
+            eid = r['entry_id']
+            combined[eid] = {
+                **r,
+                'semantic_score': r['similarity'],
+                'keyword_score': 0.0,
+                'match_types': ['semantic'],
+            }
+
+        # Merge keyword results
+        for r in keyword_results:
+            eid = r['entry_id']
+            if eid in combined:
+                # Entry found by both - boost the score
+                combined[eid]['keyword_score'] = r['similarity']
+                combined[eid]['match_types'].append('keyword')
+                # Combined score with keyword boost
+                combined[eid]['similarity'] = min(1.0,
+                    combined[eid]['semantic_score'] + (r['similarity'] * keyword_boost)
+                )
+            else:
+                # Only found by keyword
+                combined[eid] = {
+                    **r,
+                    'semantic_score': 0.0,
+                    'keyword_score': r['similarity'],
+                    'match_types': ['keyword'],
+                }
+
+        # Sort by combined similarity
+        all_results = sorted(combined.values(), key=lambda x: x['similarity'], reverse=True)
+
+        # Split into high-confidence and low-confidence
+        high_confidence = []
+        low_confidence = []
+
+        for r in all_results:
+            # High confidence if semantic score is above threshold
+            # OR if keyword score is strong (> 0.5 = more than half the terms matched)
+            if r.get('semantic_score', 0) >= semantic_threshold or r.get('keyword_score', 0) >= 0.5:
+                if len(high_confidence) < limit:
+                    high_confidence.append(r)
+                elif include_low_confidence:
+                    low_confidence.append(r)
+            elif include_low_confidence:
+                low_confidence.append(r)
+
+        # Limit low confidence results
+        low_confidence = low_confidence[:limit]
+
+        return {
+            'results': high_confidence,
+            'maybe_related': low_confidence if include_low_confidence else [],
+            'total_found': len(all_results),
+        }
+
+    def expand_query(self, query: str, max_expansions: int = 5) -> List[str]:
+        """Expand query with synonyms and related terms using Claude.
+
+        Args:
+            query: Original query
+            max_expansions: Maximum additional queries to generate
+
+        Returns:
+            List of expanded queries (includes original)
+        """
+        import os
+        try:
+            import anthropic
+        except ImportError:
+            logger.warning("anthropic package not installed, skipping query expansion")
+            return [query]
+
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            return [query]
+
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+
+            response = client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=200,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Generate {max_expansions} alternative search queries for: "{query}"
+
+Return ONLY the alternative queries, one per line. Include synonyms, related concepts, and rephrased versions. Be concise."""
+                }]
+            )
+
+            text = response.content[0].text
+            expansions = [line.strip() for line in text.strip().split('\n') if line.strip()]
+            expansions = expansions[:max_expansions]
+
+            # Include original query first
+            return [query] + expansions
+
+        except Exception as e:
+            logger.warning(f"Query expansion failed: {e}")
+            return [query]
+
+    def search_with_expansion(
+        self,
+        query: str,
+        entry_type: str = 'knowledge',
+        limit: int = 10,
+        expand: bool = True,
+    ) -> Dict:
+        """Search with optional query expansion for better recall.
+
+        Args:
+            query: Search query
+            entry_type: 'knowledge' or 'project'
+            limit: Maximum results
+            expand: Whether to expand query with related terms
+
+        Returns:
+            Dict with results and metadata
+        """
+        queries = self.expand_query(query) if expand else [query]
+
+        # Run hybrid search for each query variant
+        all_results = {}
+
+        for q in queries:
+            result = self.hybrid_search(
+                query=q,
+                entry_type=entry_type,
+                limit=limit,
+                include_low_confidence=True,
+            )
+
+            # Merge results, keeping best scores
+            for r in result['results'] + result['maybe_related']:
+                eid = r['entry_id']
+                if eid not in all_results or r['similarity'] > all_results[eid]['similarity']:
+                    all_results[eid] = r
+
+        # Sort and split
+        sorted_results = sorted(all_results.values(), key=lambda x: x['similarity'], reverse=True)
+
+        high = [r for r in sorted_results if r.get('semantic_score', 0) >= 0.25 or r.get('keyword_score', 0) >= 0.5]
+        low = [r for r in sorted_results if r not in high]
+
+        return {
+            'results': high[:limit],
+            'maybe_related': low[:limit],
+            'queries_used': queries,
+            'total_found': len(sorted_results),
+        }
