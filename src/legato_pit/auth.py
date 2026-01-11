@@ -72,6 +72,11 @@ def github_login():
 @auth_bp.route('/github/callback')
 def github_callback():
     """Handle GitHub OAuth callback."""
+    # Check if this is an MCP OAuth flow (shares callback URL with web login)
+    if 'mcp_github_state' in session:
+        from .oauth_server import handle_mcp_github_callback
+        return handle_mcp_github_callback()
+
     # Verify state to prevent CSRF
     state = request.args.get('state')
     stored_state = session.pop('oauth_state', None)

@@ -62,6 +62,20 @@ def get_base_url() -> str:
 
 # ============ OAuth Discovery ============
 
+@oauth_bp.route('/oauth/debug')
+def oauth_debug():
+    """Debug endpoint to verify URL generation (remove in production)."""
+    return jsonify({
+        "base_url": get_base_url(),
+        "github_callback_url": url_for('auth.github_callback', _external=True),
+        "note": "MCP OAuth uses the same callback as web login",
+        "request_url": request.url,
+        "request_host": request.host,
+        "x_forwarded_proto": request.headers.get('X-Forwarded-Proto'),
+        "x_forwarded_host": request.headers.get('X-Forwarded-Host'),
+    })
+
+
 @oauth_bp.route('/.well-known/oauth-authorization-server')
 def oauth_discovery():
     """OAuth 2.1 Authorization Server Metadata (RFC 8414).
@@ -235,9 +249,11 @@ def authorize():
             "error_description": "GitHub OAuth not configured"
         }), 500
 
+    # Use the existing auth callback URL (GitHub only allows one)
+    # auth.py will detect MCP flow via session and redirect to us
     params = {
         'client_id': github_client_id,
-        'redirect_uri': url_for('oauth.github_callback', _external=True),
+        'redirect_uri': url_for('auth.github_callback', _external=True),
         'scope': 'read:user',
         'state': github_state
     }
@@ -248,10 +264,10 @@ def authorize():
     return redirect(github_auth_url)
 
 
-@oauth_bp.route('/oauth/github-callback')
-def github_callback():
+def handle_mcp_github_callback():
     """Handle GitHub OAuth callback for MCP authorization.
 
+    Called from auth.py when it detects an MCP OAuth flow.
     Exchanges GitHub code for user info, then generates our own auth code
     and redirects back to Claude.
     """
@@ -283,12 +299,12 @@ def github_callback():
     if not code:
         return jsonify({"error": "invalid_request", "error_description": "No code from GitHub"}), 400
 
-    # Exchange code for GitHub access token
+    # Exchange code for GitHub access token (use auth callback URL since that's what GitHub expects)
     token_data = {
         'client_id': current_app.config['GITHUB_CLIENT_ID'],
         'client_secret': current_app.config['GITHUB_CLIENT_SECRET'],
         'code': code,
-        'redirect_uri': url_for('oauth.github_callback', _external=True)
+        'redirect_uri': url_for('auth.github_callback', _external=True)
     }
 
     try:
