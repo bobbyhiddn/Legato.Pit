@@ -239,10 +239,10 @@ def get_recent_artifacts(limit=5):
 
 
 def get_stats():
-    """Get system statistics from local database.
+    """Get system statistics from local database and GitHub.
 
     Returns:
-        Dict with transcripts (unique), notes (total), chords (active)
+        Dict with transcripts (unique), notes (total), chords (from GitHub)
     """
     from flask import g
     from .rag.database import init_db
@@ -270,13 +270,24 @@ def get_stats():
         result = db.execute("SELECT COUNT(*) FROM knowledge_entries").fetchone()
         stats['notes'] = result[0] if result else 0
 
-        # Count active chords
-        result = db.execute("""
-            SELECT COUNT(DISTINCT chord_repo)
-            FROM knowledge_entries
-            WHERE chord_status = 'active' AND chord_repo IS NOT NULL
-        """).fetchone()
-        stats['chords'] = result[0] if result else 0
+        # Count chords from GitHub (source of truth)
+        # Uses repos with legato-chord topic
+        try:
+            token = current_app.config.get('SYSTEM_PAT')
+            org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+            if token:
+                from .chords import fetch_chord_repos
+                repos = fetch_chord_repos(token, org)
+                stats['chords'] = len(repos)
+        except Exception as e:
+            logger.warning(f"Could not fetch chord count from GitHub: {e}")
+            # Fallback to local DB count
+            result = db.execute("""
+                SELECT COUNT(DISTINCT chord_repo)
+                FROM knowledge_entries
+                WHERE chord_status = 'active' AND chord_repo IS NOT NULL
+            """).fetchone()
+            stats['chords'] = result[0] if result else 0
 
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
@@ -311,6 +322,91 @@ def get_pending_agents():
         return []
 
 
+def get_recent_chord_spawns(limit=5):
+    """Get recently approved chord spawns from the agent queue.
+
+    Returns chord approvals from local database, which is faster and
+    more reliable than querying GitHub workflows.
+
+    Args:
+        limit: Maximum number of spawns to return
+
+    Returns:
+        List of chord spawn dicts with status info
+    """
+    import json
+    from flask import g
+    from .rag.database import init_agents_db
+
+    try:
+        if 'agents_db_conn' not in g:
+            g.agents_db_conn = init_agents_db()
+        db = g.agents_db_conn
+
+        rows = db.execute(
+            """
+            SELECT queue_id, project_name, project_type, title,
+                   status, approved_by, approved_at, spawn_result,
+                   created_at
+            FROM agent_queue
+            WHERE status IN ('approved', 'rejected')
+            ORDER BY approved_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+
+        spawns = []
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+
+        for row in rows:
+            row = dict(row)
+
+            # Parse spawn_result for success/failure info
+            spawn_success = False
+            if row.get('spawn_result'):
+                try:
+                    result = json.loads(row['spawn_result'])
+                    spawn_success = result.get('success', False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Determine display status
+            if row['status'] == 'rejected':
+                status = 'rejected'
+                status_text = 'Rejected'
+            elif spawn_success:
+                status = 'success'
+                status_text = 'Spawned'
+            else:
+                status = 'error'
+                status_text = 'Failed'
+
+            # Build repo URL for approved chords
+            repo_url = None
+            if row['status'] == 'approved' and row['project_type'] == 'chord':
+                repo_url = f"https://github.com/{org}/{row['project_name']}.Chord"
+
+            spawns.append({
+                'id': row['queue_id'],
+                'title': row['title'],
+                'project_name': row['project_name'],
+                'project_type': row['project_type'],
+                'status': status,
+                'status_text': status_text,
+                'approved_by': row['approved_by'],
+                'approved_at': row['approved_at'],
+                'created_at': row['created_at'],
+                'url': repo_url,
+            })
+
+        return spawns
+
+    except Exception as e:
+        logger.error(f"Error fetching recent chord spawns: {e}")
+        return []
+
+
 @dashboard_bp.route('/')
 @login_required
 def index():
@@ -325,6 +421,7 @@ def index():
         title='Dashboard',
         system_status=get_system_status(),
         recent_jobs=get_recent_jobs(),
+        recent_chord_spawns=get_recent_chord_spawns(),
         recent_artifacts=recent_artifacts,
         stats=get_stats(),
         pending_agents=get_pending_agents()
@@ -343,6 +440,7 @@ def api_status():
     return jsonify({
         'system_status': get_system_status(),
         'recent_jobs': get_recent_jobs(),
+        'recent_chord_spawns': get_recent_chord_spawns(),
         'recent_artifacts': recent_artifacts,
         'stats': get_stats(),
         'updated_at': datetime.now().isoformat()
