@@ -1824,7 +1824,7 @@ def api_cleanup_orphans():
         orphans = []
         for note in notes_with_chords:
             chord_repo = note['chord_repo']
-            # chord_repo might be full name like "bobbyhiddn/Lab.foo.Chord" or just "Lab.foo.Chord"
+            # chord_repo might be full name like "bobbyhiddn/foo.Chord" or just "foo.Chord"
             repo_name = chord_repo.split('/')[-1] if '/' in chord_repo else chord_repo
 
             if repo_name not in valid_repo_names:
