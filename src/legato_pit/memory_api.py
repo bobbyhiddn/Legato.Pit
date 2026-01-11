@@ -646,13 +646,19 @@ def pipeline_status():
     Request body:
     {
         "run_id": "12345",
-        "stage": "parse" | "classify" | "process-knowledge" | "process-projects" | "complete",
+        "stage": "parse" | "pre-classify" | "classify" | "process-knowledge" | "process-projects" | "complete",
         "status": "started" | "success" | "failed",
         "details": {
             "thread_count": 5,
             "knowledge_count": 3,
             ...
         }
+    }
+
+    For "pre-classify" stage, details should include:
+    {
+        "categories": [{"name": "epiphany", "description": "..."}],
+        "motifs": [{"id": "thread-1", "preview": "First 200 chars...", "title": "..."}]
     }
 
     Response:
@@ -698,6 +704,20 @@ def pipeline_status():
 
         logger.info(f"Pipeline {data['run_id']} stage {data['stage']}: {data['status']}")
 
+        # Enhanced logging for pre-classify stage to aid debugging
+        if data['stage'] == 'pre-classify':
+            details = data.get('details', {})
+            categories = details.get('categories', [])
+            motifs = details.get('motifs', [])
+
+            logger.info(f"PRE-CLASSIFY DEBUG for run {data['run_id']}:")
+            logger.info(f"  Categories available ({len(categories)}): {[c.get('name') for c in categories]}")
+            for motif in motifs[:5]:  # Log first 5 motifs
+                preview = motif.get('preview', '')[:100]
+                logger.info(f"  Motif '{motif.get('id', 'unknown')}': {preview}...")
+            if len(motifs) > 5:
+                logger.info(f"  ... and {len(motifs) - 5} more motifs")
+
         return jsonify({
             'success': True,
             'message': 'Status updated',
@@ -705,6 +725,61 @@ def pipeline_status():
 
     except Exception as e:
         logger.error(f"Pipeline status update failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_api_bp.route('/pipeline/pre-classify/<run_id>', methods=['GET'])
+@require_api_token
+def get_pre_classify_details(run_id: str):
+    """Get pre-classify debug details for a pipeline run.
+
+    This endpoint helps debug classification issues by showing:
+    - What categories were available to the classifier
+    - Preview of each motif being classified
+
+    Response:
+    {
+        "run_id": "12345",
+        "found": true,
+        "categories": [{"name": "epiphany", "description": "..."}],
+        "motifs": [{"id": "thread-1", "preview": "...", "title": "..."}],
+        "updated_at": "2024-01-15T10:30:00"
+    }
+    """
+    try:
+        from .rag.database import init_db
+        import json
+
+        db = init_db()
+
+        row = db.execute(
+            """
+            SELECT details, updated_at
+            FROM pipeline_runs
+            WHERE run_id = ? AND stage = 'pre-classify'
+            """,
+            (run_id,),
+        ).fetchone()
+
+        if not row:
+            return jsonify({
+                'run_id': run_id,
+                'found': False,
+                'message': 'No pre-classify stage found for this run. Conduct may need to be updated to report this stage.',
+            })
+
+        details = json.loads(row['details']) if row['details'] else {}
+
+        return jsonify({
+            'run_id': run_id,
+            'found': True,
+            'categories': details.get('categories', []),
+            'motifs': details.get('motifs', []),
+            'updated_at': row['updated_at'],
+        })
+
+    except Exception as e:
+        logger.error(f"Get pre-classify details failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 
