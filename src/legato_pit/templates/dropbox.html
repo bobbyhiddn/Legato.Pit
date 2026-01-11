@@ -1,25 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}Transcript Dropbox - {{ app_name }}{% endblock %}
+{% block title %}Motif - {{ app_name }}{% endblock %}
 
 {% block content %}
 <div class="dropbox">
     <header class="page-header">
-        <h1>Transcript Dropbox</h1>
+        <h1>Motif</h1>
+        <p class="subtitle">Drop a musical idea into the system</p>
     </header>
 
     <form action="{{ url_for('dropbox.upload') }}" method="POST" enctype="multipart/form-data" class="upload-form">
         <div class="form-section">
-            <label for="source_id" class="form-label">Source ID (optional)</label>
-            <input type="text" id="source_id" name="source_id"
-                   class="form-input"
-                   placeholder="e.g., voice-memo-2026-01-08"
-                   autocomplete="off">
-            <span class="form-hint">Identifier for this transcript</span>
-        </div>
-
-        <div class="form-section">
-            <label class="form-label">Upload Method</label>
+            <label class="form-label">Input Method</label>
 
             <div class="upload-tabs">
                 <button type="button" class="tab-btn active" onclick="showTab('text')">Paste Text</button>
@@ -29,7 +21,7 @@
             <div id="tab-text" class="tab-content active">
                 <textarea id="transcript" name="transcript"
                           class="form-textarea"
-                          placeholder="Paste your transcript text here..."
+                          placeholder="Paste your motif here - a voice transcript, idea, thought, or any text to process..."
                           rows="10"></textarea>
                 <span class="form-hint">Max 500KB</span>
             </div>

@@ -1,7 +1,7 @@
 """
 Legato.Pit Core Application
 
-Dashboard and Transcript Dropbox for the LEGATO system.
+Dashboard and Motif input for the LEGATO system.
 """
 import os
 import atexit
@@ -77,7 +77,7 @@ def create_app():
 
         # App metadata
         APP_NAME='Legato.Pit',
-        APP_DESCRIPTION='Dashboard & Transcript Dropbox for LEGATO'
+        APP_DESCRIPTION='Dashboard & Motif for LEGATO'
     )
 
     # Rate limiting
@@ -101,6 +101,8 @@ def create_app():
     from .agents import agents_bp
     from .chords import chords_bp
     from .categories import categories_bp
+    from .oauth_server import oauth_bp
+    from .mcp_server import mcp_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -111,6 +113,8 @@ def create_app():
     app.register_blueprint(agents_bp)
     app.register_blueprint(chords_bp)
     app.register_blueprint(categories_bp)
+    app.register_blueprint(oauth_bp)  # OAuth 2.1 AS with DCR for MCP
+    app.register_blueprint(mcp_bp)    # MCP protocol handler
 
     # Initialize all databases on startup
     with app.app_context():

@@ -238,6 +238,47 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # OAuth clients (Dynamic Client Registration - RFC 7591)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE NOT NULL,
+            client_name TEXT,
+            redirect_uris TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # OAuth authorization codes (short-lived, one-time use)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            client_id TEXT NOT NULL,
+            github_user_id INTEGER NOT NULL,
+            github_login TEXT NOT NULL,
+            code_challenge TEXT,
+            scope TEXT DEFAULT 'mcp:read mcp:write',
+            redirect_uri TEXT NOT NULL,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # OAuth sessions (for refresh tokens)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS oauth_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            github_user_id INTEGER NOT NULL,
+            github_login TEXT NOT NULL,
+            refresh_token TEXT UNIQUE,
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
@@ -245,6 +286,9 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_categories_user ON user_categories(user_id, is_active)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_clients ON oauth_clients(client_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
 
     conn.commit()
     logger.info(f"Legato database initialized at {path}")

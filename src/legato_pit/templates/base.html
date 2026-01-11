@@ -22,7 +22,7 @@
                 <a href="{{ url_for('chords.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chords.') %}active{% endif %}">Chords</a>
                 <a href="{{ url_for('agents.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('agents.') %}active{% endif %}">Agents<span class="nav-badge" id="agentQueueBadge" style="display:none;"></span></a>
                 <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
-                <a href="{{ url_for('dropbox.index') }}" class="nav-link {% if request.endpoint == 'dropbox.index' %}active{% endif %}">Dropbox</a>
+                <a href="{{ url_for('dropbox.index') }}" class="nav-link {% if request.endpoint == 'dropbox.index' %}active{% endif %}">Motif</a>
                 <a href="{{ url_for('categories.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('categories.') %}active{% endif %}">Categories</a>
                 <div class="nav-user">
                     {% if user.avatar_url %}
