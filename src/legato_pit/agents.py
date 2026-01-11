@@ -489,6 +489,11 @@ def api_approve_agent(queue_id: str):
     This triggers the Conduct spawn-project workflow via repository_dispatch.
     Also updates the linked Library entry's chord_status to 'active'.
 
+    Request body (optional):
+    {
+        "additional_comments": "Extra context or instructions for the agent..."
+    }
+
     Response:
     {
         "status": "approved",
@@ -498,6 +503,8 @@ def api_approve_agent(queue_id: str):
     """
     try:
         agents_db = get_db()
+        data = request.get_json() or {}
+        additional_comments = data.get('additional_comments', '').strip()
 
         # Get the queued agent
         row = agents_db.execute(
@@ -512,6 +519,19 @@ def api_approve_agent(queue_id: str):
         user = session.get('user', {})
         username = user.get('login', 'unknown')
         org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+
+        # Append additional comments to tasker_body if provided
+        if additional_comments:
+            agent['tasker_body'] = agent['tasker_body'] + f"""
+
+---
+
+## Additional Comments from Approver
+
+{additional_comments}
+
+*— {username}*
+"""
 
         # Trigger Conduct spawn workflow
         dispatch_result = trigger_spawn_workflow(agent)

@@ -22,6 +22,35 @@
         background: var(--success-color);
         color: white;
     }
+    .agent-comments-section {
+        margin-top: 0.75rem;
+    }
+    .comments-toggle {
+        padding: 0;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+    .comments-toggle:hover {
+        color: var(--accent-color);
+    }
+    .comments-container {
+        margin-top: 0.5rem;
+    }
+    .comments-textarea {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        resize: vertical;
+        min-height: 60px;
+    }
+    .comments-textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
 </style>
 <div class="agents-container">
     <header class="page-header">
@@ -63,6 +92,17 @@
                     <span class="agent-source">Source: {{ agent.source_transcript }}</span>
                     {% endif %}
                     <span class="agent-date">Queued: {{ agent.created_at[:16] }}</span>
+                    <div class="agent-comments-section">
+                        <button type="button" class="btn btn-link btn-sm comments-toggle" onclick="toggleComments('{{ agent.queue_id }}')">
+                            + Add comments before kickoff
+                        </button>
+                        <div class="comments-container" id="comments-{{ agent.queue_id }}" style="display: none;">
+                            <textarea class="form-control comments-textarea"
+                                      id="comments-text-{{ agent.queue_id }}"
+                                      placeholder="Additional context, instructions, or notes for the agent..."
+                                      rows="3"></textarea>
+                        </div>
+                    </div>
                 </div>
                 <div class="agent-actions">
                     <button class="btn btn-primary" onclick="approveAgent('{{ agent.queue_id }}')">
@@ -122,6 +162,18 @@
 
 {% block scripts %}
 <script>
+function toggleComments(queueId) {
+    const container = document.getElementById(`comments-${queueId}`);
+    const toggle = container.previousElementSibling;
+    if (container.style.display === 'none') {
+        container.style.display = 'block';
+        toggle.textContent = '- Hide comments';
+    } else {
+        container.style.display = 'none';
+        toggle.textContent = '+ Add comments before kickoff';
+    }
+}
+
 async function approveAgent(queueId) {
     if (!confirm('Approve this agent? This will spawn a new Lab repository.')) {
         return;
@@ -132,10 +184,15 @@ async function approveAgent(queueId) {
     btn.disabled = true;
     btn.textContent = 'Approving...';
 
+    // Get optional comments
+    const commentsTextarea = document.getElementById(`comments-text-${queueId}`);
+    const additionalComments = commentsTextarea ? commentsTextarea.value.trim() : '';
+
     try {
         const response = await fetch(`/agents/api/${queueId}/approve`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ additional_comments: additionalComments })
         });
 
         const data = await response.json();
