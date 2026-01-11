@@ -92,6 +92,9 @@ def dispatch_transcript(transcript_text, source_id):
     # Get user-defined categories for dynamic classification
     category_definitions = get_category_definitions()
     logger.info(f"Sending {len(category_definitions)} category definitions to classifier")
+    # Debug: Log category names being sent
+    category_names = [c['name'] for c in category_definitions]
+    logger.info(f"Category names being sent to Conduct: {category_names}")
 
     # Prepare dispatch payload
     # Include both 'transcript' and 'text' fields for compatibility with Conduct
@@ -202,6 +205,27 @@ def upload():
         flash(message, 'error')
 
     return redirect(url_for('dropbox.index'))
+
+
+@dropbox_bp.route('/api/debug-categories', methods=['GET'])
+@login_required
+def api_debug_categories():
+    """
+    Debug endpoint: Show exactly what category definitions would be sent to Conduct.
+
+    This helps diagnose classification issues by showing:
+    - All categories that will be passed to the classifier
+    - Whether your new category is included
+    - The description (which the classifier uses for context)
+    """
+    category_definitions = get_category_definitions()
+
+    return jsonify({
+        'count': len(category_definitions),
+        'category_names': [c['name'] for c in category_definitions],
+        'categories': category_definitions,
+        'note': 'These are the exact category definitions that will be sent to Conduct for classification'
+    })
 
 
 @dropbox_bp.route('/api/upload', methods=['POST'])
