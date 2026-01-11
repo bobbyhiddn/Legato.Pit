@@ -231,10 +231,17 @@
             <h3>Create Chord</h3>
             <p>Combining <span id="chordModalCount">0</span> note(s):</p>
             <ul class="chord-modal-list" id="chordModalList"></ul>
-            <input type="text" class="chord-modal-input" id="chordProjectName" placeholder="Project name (e.g., my-feature)">
+            <div class="chord-modal-hint">
+                Claude will analyze these notes and generate a project title and summary for the agent.
+            </div>
+            <input type="text" class="chord-modal-input" id="chordProjectName" placeholder="Project name override (optional)">
             <div class="chord-modal-actions">
                 <button class="btn btn-secondary" onclick="closeChordModal()">Cancel</button>
-                <button class="btn btn-primary" id="chordCreateBtn" onclick="submitChord()">Create</button>
+                <button class="btn btn-primary" id="chordCreateBtn" onclick="submitChord()">Create Chord</button>
+            </div>
+            <div class="chord-modal-result" id="chordResult" style="display: none;">
+                <div class="chord-result-title" id="chordResultTitle"></div>
+                <div class="chord-result-summary" id="chordResultSummary"></div>
             </div>
         </div>
     </div>
@@ -402,6 +409,12 @@
             color: var(--text-secondary);
             padding-left: 1.25rem;
         }
+        .chord-modal-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+            font-style: italic;
+        }
         .chord-modal-input {
             width: 100%;
             padding: 0.75rem;
@@ -411,10 +424,29 @@
             color: var(--text-primary);
             margin-bottom: 1rem;
         }
+        .chord-modal-input::placeholder {
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
         .chord-modal-actions {
             display: flex;
             justify-content: flex-end;
             gap: 0.5rem;
+        }
+        .chord-modal-result {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border-left: 3px solid var(--success-color);
+        }
+        .chord-result-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .chord-result-summary {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
         }
         /* Add to chord button style */
         .btn-add-chord {
@@ -564,43 +596,53 @@
         }
 
         async function submitChord() {
-            const projectName = document.getElementById('chordProjectName').value.trim();
-            if (!projectName) {
-                showWarning('Please enter a project name');
-                document.getElementById('chordProjectName').focus();
-                return;
-            }
-
+            const projectNameOverride = document.getElementById('chordProjectName').value.trim();
             const queue = getChordQueue();
             const btn = document.getElementById('chordCreateBtn');
+            const resultDiv = document.getElementById('chordResult');
+
             btn.disabled = true;
-            btn.textContent = 'Creating...';
+            btn.textContent = 'Analyzing with Claude...';
+            resultDiv.style.display = 'none';
 
             try {
+                const payload = { entry_ids: queue.map(e => e.id) };
+                if (projectNameOverride) {
+                    payload.project_name = projectNameOverride;
+                }
+
                 const response = await fetch('/library/api/create-chord', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        entry_ids: queue.map(e => e.id),
-                        project_name: projectName
-                    })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    closeChordModal();
-                    clearChordQueue();
-                    showSuccess('Chord created successfully');
-                    window.location.href = '/agents/';
+                    // Show the generated result briefly
+                    document.getElementById('chordResultTitle').textContent = data.title;
+                    document.getElementById('chordResultSummary').textContent = data.summary;
+                    resultDiv.style.display = 'block';
+                    btn.textContent = 'Created!';
+
+                    showSuccess(`Chord "${data.title}" queued for agent`);
+
+                    // Wait a moment to show the result, then redirect
+                    setTimeout(() => {
+                        closeChordModal();
+                        clearChordQueue();
+                        window.location.href = '/agents/';
+                    }, 1500);
                 } else {
                     showError(data.error || 'Failed to create chord');
+                    btn.disabled = false;
+                    btn.textContent = 'Create Chord';
                 }
             } catch (error) {
                 showError(error.message);
-            } finally {
                 btn.disabled = false;
-                btn.textContent = 'Create';
+                btn.textContent = 'Create Chord';
             }
         }
 

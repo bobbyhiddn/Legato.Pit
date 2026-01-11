@@ -878,22 +878,148 @@ def list_projects():
     )
 
 
+def generate_chord_summary(entries: list[dict]) -> dict:
+    """Use Claude to generate a title and summary for a chord.
+
+    Args:
+        entries: List of note dicts with 'title', 'content', 'category'
+
+    Returns:
+        {
+            "project_name": "slug-style-name",
+            "title": "Human Readable Title",
+            "summary": "What the agent should accomplish...",
+            "intent": "Brief intent statement"
+        }
+    """
+    import os
+    import anthropic
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        # Fallback if no API key
+        if len(entries) == 1:
+            title = entries[0]['title']
+            slug = title.lower().replace(' ', '-')[:30]
+            return {
+                "project_name": slug,
+                "title": title,
+                "summary": f"Implement the concept described in: {title}",
+                "intent": entries[0].get('category', 'project')
+            }
+        return {
+            "project_name": f"chord-{len(entries)}-notes",
+            "title": f"Combined Chord ({len(entries)} notes)",
+            "summary": "Implement the combined concepts from the source notes.",
+            "intent": "multi-note project"
+        }
+
+    # Build context for Claude
+    notes_text = ""
+    for i, entry in enumerate(entries, 1):
+        content = entry.get('content', '')[:2000]  # Limit per note
+        notes_text += f"""
+### Note {i}: {entry['title']}
+Category: {entry.get('category', 'uncategorized')}
+
+{content}
+
+---
+"""
+
+    prompt = f"""Analyze these knowledge notes and generate a project summary for a coding agent.
+
+{notes_text}
+
+Based on these notes, provide:
+1. A short project slug (lowercase, hyphens, max 30 chars) - this will be the GitHub repo/project name
+2. A human-readable title (max 60 chars)
+3. A clear summary (2-4 sentences) describing what the coding agent should implement. Be specific about the expected output.
+4. A brief intent phrase (3-5 words)
+
+Respond in this exact JSON format:
+{{
+    "project_name": "example-project-slug",
+    "title": "Example Project Title",
+    "summary": "The agent should implement X by doing Y. The expected output is Z.",
+    "intent": "brief intent phrase"
+}}
+
+Only output the JSON, nothing else."""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        import json
+        result_text = response.content[0].text.strip()
+        # Handle potential markdown code blocks
+        if result_text.startswith('```'):
+            result_text = result_text.split('```')[1]
+            if result_text.startswith('json'):
+                result_text = result_text[4:]
+        result = json.loads(result_text)
+
+        # Validate and sanitize
+        import re
+        project_name = re.sub(r'[^a-z0-9-]', '', result.get('project_name', 'chord').lower())[:30]
+        if len(project_name) < 2:
+            project_name = f"chord-{len(entries)}"
+
+        return {
+            "project_name": project_name,
+            "title": result.get('title', 'Chord Project')[:60],
+            "summary": result.get('summary', 'Implement the concepts from source notes.'),
+            "intent": result.get('intent', 'project implementation')
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to generate chord summary: {e}")
+        # Fallback
+        if len(entries) == 1:
+            title = entries[0]['title']
+            slug = title.lower().replace(' ', '-').replace('_', '-')[:30]
+            import re
+            slug = re.sub(r'[^a-z0-9-]', '', slug)
+            return {
+                "project_name": slug or "single-note",
+                "title": title,
+                "summary": f"Implement the concept: {title}",
+                "intent": entries[0].get('category', 'project')
+            }
+        return {
+            "project_name": f"chord-{len(entries)}-notes",
+            "title": f"Combined Chord ({len(entries)} notes)",
+            "summary": "Implement the combined concepts from the source notes.",
+            "intent": "multi-note project"
+        }
+
+
 @library_bp.route('/api/create-chord', methods=['POST'])
 @login_required
 def api_create_chord():
     """Create a Chord from one or more Notes.
 
+    Uses Claude to generate a project title and summary from the note content.
+    The agent receives both the summary (directive) and full note content (context).
+
     Request body:
     {
         "entry_ids": ["kb-abc123", "kb-def456"],
-        "project_name": "my-project"
+        "project_name": "optional-override"  // Optional - will be auto-generated
     }
 
     Response:
     {
         "status": "queued",
         "queue_id": "aq-xyz789",
-        "project_name": "my-project",
+        "project_name": "generated-name",
+        "title": "Generated Title",
+        "summary": "What the agent will do...",
         "source_count": 2
     }
     """
@@ -906,24 +1032,16 @@ def api_create_chord():
         return jsonify({'error': 'No data provided'}), 400
 
     entry_ids = data.get('entry_ids', [])
-    project_name = data.get('project_name', '')
+    manual_project_name = data.get('project_name', '').strip()
 
     if not entry_ids:
         return jsonify({'error': 'entry_ids is required'}), 400
-
-    if not project_name:
-        return jsonify({'error': 'project_name is required'}), 400
-
-    # Validate project name
-    project_name = re.sub(r'[^a-z0-9-]', '', project_name.lower())[:30]
-    if len(project_name) < 2:
-        return jsonify({'error': 'Project name must be at least 2 characters'}), 400
 
     try:
         legato_db = get_db()
         agents_db = get_agents_db()
 
-        # Fetch all entries
+        # Fetch all entries with full content
         placeholders = ','.join('?' * len(entry_ids))
         entries = legato_db.execute(
             f"""
@@ -939,56 +1057,71 @@ def api_create_chord():
 
         entries = [dict(e) for e in entries]
 
-        # Build combined tasker body
-        combined_title = f"Multi-note Chord: {project_name}"
-        if len(entries) == 1:
-            combined_title = entries[0]['title']
+        # Generate title and summary using Claude
+        chord_info = generate_chord_summary(entries)
 
-        context_sections = []
+        # Use manual override if provided
+        if manual_project_name:
+            project_name = re.sub(r'[^a-z0-9-]', '', manual_project_name.lower())[:30]
+            if len(project_name) < 2:
+                project_name = chord_info['project_name']
+        else:
+            project_name = chord_info['project_name']
+
+        title = chord_info['title']
+        summary = chord_info['summary']
+        intent = chord_info['intent']
+
+        # Build full context sections (complete content, not truncated)
+        full_context_sections = []
         for entry in entries:
-            content_preview = entry['content'][:400] if entry['content'] else ''
-            context_sections.append(
-                f"### From: {entry['title']} ({entry['entry_id']})\n"
-                f'"{content_preview}..."'
+            full_context_sections.append(
+                f"## Source Note: {entry['title']}\n"
+                f"**Entry ID:** {entry['entry_id']}\n"
+                f"**Category:** {entry.get('category', 'uncategorized')}\n\n"
+                f"{entry['content'] or '(No content)'}\n\n"
+                f"---"
             )
 
-        tasker_body = f"""## Tasker: {combined_title}
+        # Build tasker body with summary directive + full context
+        tasker_body = f"""## Tasker: {title}
 
-### Context
-This chord combines {len(entries)} note(s) from the Library:
+### Summary & Directive
+{summary}
 
-{chr(10).join(context_sections)}
+### Full Source Context
+The following is the complete content from {len(entries)} source note(s). Use this as reference material.
 
-### Objective
-Implement the project incorporating ideas from all source notes.
+{chr(10).join(full_context_sections)}
 
 ### Acceptance Criteria
-- [ ] Core functionality implemented
-- [ ] All source note concepts addressed
-- [ ] Documentation updated
-- [ ] Tests written
+- [ ] Core functionality implemented as described in the summary
+- [ ] All relevant concepts from source notes addressed
+- [ ] Code is well-documented
+- [ ] Tests cover main functionality
 
 ### Constraints
-- Follow patterns in `copilot-instructions.md`
+- Follow patterns in `copilot-instructions.md` if present
 - Reference `SIGNAL.md` for project intent
 - Keep PRs focused and reviewable
 
 ### References
-{chr(10).join(f'- Source: `{e["entry_id"]}`' for e in entries)}
+{chr(10).join(f'- Source: `{e["entry_id"]}` - {e["title"]}' for e in entries)}
 
 ---
-*Generated from {len(entries)} Library note(s) | Combined Chord*
+*Generated from {len(entries)} Library note(s) | Intent: {intent}*
 """
 
         # Build signal JSON
         signal_json = {
             "id": f"lab.chord.{project_name}",
             "type": "project",
-            "source": "pit-library-multi",
+            "source": "pit-library",
             "category": "chord",
-            "title": combined_title,
+            "title": title,
             "domain_tags": [],
-            "intent": f"Combined from {len(entries)} notes",
+            "intent": intent,
+            "summary": summary,
             "key_phrases": [],
             "source_entries": [e['entry_id'] for e in entries],
         }
@@ -1010,22 +1143,24 @@ Implement the project incorporating ideas from all source notes.
                 queue_id,
                 project_name,
                 'chord',
-                combined_title,
-                f"Combined from {len(entries)} notes",
+                title,
+                summary,
                 json.dumps(signal_json),
                 tasker_body,
-                f"library:multi:{len(entries)}",
+                f"library:chord:{len(entries)}",
                 related_ids,
             )
         )
         agents_db.commit()
 
-        logger.info(f"Queued multi-note chord: {queue_id} - {project_name} from {len(entries)} notes")
+        logger.info(f"Queued chord: {queue_id} - {title} ({project_name}) from {len(entries)} notes")
 
         return jsonify({
             'status': 'queued',
             'queue_id': queue_id,
             'project_name': project_name,
+            'title': title,
+            'summary': summary,
             'source_count': len(entries),
         })
 
