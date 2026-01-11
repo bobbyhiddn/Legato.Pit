@@ -436,7 +436,7 @@
                             </select>
                         </span>
                         <div class="action-group">
-                            <button class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                            <button class="action-btn btn-chord" onclick="addToChordQueueLocal('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                             </button>
                             <button class="action-btn btn-delete" onclick="deleteEntry('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Delete note">
@@ -553,38 +553,24 @@
         }
     }
 
-    async function addToChordQueue(entryId, title) {
-        const card = document.querySelector(`[data-entry-id="${entryId}"]`);
-        const btn = card.querySelector('.btn-chord');
-        btn.disabled = true;
+    // Override to use global chord queue from base.html
+    function addToChordQueueLocal(entryId, title) {
+        // Call the global function from base.html (localStorage-based)
+        if (typeof addToChordQueue === 'function') {
+            addToChordQueue(entryId, title);
+            showSuccess(`Added "${title}" to chord queue`);
 
-        try {
-            const response = await fetch('/agents/api/queue-chord', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    entry_id: entryId
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                showSuccess('Added to chord queue');
+            // Update button state
+            const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+            const btn = card?.querySelector('.btn-chord');
+            if (btn) {
                 btn.style.background = 'var(--success-color)';
                 btn.style.color = 'white';
                 setTimeout(() => {
                     btn.style.background = '';
                     btn.style.color = '';
-                    btn.disabled = false;
-                }, 2000);
-            } else {
-                showError(data.error || 'Failed to add to queue');
-                btn.disabled = false;
+                }, 1500);
             }
-        } catch (error) {
-            showError(error.message);
-            btn.disabled = false;
         }
     }
 

@@ -458,7 +458,7 @@
                         </select>
                     </span>
                     <div class="action-group">
-                        <button class="action-btn btn-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
+                        <button class="action-btn btn-chord" onclick="addToChordQueueLocal('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                         </button>
                         <button class="action-btn btn-delete" onclick="deleteEntry('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Delete note">
@@ -603,33 +603,23 @@
         }
     }
 
-    async function addToChordQueue(entryId, title) {
-        try {
-            const response = await fetch('/agents/api/queue-chord', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ entry_id: entryId })
-            });
+    // Use global chord queue from base.html
+    function addToChordQueueLocal(entryId, title) {
+        if (typeof addToChordQueue === 'function') {
+            addToChordQueue(entryId, title);
+            showSuccess(`Added "${title}" to chord queue`);
 
-            const data = await response.json();
-
-            if (response.ok && data.status === 'success') {
-                // Update UI to show queued status
-                const card = document.querySelector(`[data-entry-id="${entryId}"]`);
-                const actions = card.querySelector('.entry-actions');
-                const existingBadge = actions.querySelector('.chord-badge');
-                if (!existingBadge) {
-                    const badge = document.createElement('span');
-                    badge.className = 'chord-badge pending';
-                    badge.textContent = 'Queued';
-                    actions.insertBefore(badge, actions.firstChild);
-                }
-                showSuccess(`Added "${title}" to chord queue`);
-            } else {
-                showError(data.error || 'Failed to queue');
+            // Update button state
+            const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+            const btn = card?.querySelector('.btn-chord');
+            if (btn) {
+                btn.style.background = 'var(--success-color)';
+                btn.style.color = 'white';
+                setTimeout(() => {
+                    btn.style.background = '';
+                    btn.style.color = '';
+                }, 1500);
             }
-        } catch (error) {
-            showError(error.message);
         }
     }
 
