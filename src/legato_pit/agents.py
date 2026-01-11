@@ -64,7 +64,7 @@ def index():
     pending_rows = db.execute(
         """
         SELECT queue_id, project_name, project_type, title, description,
-               source_transcript, related_entry_id, created_at
+               source_transcript, related_entry_id, comments, created_at
         FROM agent_queue
         WHERE status = 'pending'
         ORDER BY created_at DESC
@@ -72,7 +72,7 @@ def index():
     ).fetchall()
     pending_agents = [dict(row) for row in pending_rows]
 
-    # Look up note titles for related_entry_ids
+    # Look up note titles for related_entry_ids and parse comments
     legato_db = get_legato_db()
     for agent in pending_agents:
         if agent.get('related_entry_id'):
@@ -83,6 +83,15 @@ def index():
                 (entry_id,)
             ).fetchone()
             agent['related_note_title'] = note['title'] if note else None
+
+        # Parse comments JSON array
+        if agent.get('comments'):
+            try:
+                agent['comments_list'] = json.loads(agent['comments'])
+            except (json.JSONDecodeError, TypeError):
+                agent['comments_list'] = []
+        else:
+            agent['comments_list'] = []
 
     # Get recent processed agents (last 20)
     recent_rows = db.execute(
@@ -758,6 +767,76 @@ def api_reject_all():
         return jsonify({'error': str(e)}), 500
 
 
+@agents_bp.route('/api/<queue_id>/comments', methods=['POST'])
+@login_required
+def api_add_comment(queue_id: str):
+    """Add a comment to an agent (max 5 total).
+
+    Request body:
+    {
+        "text": "Comment text here"
+    }
+
+    Response:
+    {
+        "status": "added",
+        "comments": [...]
+    }
+    """
+    try:
+        db = get_db()
+        data = request.get_json() or {}
+        text = data.get('text', '').strip()
+
+        if not text:
+            return jsonify({'error': 'Comment text is required'}), 400
+
+        user = session.get('user', {})
+        username = user.get('username', 'unknown')
+
+        # Get current comments
+        agent = db.execute(
+            "SELECT comments FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
+            (queue_id,)
+        ).fetchone()
+
+        if not agent:
+            return jsonify({'error': 'Agent not found or already processed'}), 404
+
+        # Parse existing comments
+        try:
+            comments = json.loads(agent['comments']) if agent['comments'] else []
+        except (json.JSONDecodeError, TypeError):
+            comments = []
+
+        # Check limit
+        if len(comments) >= 5:
+            return jsonify({'error': 'Maximum 5 comments allowed'}), 400
+
+        # Add new comment
+        comments.append({
+            "text": text,
+            "author": username,
+            "timestamp": datetime.now().isoformat() + "Z"
+        })
+
+        # Save
+        db.execute(
+            "UPDATE agent_queue SET comments = ?, updated_at = CURRENT_TIMESTAMP WHERE queue_id = ?",
+            (json.dumps(comments), queue_id)
+        )
+        db.commit()
+
+        return jsonify({
+            'status': 'added',
+            'comments': comments
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to add comment: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @agents_bp.route('/api/<queue_id>/reject', methods=['POST'])
 @login_required
 def api_reject_agent(queue_id: str):
@@ -780,20 +859,18 @@ def api_reject_agent(queue_id: str):
         reason = data.get('reason', '')
 
         user = session.get('user', {})
-        username = user.get('login', 'unknown')
+        username = user.get('username', 'unknown')
 
         # Get the agent's related_entry_id before rejecting
         agent = db.execute(
-            "SELECT related_entry_id FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
+            "SELECT related_entry_id FROM agent_queue WHERE queue_id = ?",
             (queue_id,)
         ).fetchone()
 
-        if not agent:
-            return jsonify({'error': 'Agent not found or already processed'}), 404
-
         related_entry_id = agent['related_entry_id'] if agent else None
 
-        result = db.execute(
+        # Update status to rejected - check rowcount to verify it worked
+        cursor = db.execute(
             """
             UPDATE agent_queue
             SET status = 'rejected',
@@ -806,6 +883,9 @@ def api_reject_agent(queue_id: str):
             (username, json.dumps({'rejected': True, 'reason': reason}), queue_id)
         )
         db.commit()
+
+        if cursor.rowcount == 0:
+            return jsonify({'error': 'Agent not found or already processed'}), 404
 
         # Reset chord_status to 'rejected' AND needs_chord=0 on linked notes to prevent re-queueing
         if related_entry_id:

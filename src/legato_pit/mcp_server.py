@@ -743,6 +743,15 @@ def tool_spawn_agent(args: dict) -> dict:
     else:
         description = primary['content'][:200] if primary['content'] else primary['title']
 
+    # Build initial comments array with Claude's comment if provided
+    initial_comments = []
+    if additional_comments:
+        initial_comments.append({
+            "text": additional_comments,
+            "author": "claude",
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        })
+
     # Insert into agent_queue
     try:
         agents_db = get_connection(get_db_path("agents.db"))
@@ -751,8 +760,8 @@ def tool_spawn_agent(args: dict) -> dict:
             """
             INSERT INTO agent_queue
             (queue_id, project_name, project_type, title, description,
-             signal_json, tasker_body, source_transcript, related_entry_id, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+             signal_json, tasker_body, source_transcript, related_entry_id, comments, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
             """,
             (
                 queue_id,
@@ -764,6 +773,7 @@ def tool_spawn_agent(args: dict) -> dict:
                 tasker_body,
                 'mcp-claude',
                 ','.join(n['entry_id'] for n in notes),
+                json.dumps(initial_comments),
             )
         )
         agents_db.commit()
