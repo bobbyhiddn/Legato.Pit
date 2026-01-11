@@ -282,6 +282,37 @@ TOOLS = [
             },
             "required": []
         }
+    },
+    {
+        "name": "spawn_agent",
+        "description": "Queue a chord project for human approval. Links 1-5 existing library notes to create a project that will be implemented by GitHub Copilot after approval. The project appears in the Legato agent queue for review.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "note_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "description": "Array of 1-5 entry_ids (e.g., ['kb-abc123']) to link to this project"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Slug-style name for the project (e.g., 'mcp-bedrock-adapter'). Auto-generated if not provided."
+                },
+                "project_type": {
+                    "type": "string",
+                    "enum": ["note", "chord"],
+                    "description": "Project scope: 'note' for single-PR simple projects, 'chord' for complex multi-phase projects (default: 'note')",
+                    "default": "note"
+                },
+                "additional_comments": {
+                    "type": "string",
+                    "description": "Additional context, instructions, or requirements for the implementation"
+                }
+            },
+            "required": ["note_ids"]
+        }
     }
 ]
 
@@ -302,6 +333,7 @@ def handle_tool_call(params: dict) -> dict:
         'list_categories': tool_list_categories,
         'get_note': tool_get_note,
         'list_recent_notes': tool_list_recent_notes,
+        'spawn_agent': tool_spawn_agent,
     }
 
     handler = tool_handlers.get(name)
@@ -618,6 +650,131 @@ def tool_list_recent_notes(args: dict) -> dict:
         ],
         "count": len(notes)
     }
+
+
+def tool_spawn_agent(args: dict) -> dict:
+    """Queue a chord project from library notes for human approval."""
+    import secrets
+    import re
+    from .rag.database import get_db_path, get_connection
+
+    note_ids = args.get('note_ids', [])
+    project_name = args.get('project_name', '').strip()
+    project_type = args.get('project_type', 'note').lower()
+    additional_comments = args.get('additional_comments', '').strip()
+
+    # Validate note_ids
+    if not note_ids:
+        return {"error": "At least one note_id is required"}
+    if len(note_ids) > 5:
+        return {"error": "Maximum 5 notes can be linked to a project"}
+    if not isinstance(note_ids, list):
+        note_ids = [note_ids]
+
+    # Validate project_type
+    if project_type not in ('note', 'chord'):
+        project_type = 'note'
+
+    # Look up all the notes
+    db = get_db()
+    notes = []
+    for nid in note_ids:
+        entry = db.execute(
+            "SELECT entry_id, title, category, content, domain_tags, key_phrases FROM knowledge_entries WHERE entry_id = ?",
+            (nid.strip(),)
+        ).fetchone()
+        if entry:
+            notes.append(dict(entry))
+        else:
+            return {"error": f"Note not found: {nid}"}
+
+    if not notes:
+        return {"error": "No valid notes found"}
+
+    # Use first note as primary
+    primary = notes[0]
+
+    # Generate project name if not provided
+    if not project_name:
+        # Create slug from first note's title
+        slug = re.sub(r'[^a-z0-9]+', '-', primary['title'].lower()).strip('-')
+        project_name = slug[:50]  # Limit length
+
+    # Generate queue_id
+    queue_id = f"aq-{secrets.token_hex(6)}"
+
+    # Build signal JSON
+    signal_json = {
+        "title": primary['title'],
+        "intent": primary['content'][:500] if primary['content'] else "",
+        "domain_tags": primary.get('domain_tags', '').split(',') if primary.get('domain_tags') else [],
+        "source_notes": [n['entry_id'] for n in notes],
+        "additional_comments": additional_comments,
+    }
+
+    # Build tasker body
+    notes_section = "\n".join([f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes])
+    tasker_body = f"""## Tasker: {primary['title']}
+
+### Linked Notes
+{notes_section}
+
+### Context
+{primary['content'][:1000] if primary['content'] else 'No content'}
+
+### Additional Comments
+{additional_comments if additional_comments else 'None provided'}
+
+---
+*Queued via MCP by Claude | {len(notes)} note(s) linked*
+"""
+
+    # Build description
+    if len(notes) > 1:
+        description = f"Multi-note chord linking {len(notes)} notes: {', '.join(n['title'][:30] for n in notes)}"
+    else:
+        description = primary['content'][:200] if primary['content'] else primary['title']
+
+    # Insert into agent_queue
+    try:
+        agents_db = get_connection(get_db_path("agents.db"))
+
+        agents_db.execute(
+            """
+            INSERT INTO agent_queue
+            (queue_id, project_name, project_type, title, description,
+             signal_json, tasker_body, source_transcript, related_entry_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (
+                queue_id,
+                project_name,
+                project_type,
+                primary['title'],
+                description,
+                json.dumps(signal_json),
+                tasker_body,
+                'mcp-claude',
+                ','.join(n['entry_id'] for n in notes),
+            )
+        )
+        agents_db.commit()
+
+        logger.info(f"MCP queued agent: {queue_id} - {project_name} ({len(notes)} notes)")
+
+        return {
+            "success": True,
+            "queue_id": queue_id,
+            "project_name": project_name,
+            "project_type": project_type,
+            "notes_linked": len(notes),
+            "note_ids": [n['entry_id'] for n in notes],
+            "message": f"Project '{project_name}' queued for approval. Visit /agents in Legato Pit to approve."
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to queue agent: {e}")
+        return {"error": f"Failed to queue project: {str(e)}"}
 
 
 # ============ Resource Handlers ============
