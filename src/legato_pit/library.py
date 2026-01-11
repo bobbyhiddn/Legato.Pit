@@ -1114,7 +1114,7 @@ The following is the complete content from {len(entries)} source note(s). Use th
 
         # Build signal JSON
         signal_json = {
-            "id": f"lab.chord.{project_name}",
+            "id": f"{project_name}.Chord",
             "type": "project",
             "source": "pit-library",
             "category": "chord",
