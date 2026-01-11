@@ -1124,6 +1124,7 @@ The following is the complete content from {len(entries)} source note(s). Use th
             "summary": summary,
             "key_phrases": [],
             "source_entries": [e['entry_id'] for e in entries],
+            "path": f"{project_name}.Chord",
         }
 
         # Generate queue ID
@@ -1824,7 +1825,7 @@ def api_cleanup_orphans():
         orphans = []
         for note in notes_with_chords:
             chord_repo = note['chord_repo']
-            # chord_repo might be full name like "bobbyhiddn/Lab.foo.Chord" or just "Lab.foo.Chord"
+            # chord_repo might be full name like "bobbyhiddn/foo.Chord" or just "foo.Chord"
             repo_name = chord_repo.split('/')[-1] if '/' in chord_repo else chord_repo
 
             if repo_name not in valid_repo_names:

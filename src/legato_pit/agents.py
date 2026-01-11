@@ -194,11 +194,13 @@ def api_create_agent():
             })
 
         # Build signal JSON
+        repo_suffix = "Chord" if project_type == "chord" else "Note"
         signal_json = {
             "title": primary['title'],
             "intent": primary['content'][:500] if primary['content'] else "",
             "domain_tags": primary.get('domain_tags', '').split(',') if primary.get('domain_tags') else [],
             "source_notes": [n['entry_id'] for n in notes],
+            "path": f"{project_name}.{repo_suffix}",
         }
 
         # Build tasker body
@@ -1313,14 +1315,17 @@ From voice transcript:
 *Generated from Conduct pipeline*
 """
 
+            project_scope = item.get('project_scope', 'chord')
+            repo_suffix = "Chord" if project_scope == "chord" else "Note"
             signal_json = {
-                "id": f"lab.{item.get('project_scope', 'chord')}.{project_name}",
+                "id": f"lab.{project_scope}.{project_name}",
                 "type": "project",
                 "source": "conduct",
-                "category": item.get('project_scope', 'chord'),
+                "category": project_scope,
                 "title": item.get('knowledge_title') or item.get('title', 'Untitled'),
                 "domain_tags": item.get('domain_tags', []),
                 "key_phrases": item.get('key_phrases', []),
+                "path": f"{project_name}.{repo_suffix}",
             }
 
             queue_id = generate_queue_id()
@@ -1535,16 +1540,19 @@ Implement a unified solution addressing all related notes above.
 *Generated from {len(group_entries)} Library entries | multi-note chord*
 """
 
+            chord_scope = primary_entry.get('chord_scope', 'chord')
+            repo_suffix = "Chord" if chord_scope == "chord" else "Note"
             signal_json = {
-                "id": f"lab.chord.{chord_name}",
+                "id": f"lab.{chord_scope}.{chord_name}",
                 "type": "project",
                 "source": "library-escalation",
-                "category": primary_entry.get('chord_scope', 'chord'),
+                "category": chord_scope,
                 "title": primary_entry['title'] if len(group_entries) == 1 else f"Multi-note: {primary_entry['title']}",
                 "domain_tags": [],
                 "intent": primary_entry['content'][:200] if primary_entry['content'] else '',
                 "key_phrases": [],
                 "entry_count": len(group_entries),
+                "path": f"{chord_name}.{repo_suffix}",
             }
 
             queue_id = generate_queue_id()
