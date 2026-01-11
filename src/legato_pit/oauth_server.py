@@ -24,7 +24,7 @@ from urllib.parse import urlencode
 
 import requests
 import jwt
-from flask import Blueprint, request, jsonify, redirect, session, current_app, g
+from flask import Blueprint, request, jsonify, redirect, session, current_app, g, url_for
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,17 @@ def get_jwt_secret() -> str:
     return os.environ.get('JWT_SECRET_KEY') or current_app.config.get('SECRET_KEY')
 
 
+def get_base_url() -> str:
+    """Get the base URL respecting proxy headers and PREFERRED_URL_SCHEME.
+
+    Uses url_for with _external=True to properly handle Fly.io proxy.
+    """
+    # url_for with _external=True respects PREFERRED_URL_SCHEME and ProxyFix
+    root = url_for('oauth.oauth_discovery', _external=True)
+    # Strip the endpoint path to get base URL
+    return root.rsplit('/.well-known/', 1)[0]
+
+
 # ============ OAuth Discovery ============
 
 @oauth_bp.route('/.well-known/oauth-authorization-server')
@@ -57,7 +68,7 @@ def oauth_discovery():
 
     Claude.ai uses this to discover OAuth endpoints for DCR and authorization.
     """
-    base = request.host_url.rstrip('/')
+    base = get_base_url()
 
     return jsonify({
         "issuer": base,
@@ -76,7 +87,7 @@ def oauth_discovery():
 @oauth_bp.route('/.well-known/oauth-protected-resource')
 def oauth_protected_resource():
     """OAuth 2.1 Protected Resource Metadata (RFC 9728)."""
-    base = request.host_url.rstrip('/')
+    base = get_base_url()
 
     return jsonify({
         "resource": base,

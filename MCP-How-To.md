@@ -4,7 +4,7 @@ This guide explains how to connect Legato.Pit to Claude.ai as a custom MCP conne
 
 ## Prerequisites
 
-1. **Pit must be deployed** with HTTPS (e.g., `https://pit.legato.dev`)
+1. **Pit must be deployed** with HTTPS (e.g., `https://legato-pit.fly.dev`)
 2. **GitHub OAuth configured** with `GH_OAUTH_CLIENT_ID` and `GH_OAUTH_CLIENT_SECRET`
 3. **PyJWT installed**: `pip install PyJWT>=2.8.0`
 
@@ -30,10 +30,8 @@ Go to **Settings** → **Connectors**
 Click **"Add custom connector"** and enter:
 
 ```
-Server URL: https://pit.legato.dev/mcp
+Server URL: https://legato-pit.fly.dev/mcp
 ```
-
-Replace with your actual Pit deployment URL.
 
 ### 3. Authenticate
 
@@ -96,7 +94,7 @@ Expected: Claude searches, finds the note, then calls `get_note` to fetch full c
 1. Verify your Pit URL is HTTPS and publicly accessible
 2. Check that `/.well-known/oauth-authorization-server` returns valid JSON:
    ```bash
-   curl https://pit.legato.dev/.well-known/oauth-authorization-server
+   curl https://legato-pit.fly.dev/.well-known/oauth-authorization-server
    ```
 
 ### "Authentication Failed"
@@ -121,19 +119,19 @@ You can test the OAuth flow manually:
 
 ```bash
 # 1. Check OAuth discovery
-curl https://pit.legato.dev/.well-known/oauth-authorization-server
+curl https://legato-pit.fly.dev/.well-known/oauth-authorization-server
 
 # 2. Test DCR (registration)
-curl -X POST https://pit.legato.dev/oauth/register \
+curl -X POST https://legato-pit.fly.dev/oauth/register \
   -H "Content-Type: application/json" \
   -d '{"redirect_uris":["https://example.com/callback"],"client_name":"Test"}'
 
 # 3. Test MCP protocol version
-curl -I https://pit.legato.dev/mcp
+curl -I https://legato-pit.fly.dev/mcp
 # Should return: MCP-Protocol-Version: 2025-06-18
 
 # 4. Test MCP endpoint (requires valid token)
-curl -X POST https://pit.legato.dev/mcp \
+curl -X POST https://legato-pit.fly.dev/mcp \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
