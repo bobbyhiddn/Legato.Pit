@@ -4,6 +4,14 @@
 
 {% block content %}
 <style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .page-header h1 {
+        margin-bottom: 0.25rem;
+    }
     .agent-note-link {
         color: var(--accent-color);
         text-decoration: none;
@@ -85,11 +93,131 @@
         padding: 0.4rem 0.8rem;
         font-size: 0.85rem;
     }
+    /* Modal styles */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-overlay.active {
+        display: flex;
+    }
+    .modal {
+        background: var(--bg-primary);
+        border-radius: 8px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1.25rem;
+    }
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--text-muted);
+        padding: 0;
+        line-height: 1;
+    }
+    .modal-close:hover {
+        color: var(--text-primary);
+    }
+    .modal-body {
+        padding: 1.5rem;
+    }
+    .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        padding: 1rem 1.5rem;
+        border-top: 1px solid var(--border-color);
+    }
+    .form-group {
+        margin-bottom: 1.25rem;
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+    .form-group .hint {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+    }
+    .form-control {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 0.9rem;
+    }
+    .form-control:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+    select.form-control {
+        min-height: 120px;
+    }
+    .selected-notes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .selected-note-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.25rem 0.5rem;
+        background: var(--accent-color);
+        color: white;
+        border-radius: 4px;
+        font-size: 0.8rem;
+    }
+    .selected-note-tag button {
+        background: none;
+        border: none;
+        color: white;
+        cursor: pointer;
+        padding: 0;
+        font-size: 1rem;
+        line-height: 1;
+        opacity: 0.8;
+    }
+    .selected-note-tag button:hover {
+        opacity: 1;
+    }
 </style>
 <div class="agents-container">
     <header class="page-header">
-        <h1>Chord Queue</h1>
-        <p class="subtitle">Review and approve chord repository creation</p>
+        <div>
+            <h1>Chord Queue</h1>
+            <p class="subtitle">Review and approve chord repository creation</p>
+        </div>
+        <button class="btn btn-primary" onclick="openCreateModal()">+ Create Agent</button>
     </header>
 
     {% if pending_agents %}
@@ -206,6 +334,54 @@
             <li>A new repo is created with an initial issue assigned to Copilot</li>
         </ol>
     </section>
+</div>
+
+<!-- Create Agent Modal -->
+<div class="modal-overlay" id="createAgentModal" onclick="closeModalOnOverlay(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h2>Create Agent</h2>
+            <button class="modal-close" onclick="closeCreateModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="createAgentForm" onsubmit="submitCreateAgent(event)">
+                <div class="form-group">
+                    <label for="noteSelect">Select Notes (1-5)</label>
+                    <select id="noteSelect" class="form-control" multiple onchange="updateSelectedNotes()">
+                        <!-- Populated via JS -->
+                    </select>
+                    <div class="selected-notes" id="selectedNotesTags"></div>
+                    <p class="hint">Hold Ctrl/Cmd to select multiple notes</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="projectName">Project Name (optional)</label>
+                    <input type="text" id="projectName" class="form-control"
+                           placeholder="auto-generated from note title if empty"
+                           pattern="[a-z0-9-]+" title="Lowercase letters, numbers, and hyphens only">
+                    <p class="hint">Slug format: lowercase, hyphens only (e.g., my-project-name)</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="projectType">Project Type</label>
+                    <select id="projectType" class="form-control" style="min-height: auto;">
+                        <option value="note">Note (single PR, simple project)</option>
+                        <option value="chord">Chord (multi-phase, complex project)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="initialComment">Initial Comment (optional)</label>
+                    <textarea id="initialComment" class="form-control" rows="3"
+                              placeholder="Additional context, instructions, or requirements..."></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+            <button type="submit" form="createAgentForm" class="btn btn-primary" id="createAgentBtn">Create Agent</button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -371,5 +547,138 @@ async function rejectAgent(queueId) {
         btn.textContent = 'Reject';
     }
 }
+
+// ============ Create Agent Modal ============
+
+let availableNotes = [];
+let selectedNoteIds = [];
+
+async function openCreateModal() {
+    const modal = document.getElementById('createAgentModal');
+    modal.classList.add('active');
+
+    // Fetch available notes
+    try {
+        const response = await fetch('/library/api/entries?limit=100');
+        const data = await response.json();
+        availableNotes = data.entries || [];
+
+        const select = document.getElementById('noteSelect');
+        select.innerHTML = availableNotes.map(note =>
+            `<option value="${note.entry_id}">[${note.category}] ${escapeHtml(note.title)}</option>`
+        ).join('');
+
+        selectedNoteIds = [];
+        updateSelectedNotes();
+    } catch (error) {
+        showError('Failed to load notes: ' + error.message);
+    }
+}
+
+function closeCreateModal() {
+    const modal = document.getElementById('createAgentModal');
+    modal.classList.remove('active');
+
+    // Reset form
+    document.getElementById('createAgentForm').reset();
+    selectedNoteIds = [];
+    updateSelectedNotes();
+}
+
+function closeModalOnOverlay(event) {
+    if (event.target.classList.contains('modal-overlay')) {
+        closeCreateModal();
+    }
+}
+
+function updateSelectedNotes() {
+    const select = document.getElementById('noteSelect');
+    selectedNoteIds = Array.from(select.selectedOptions).map(opt => opt.value);
+
+    // Limit to 5
+    if (selectedNoteIds.length > 5) {
+        selectedNoteIds = selectedNoteIds.slice(0, 5);
+        // Deselect extras
+        Array.from(select.options).forEach(opt => {
+            if (!selectedNoteIds.includes(opt.value)) {
+                opt.selected = false;
+            }
+        });
+        showError('Maximum 5 notes allowed');
+    }
+
+    // Update tags display
+    const tagsContainer = document.getElementById('selectedNotesTags');
+    tagsContainer.innerHTML = selectedNoteIds.map(id => {
+        const note = availableNotes.find(n => n.entry_id === id);
+        const title = note ? note.title : id;
+        return `<span class="selected-note-tag">
+            ${escapeHtml(title.slice(0, 30))}${title.length > 30 ? '...' : ''}
+            <button type="button" onclick="removeSelectedNote('${id}')">&times;</button>
+        </span>`;
+    }).join('');
+}
+
+function removeSelectedNote(noteId) {
+    const select = document.getElementById('noteSelect');
+    Array.from(select.options).forEach(opt => {
+        if (opt.value === noteId) {
+            opt.selected = false;
+        }
+    });
+    updateSelectedNotes();
+}
+
+async function submitCreateAgent(event) {
+    event.preventDefault();
+
+    if (selectedNoteIds.length === 0) {
+        showError('Please select at least one note');
+        return;
+    }
+
+    const btn = document.getElementById('createAgentBtn');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+
+    const projectName = document.getElementById('projectName').value.trim();
+    const projectType = document.getElementById('projectType').value;
+    const initialComment = document.getElementById('initialComment').value.trim();
+
+    try {
+        const response = await fetch('/agents/api/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                note_ids: selectedNoteIds,
+                project_name: projectName || undefined,
+                project_type: projectType,
+                initial_comment: initialComment || undefined
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showSuccess(`Agent created: ${data.project_name}`);
+            closeCreateModal();
+            window.location.reload();
+        } else {
+            showError(data.error || 'Failed to create agent');
+        }
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create Agent';
+    }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeCreateModal();
+    }
+});
 </script>
 {% endblock %}

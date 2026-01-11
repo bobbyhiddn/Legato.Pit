@@ -115,6 +115,150 @@ def index():
 
 # ============ API Endpoints (called by Pit UI) ============
 
+@agents_bp.route('/api/create', methods=['POST'])
+@login_required
+def api_create_agent():
+    """Create a new agent from selected notes.
+
+    Request body:
+    {
+        "note_ids": ["kb-abc123", "kb-def456"],
+        "project_name": "optional-slug",
+        "project_type": "note" or "chord",
+        "initial_comment": "Optional comment"
+    }
+
+    Response:
+    {
+        "success": true,
+        "queue_id": "aq-xxx",
+        "project_name": "..."
+    }
+    """
+    import re
+
+    try:
+        db = get_db()
+        legato_db = get_legato_db()
+        data = request.get_json() or {}
+
+        note_ids = data.get('note_ids', [])
+        project_name = data.get('project_name', '').strip()
+        project_type = data.get('project_type', 'note').lower()
+        initial_comment = data.get('initial_comment', '').strip()
+
+        user = session.get('user', {})
+        username = user.get('username', 'unknown')
+
+        # Validate
+        if not note_ids:
+            return jsonify({'error': 'At least one note is required'}), 400
+        if len(note_ids) > 5:
+            return jsonify({'error': 'Maximum 5 notes allowed'}), 400
+        if project_type not in ('note', 'chord'):
+            project_type = 'note'
+
+        # Look up all notes
+        notes = []
+        for nid in note_ids:
+            entry = legato_db.execute(
+                "SELECT entry_id, title, category, content, domain_tags FROM knowledge_entries WHERE entry_id = ?",
+                (nid.strip(),)
+            ).fetchone()
+            if entry:
+                notes.append(dict(entry))
+            else:
+                return jsonify({'error': f'Note not found: {nid}'}), 404
+
+        if not notes:
+            return jsonify({'error': 'No valid notes found'}), 400
+
+        # Use first note as primary
+        primary = notes[0]
+
+        # Generate project name if not provided
+        if not project_name:
+            slug = re.sub(r'[^a-z0-9]+', '-', primary['title'].lower()).strip('-')
+            project_name = slug[:50]
+
+        # Generate queue_id
+        queue_id = generate_queue_id()
+
+        # Build initial comments
+        initial_comments = []
+        if initial_comment:
+            initial_comments.append({
+                "text": initial_comment,
+                "author": username,
+                "timestamp": datetime.now().isoformat() + "Z"
+            })
+
+        # Build signal JSON
+        signal_json = {
+            "title": primary['title'],
+            "intent": primary['content'][:500] if primary['content'] else "",
+            "domain_tags": primary.get('domain_tags', '').split(',') if primary.get('domain_tags') else [],
+            "source_notes": [n['entry_id'] for n in notes],
+        }
+
+        # Build tasker body
+        notes_section = "\n".join([f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes])
+        tasker_body = f"""## Tasker: {primary['title']}
+
+### Linked Notes
+{notes_section}
+
+### Context
+{primary['content'][:1000] if primary['content'] else 'No content'}
+
+---
+*Queued via Pit UI by {username} | {len(notes)} note(s) linked*
+"""
+
+        # Build description
+        if len(notes) > 1:
+            description = f"Multi-note chord linking {len(notes)} notes"
+        else:
+            description = primary['content'][:200] if primary['content'] else primary['title']
+
+        # Insert into agent_queue
+        db.execute(
+            """
+            INSERT INTO agent_queue
+            (queue_id, project_name, project_type, title, description,
+             signal_json, tasker_body, source_transcript, related_entry_id, comments, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (
+                queue_id,
+                project_name,
+                project_type,
+                primary['title'],
+                description,
+                json.dumps(signal_json),
+                tasker_body,
+                f'pit-ui:{username}',
+                ','.join(n['entry_id'] for n in notes),
+                json.dumps(initial_comments),
+            )
+        )
+        db.commit()
+
+        logger.info(f"Created agent via UI: {queue_id} - {project_name} by {username}")
+
+        return jsonify({
+            'success': True,
+            'queue_id': queue_id,
+            'project_name': project_name,
+            'project_type': project_type,
+            'notes_linked': len(notes),
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to create agent: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @agents_bp.route('/api/queue-chord', methods=['POST'])
 @login_required
 def api_queue_chord():
