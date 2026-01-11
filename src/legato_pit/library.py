@@ -1124,6 +1124,7 @@ The following is the complete content from {len(entries)} source note(s). Use th
             "summary": summary,
             "key_phrases": [],
             "source_entries": [e['entry_id'] for e in entries],
+            "path": f"{project_name}.Chord",
         }
 
         # Generate queue ID

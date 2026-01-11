@@ -712,12 +712,14 @@ def tool_spawn_agent(args: dict) -> dict:
     queue_id = f"aq-{secrets.token_hex(6)}"
 
     # Build signal JSON
+    repo_suffix = "Chord" if project_type == "chord" else "Note"
     signal_json = {
         "title": primary['title'],
         "intent": primary['content'][:500] if primary['content'] else "",
         "domain_tags": primary.get('domain_tags', '').split(',') if primary.get('domain_tags') else [],
         "source_notes": [n['entry_id'] for n in notes],
         "additional_comments": additional_comments,
+        "path": f"{project_name}.{repo_suffix}",
     }
 
     # Build tasker body
