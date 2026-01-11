@@ -20,7 +20,7 @@ import logging
 import json
 from datetime import datetime, timedelta
 from functools import wraps
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import requests
 import jwt
@@ -64,7 +64,26 @@ def get_base_url() -> str:
 
 @oauth_bp.route('/oauth/debug')
 def oauth_debug():
-    """Debug endpoint to verify URL generation (remove in production)."""
+    """Debug endpoint to verify URL generation and OAuth state."""
+    db = get_db()
+
+    # Count registered clients
+    client_count = db.execute("SELECT COUNT(*) FROM oauth_clients").fetchone()[0]
+
+    # Count pending auth codes
+    auth_code_count = db.execute("SELECT COUNT(*) FROM oauth_auth_codes").fetchone()[0]
+
+    # Count active sessions
+    session_count = db.execute("SELECT COUNT(*) FROM oauth_sessions").fetchone()[0]
+
+    # Get recent clients (names only, no secrets)
+    recent_clients = db.execute("""
+        SELECT client_id, client_name, created_at
+        FROM oauth_clients
+        ORDER BY created_at DESC
+        LIMIT 5
+    """).fetchall()
+
     return jsonify({
         "base_url": get_base_url(),
         "github_callback_url": url_for('auth.github_callback', _external=True),
@@ -73,6 +92,15 @@ def oauth_debug():
         "request_host": request.host,
         "x_forwarded_proto": request.headers.get('X-Forwarded-Proto'),
         "x_forwarded_host": request.headers.get('X-Forwarded-Host'),
+        "oauth_stats": {
+            "registered_clients": client_count,
+            "pending_auth_codes": auth_code_count,
+            "active_sessions": session_count,
+        },
+        "recent_clients": [
+            {"client_id": c['client_id'], "name": c['client_name'], "created": c['created_at']}
+            for c in recent_clients
+        ]
     })
 
 
@@ -386,28 +414,55 @@ def handle_mcp_github_callback():
 
     logger.info(f"MCP OAuth: Issued auth code for {github_user.get('login')} to client {oauth_request['client_id']}")
 
-    # Redirect back to Claude with our auth code
-    callback = f"{oauth_request['redirect_uri']}?code={auth_code}"
+    # Redirect back to client with our auth code
+    # Include iss (issuer) for OAuth 2.1 mix-up attack prevention
+    issuer = get_base_url()
+    callback = f"{oauth_request['redirect_uri']}?code={auth_code}&iss={quote(issuer, safe='')}"
     if oauth_request.get('state'):
         callback += f"&state={oauth_request['state']}"
 
+    logger.info(f"MCP OAuth: Redirecting to {oauth_request['redirect_uri'][:50]}... with auth code")
     return redirect(callback)
 
 
 # ============ Token Endpoint ============
 
-@oauth_bp.route('/oauth/token', methods=['POST'])
+def _get_token_param(key: str) -> str | None:
+    """Get a parameter from either form data or JSON body.
+
+    OAuth 2.1 spec requires application/x-www-form-urlencoded, but some
+    clients (like ChatGPT) may send JSON. Support both.
+    """
+    # Try form data first (standard OAuth)
+    value = request.form.get(key)
+    if value:
+        return value
+
+    # Try JSON body as fallback
+    try:
+        json_data = request.get_json(silent=True)
+        if json_data and isinstance(json_data, dict):
+            return json_data.get(key)
+    except Exception:
+        pass
+
+    return None
+
+
+@oauth_bp.route('/oauth/token', methods=['POST', 'OPTIONS'])
 def token():
     """Token endpoint - exchange auth code for access token.
 
     Implements PKCE verification and issues JWT access tokens.
+    Supports both application/x-www-form-urlencoded (standard) and JSON body.
 
-    Request (application/x-www-form-urlencoded):
+    Request:
     - grant_type: "authorization_code" or "refresh_token"
     - code: Authorization code (for authorization_code grant)
     - code_verifier: PKCE verifier (for authorization_code grant)
     - redirect_uri: Must match original
     - refresh_token: For refresh_token grant
+    - client_id: Client ID (optional but logged)
 
     Response:
     {
@@ -417,13 +472,26 @@ def token():
         "refresh_token": "..."
     }
     """
-    grant_type = request.form.get('grant_type')
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        response = current_app.make_default_options_response()
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        return response
+
+    # Log request details for debugging
+    content_type = request.content_type or 'unknown'
+    client_id = _get_token_param('client_id')
+    grant_type = _get_token_param('grant_type')
+
+    logger.info(f"Token request: grant_type={grant_type}, client_id={client_id}, content_type={content_type}")
 
     if grant_type == 'authorization_code':
         return _handle_authorization_code_grant()
     elif grant_type == 'refresh_token':
         return _handle_refresh_token_grant()
     else:
+        logger.warning(f"Unsupported grant type: {grant_type}")
         return jsonify({
             "error": "unsupported_grant_type",
             "error_description": f"Grant type '{grant_type}' not supported"
@@ -432,12 +500,15 @@ def token():
 
 def _handle_authorization_code_grant():
     """Handle authorization_code grant type."""
-    code = request.form.get('code')
-    code_verifier = request.form.get('code_verifier')
-    redirect_uri = request.form.get('redirect_uri')
-    client_id = request.form.get('client_id')
+    code = _get_token_param('code')
+    code_verifier = _get_token_param('code_verifier')
+    redirect_uri = _get_token_param('redirect_uri')
+    client_id = _get_token_param('client_id')
+
+    logger.debug(f"Auth code grant: code={code[:10] if code else 'None'}..., has_verifier={bool(code_verifier)}")
 
     if not code:
+        logger.warning("Token request missing code parameter")
         return jsonify({"error": "invalid_request", "error_description": "code required"}), 400
 
     # Look up auth code
@@ -448,7 +519,10 @@ def _handle_authorization_code_grant():
     ).fetchone()
 
     if not auth_code:
+        logger.warning(f"Auth code not found in database: {code[:15]}...")
         return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired code"}), 400
+
+    logger.info(f"Found auth code for client {auth_code['client_id']}, user {auth_code['github_login']}")
 
     # Delete the code (one-time use)
     db.execute("DELETE FROM oauth_auth_codes WHERE code = ?", (code,))
@@ -513,9 +587,10 @@ def _handle_authorization_code_grant():
 
 def _handle_refresh_token_grant():
     """Handle refresh_token grant type."""
-    refresh_token = request.form.get('refresh_token')
+    refresh_token = _get_token_param('refresh_token')
 
     if not refresh_token:
+        logger.warning("Token request missing refresh_token parameter")
         return jsonify({"error": "invalid_request", "error_description": "refresh_token required"}), 400
 
     # Look up refresh token
@@ -602,7 +677,11 @@ def require_mcp_auth(f):
         auth_header = request.headers.get('Authorization', '')
 
         if not auth_header.startswith('Bearer '):
-            return jsonify({"error": "unauthorized"}), 401, {
+            logger.warning(f"MCP request missing Bearer token. Auth header: {auth_header[:50] if auth_header else 'empty'}")
+            return jsonify({
+                "error": "unauthorized",
+                "error_description": "Access token is missing. Include Authorization: Bearer <token> header."
+            }), 401, {
                 'WWW-Authenticate': 'Bearer realm="legato-pit"'
             }
 
@@ -610,10 +689,15 @@ def require_mcp_auth(f):
         claims = verify_access_token(token)
 
         if not claims:
-            return jsonify({"error": "invalid_token"}), 401, {
+            logger.warning(f"MCP request with invalid token: {token[:20]}...")
+            return jsonify({
+                "error": "invalid_token",
+                "error_description": "The access token is invalid or expired."
+            }), 401, {
                 'WWW-Authenticate': 'Bearer realm="legato-pit", error="invalid_token"'
             }
 
+        logger.debug(f"MCP auth successful for user: {claims.get('sub')}")
         # Store claims in g for use in handler
         g.mcp_user = claims
 

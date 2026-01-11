@@ -56,12 +56,20 @@ def get_embedding_service():
 
 # ============ Protocol Version Discovery ============
 
-@mcp_bp.route('', methods=['HEAD'])
+@mcp_bp.route('', methods=['HEAD', 'OPTIONS'])
 def mcp_head():
-    """Protocol version discovery.
+    """Protocol version discovery and CORS preflight.
 
-    Claude checks this to verify server compatibility.
+    Claude/ChatGPT checks this to verify server compatibility.
     """
+    if request.method == 'OPTIONS':
+        # CORS preflight
+        response = current_app.make_default_options_response()
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, HEAD, OPTIONS'
+        response.headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+        return response
+
     return '', 200, {
         'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
         'Content-Type': 'application/json'
