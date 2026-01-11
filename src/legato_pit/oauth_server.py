@@ -167,7 +167,7 @@ def register_client():
 
     return jsonify({
         "client_id": client_id,
-        "client_secret": None,  # Public client (no secret)
+        "client_secret": "",  # Public client (empty string for Pydantic compatibility)
         "redirect_uris": redirect_uris,
         "client_name": client_name,
         "token_endpoint_auth_method": "none"
