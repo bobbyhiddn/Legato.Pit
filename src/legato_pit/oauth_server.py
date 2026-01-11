@@ -237,7 +237,7 @@ def authorize():
 
     params = {
         'client_id': github_client_id,
-        'redirect_uri': request.host_url.rstrip('/') + '/oauth/github-callback',
+        'redirect_uri': url_for('oauth.github_callback', _external=True),
         'scope': 'read:user',
         'state': github_state
     }
@@ -288,7 +288,7 @@ def github_callback():
         'client_id': current_app.config['GITHUB_CLIENT_ID'],
         'client_secret': current_app.config['GITHUB_CLIENT_SECRET'],
         'code': code,
-        'redirect_uri': request.host_url.rstrip('/') + '/oauth/github-callback'
+        'redirect_uri': url_for('oauth.github_callback', _external=True)
     }
 
     try:
