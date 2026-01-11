@@ -2,6 +2,333 @@
 
 {% block title %}Dashboard - {{ app_name }}{% endblock %}
 
+{% block head %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+    /* Graph styles */
+    .graph-card {
+        height: 500px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .graph-card h2 {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .graph-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .control-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .control-group label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .control-group input[type="range"] {
+        width: 80px;
+    }
+
+    .control-group .value {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        min-width: 2em;
+    }
+
+    .graph-wrapper {
+        flex: 1;
+        position: relative;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        overflow: hidden;
+        min-height: 350px;
+    }
+
+    #graph-svg {
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+    }
+
+    #graph-svg:active {
+        cursor: grabbing;
+    }
+
+    .node {
+        cursor: pointer;
+    }
+
+    .node:hover circle {
+        stroke-width: 3px;
+        stroke: white;
+    }
+
+    .node.selected circle {
+        stroke-width: 3px;
+        stroke: var(--accent-color);
+    }
+
+    .node text {
+        font-size: 8px;
+        fill: var(--text-secondary);
+        pointer-events: none;
+        text-anchor: middle;
+        dominant-baseline: middle;
+    }
+
+    .link {
+        stroke-opacity: 0.4;
+    }
+
+    .link.curved {
+        fill: none;
+    }
+
+    .category-marker {
+        pointer-events: none;
+    }
+
+    .category-marker text {
+        font-size: 10px;
+        font-weight: 600;
+        fill: var(--text-secondary);
+        text-anchor: middle;
+        dominant-baseline: middle;
+    }
+
+    .graph-legend {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: rgba(22, 27, 34, 0.9);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem;
+        max-width: 150px;
+        font-size: 0.75rem;
+    }
+
+    .legend-title {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.25rem;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-bottom: 0.15rem;
+        cursor: pointer;
+        padding: 0.15rem 0.25rem;
+        border-radius: 3px;
+    }
+
+    .legend-item:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .legend-item.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .legend-count {
+        color: var(--text-secondary);
+        font-size: 0.65rem;
+        margin-left: auto;
+    }
+
+    .graph-tooltip {
+        position: fixed;
+        background: rgba(22, 27, 34, 0.95);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        max-width: 200px;
+        z-index: 1000;
+    }
+
+    .graph-tooltip.visible {
+        opacity: 1;
+    }
+
+    .graph-stats {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.5rem 0 0 0;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .graph-stats span {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(22, 27, 34, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+    }
+
+    /* Note Preview Modal */
+    .note-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+    }
+
+    .note-modal.visible {
+        display: flex;
+    }
+
+    .note-modal-content {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .note-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .note-modal-header h3 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.25rem;
+    }
+
+    .note-modal-meta {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .note-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+    }
+
+    .note-modal-close:hover {
+        color: var(--text-primary);
+    }
+
+    .note-modal-body {
+        padding: 1.25rem;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    .note-modal-preview {
+        font-size: 0.9rem;
+        line-height: 1.6;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+    }
+
+    .note-modal-actions {
+        display: flex;
+        gap: 0.75rem;
+        padding: 1rem 1.25rem;
+        border-top: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+    }
+
+    .note-modal-actions .btn {
+        flex: 1;
+    }
+
+    /* Selection toolbar */
+    .selection-toolbar {
+        position: absolute;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--card-bg);
+        border: 1px solid var(--accent-color);
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        display: none;
+        align-items: center;
+        gap: 1rem;
+        z-index: 100;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .selection-toolbar.visible {
+        display: flex;
+    }
+
+    .selection-count {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+
+    .selection-count span {
+        color: var(--accent-color);
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="dashboard">
     <header class="page-header">
@@ -23,6 +350,82 @@
             <span class="stat-label">Chords</span>
         </div>
     </section>
+
+    <!-- Knowledge Graph -->
+    <section class="card graph-card">
+        <h2>
+            Knowledge Graph
+            <button class="btn btn-small btn-secondary" onclick="resetZoom()">Reset View</button>
+        </h2>
+        <div class="graph-controls">
+            <div class="control-group">
+                <label>Layout:</label>
+                <select id="layoutSelect" onchange="changeLayout(this.value)" style="padding: 0.25rem; border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">
+                    <option value="force">Force</option>
+                    <option value="dendrite">Dendrite</option>
+                    <option value="radial">Radial</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Similarity:</label>
+                <input type="range" id="thresholdSlider" min="0.1" max="0.9" step="0.05" value="0.65">
+                <span class="value" id="thresholdValue">0.65</span>
+            </div>
+            <div class="control-group">
+                <label>Node Size:</label>
+                <input type="range" id="nodeSizeSlider" min="4" max="12" step="1" value="5">
+            </div>
+            <div class="control-group">
+                <label style="font-size: 0.7rem; opacity: 0.7">Shift+click to multi-select</label>
+            </div>
+        </div>
+        <div class="graph-wrapper" id="graphWrapper">
+            <div class="loading-overlay" id="loadingOverlay">
+                <span style="color: var(--text-secondary)">Loading graph...</span>
+            </div>
+            <svg id="graph-svg"></svg>
+            <div class="graph-legend" id="graphLegend"></div>
+            <div class="selection-toolbar" id="selectionToolbar">
+                <span class="selection-count"><span id="selectedCount">0</span> notes selected</span>
+                <button class="btn btn-small btn-primary" onclick="createChordFromSelection()">Create Chord</button>
+                <button class="btn btn-small btn-secondary" onclick="clearSelection()">Clear</button>
+            </div>
+        </div>
+        <div class="graph-stats">
+            Nodes: <span id="nodeCount">0</span> |
+            Edges: <span id="edgeCount">0</span> |
+            Categories: <span id="categoryCount">0</span>
+        </div>
+    </section>
+
+    <!-- Note Preview Modal -->
+    <div class="note-modal" id="notePreviewModal">
+        <div class="note-modal-content">
+            <div class="note-modal-header">
+                <div>
+                    <h3 id="modalNoteTitle">Note Title</h3>
+                    <div class="note-modal-meta">
+                        <span class="badge" id="modalNoteCategory">category</span>
+                        <span id="modalNoteDate"></span>
+                    </div>
+                </div>
+                <button class="note-modal-close" onclick="closeNoteModal()">&times;</button>
+            </div>
+            <div class="note-modal-body">
+                <div class="note-modal-preview" id="modalNoteContent">
+                    Loading...
+                </div>
+            </div>
+            <div class="note-modal-actions">
+                <a href="#" id="modalOpenLink" class="btn btn-primary">Open Note</a>
+                <button class="btn btn-secondary" id="modalAddToChord" onclick="addModalNoteToSelection()">Add to Selection</button>
+                <button class="btn btn-secondary" onclick="closeNoteModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Graph Tooltip -->
+    <div class="graph-tooltip" id="graphTooltip"></div>
 
     <section class="card">
         <h2>System Status</h2>
@@ -93,6 +496,40 @@
     </section>
 
     <section class="card">
+        <h2>Recent Chord Spawns</h2>
+        {% if recent_chord_spawns %}
+        <div class="job-list">
+            {% for spawn in recent_chord_spawns %}
+            {% if spawn.url %}
+            <a href="{{ spawn.url }}" target="_blank" class="job-item">
+            {% else %}
+            <div class="job-item">
+            {% endif %}
+                <div class="job-status status-{{ spawn.status }}">
+                    <span class="status-indicator"></span>
+                </div>
+                <div class="job-info">
+                    <span class="job-title">{{ spawn.title }}</span>
+                    <span class="job-meta">
+                        <span class="badge badge-{{ spawn.project_type }}">{{ spawn.project_type }}</span>
+                        {{ spawn.status_text }}
+                        {% if spawn.approved_by %}&middot; by {{ spawn.approved_by }}{% endif %}
+                        {% if spawn.approved_at %}&middot; {{ spawn.approved_at[:10] }}{% endif %}
+                    </span>
+                </div>
+            {% if spawn.url %}
+            </a>
+            {% else %}
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">No chord spawns yet</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
         <h2>Recent Artifacts</h2>
         {% if recent_artifacts %}
         <div class="artifact-list">
@@ -118,6 +555,7 @@
 
 {% block scripts %}
 <script>
+// ============ Dashboard Functions ============
 function refreshDashboard() {
     window.location.reload();
 }
@@ -194,5 +632,734 @@ async function rejectAgent(queueId) {
         btn.textContent = 'Reject';
     }
 }
+
+// ============ Graph State ============
+let graphData = { nodes: [], edges: [], categories: [] };
+let simulation = null;
+let svg = null;
+let g = null;
+let zoom = null;
+let currentThreshold = 0.65;
+let currentNodeSize = 5;
+let activeCategory = null;
+let selectedNodes = new Set();
+let currentModalNode = null;
+let audioEnabled = true;
+let audioContext = null;
+let currentLayout = 'force'; // 'force', 'dendrite', 'radial'
+
+// ============ Audio System ============
+function initAudio() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function playTone(frequency, duration = 0.15, type = 'sine') {
+    if (!audioEnabled) return;
+    initAudio();
+
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = frequency;
+    oscillator.type = type;
+
+    gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + duration);
+}
+
+function getNoteFrequency(nodeData) {
+    // Map category to base note (pentatonic scale for pleasant sounds)
+    const categoryNotes = {
+        'concept': 523.25,    // C5
+        'epiphany': 587.33,   // D5
+        'question': 659.25,   // E5
+        'idea': 783.99,       // G5
+        'reflection': 880.00, // A5
+        'observation': 987.77 // B5
+    };
+
+    // Get base frequency from category or use default
+    const baseFreq = categoryNotes[nodeData.category] || 659.25;
+
+    // Add slight variation based on node ID hash
+    const hash = nodeData.id.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+    const variation = (hash % 20 - 10) * 2; // ±20 cents variation
+
+    return baseFreq * Math.pow(2, variation / 1200);
+}
+
+function playNoteChime(nodeData) {
+    const freq = getNoteFrequency(nodeData);
+    playTone(freq, 0.2, 'triangle');
+}
+
+function playChordSound(nodes) {
+    if (!audioEnabled || nodes.length === 0) return;
+    initAudio();
+
+    // Play harmonious chord from selected notes
+    const frequencies = nodes.slice(0, 4).map(n => getNoteFrequency(n));
+
+    frequencies.forEach((freq, i) => {
+        setTimeout(() => playTone(freq, 0.3, 'triangle'), i * 50);
+    });
+}
+
+function vibrateConnectedNodes(nodeData, connectedNodeIds) {
+    // Visual vibration effect on connected nodes
+    connectedNodeIds.forEach((id, i) => {
+        setTimeout(() => {
+            const nodeEl = d3.select(`.node[data-id="${id}"]`);
+            if (!nodeEl.empty()) {
+                nodeEl.select('circle')
+                    .transition()
+                    .duration(100)
+                    .attr('r', currentNodeSize * 1.5)
+                    .transition()
+                    .duration(100)
+                    .attr('r', currentNodeSize);
+            }
+        }, i * 30);
+    });
+}
+
+function toggleAudio() {
+    audioEnabled = !audioEnabled;
+    const btn = document.getElementById('audioToggle');
+    btn.textContent = audioEnabled ? '🔊' : '🔇';
+    btn.title = audioEnabled ? 'Sound on (click to mute)' : 'Sound off (click to unmute)';
+}
+
+// ============ Graph Initialization ============
+document.addEventListener('DOMContentLoaded', () => {
+    initGraph();
+    loadGraphData();
+
+    // Control listeners
+    document.getElementById('thresholdSlider').addEventListener('input', (e) => {
+        currentThreshold = parseFloat(e.target.value);
+        document.getElementById('thresholdValue').textContent = currentThreshold.toFixed(2);
+    });
+
+    document.getElementById('thresholdSlider').addEventListener('change', () => {
+        loadGraphData();
+    });
+
+    document.getElementById('nodeSizeSlider').addEventListener('input', (e) => {
+        currentNodeSize = parseInt(e.target.value);
+        updateNodeSizes();
+    });
+
+    // Modal keyboard handling
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeNoteModal();
+        }
+    });
+
+    // Click outside modal to close
+    document.getElementById('notePreviewModal').addEventListener('click', (e) => {
+        if (e.target.id === 'notePreviewModal') {
+            closeNoteModal();
+        }
+    });
+});
+
+function initGraph() {
+    const wrapper = document.getElementById('graphWrapper');
+    const width = wrapper.clientWidth;
+    const height = wrapper.clientHeight;
+
+    svg = d3.select('#graph-svg')
+        .attr('viewBox', [0, 0, width, height]);
+
+    // Add zoom behavior
+    zoom = d3.zoom()
+        .scaleExtent([0.2, 4])
+        .on('zoom', (event) => {
+            g.attr('transform', event.transform);
+        });
+
+    svg.call(zoom);
+
+    // Container for graph elements
+    g = svg.append('g');
+
+    // Create layer groups
+    g.append('g').attr('class', 'links-layer');
+    g.append('g').attr('class', 'categories-layer');
+    g.append('g').attr('class', 'nodes-layer');
+}
+
+async function loadGraphData() {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.style.display = 'flex';
+
+    try {
+        const response = await fetch(`/library/api/graph?threshold=${currentThreshold}&limit=200`);
+        graphData = await response.json();
+
+        if (graphData.error) {
+            throw new Error(graphData.error);
+        }
+
+        // Update stats
+        document.getElementById('nodeCount').textContent = graphData.nodes.length;
+        document.getElementById('edgeCount').textContent = graphData.edges.length;
+        document.getElementById('categoryCount').textContent = graphData.categories.length;
+
+        renderLegend();
+        renderGraph();
+
+    } catch (error) {
+        console.error('Failed to load graph:', error);
+        loadingOverlay.innerHTML = `<span style="color: var(--text-secondary)">Error: ${error.message}</span>`;
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
+}
+
+function renderLegend() {
+    const legend = document.getElementById('graphLegend');
+    legend.innerHTML = `
+        <div class="legend-title" style="display: flex; justify-content: space-between; align-items: center;">
+            Categories
+            <button id="audioToggle" onclick="toggleAudio()" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Sound on (click to mute)">🔊</button>
+        </div>
+        <div class="legend-item ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)">
+            <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
+            <span>All</span>
+            <span class="legend-count">${graphData.nodes.length}</span>
+        </div>
+        ${graphData.categories.map(cat => `
+            <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
+                 onclick="filterByCategory('${cat.name}')">
+                <span class="legend-dot" style="background: ${cat.color}"></span>
+                <span>${cat.name}</span>
+                <span class="legend-count">${cat.count}</span>
+            </div>
+        `).join('')}
+    `;
+}
+
+function filterByCategory(category) {
+    activeCategory = category;
+    renderLegend();
+    renderGraph();
+}
+
+function renderGraph() {
+    const wrapper = document.getElementById('graphWrapper');
+    const width = wrapper.clientWidth;
+    const height = wrapper.clientHeight;
+
+    // Stop existing simulation
+    if (simulation) {
+        simulation.stop();
+    }
+
+    // Clear existing elements
+    g.select('.links-layer').selectAll('*').remove();
+    g.select('.categories-layer').selectAll('*').remove();
+    g.select('.nodes-layer').selectAll('*').remove();
+
+    // Filter nodes by active category
+    let filteredNodes = graphData.nodes;
+    if (activeCategory) {
+        filteredNodes = graphData.nodes.filter(n => n.category === activeCategory);
+    }
+
+    // Create node ID set for filtering edges
+    const nodeIds = new Set(filteredNodes.map(n => n.id));
+
+    // Process edges - only include edges between visible nodes
+    const links = graphData.edges
+        .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+        .map(e => ({
+            source: e.source,
+            target: e.target,
+            weight: e.weight
+        }));
+
+    // Build adjacency map for connected node lookup
+    const adjacencyMap = new Map();
+    links.forEach(link => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+        if (!adjacencyMap.has(sourceId)) adjacencyMap.set(sourceId, []);
+        if (!adjacencyMap.has(targetId)) adjacencyMap.set(targetId, []);
+        adjacencyMap.get(sourceId).push(targetId);
+        adjacencyMap.get(targetId).push(sourceId);
+    });
+
+    // Create simulation with category-based clustering
+    simulation = d3.forceSimulation(filteredNodes)
+        .force('link', d3.forceLink(links)
+            .id(d => d.id)
+            .distance(d => 80 * (1 - d.weight))
+            .strength(d => d.weight * 0.6))
+        .force('charge', d3.forceManyBody()
+            .strength(-100)
+            .distanceMax(200))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(currentNodeSize + 3))
+        .force('x', d3.forceX(width / 2).strength(0.03))
+        .force('y', d3.forceY(height / 2).strength(0.03));
+
+    // Apply layout based on current mode
+    if (currentLayout === 'dendrite') {
+        applyDendriteLayout(filteredNodes, graphData.categories, width, height);
+        // Use weaker simulation for dendrite (just for link aesthetics)
+        simulation.force('charge', d3.forceManyBody().strength(-30).distanceMax(100));
+    } else if (currentLayout === 'radial') {
+        applyRadialLayout(filteredNodes, graphData.categories, width, height);
+        // Use weaker simulation for radial
+        simulation.force('charge', d3.forceManyBody().strength(-20).distanceMax(80));
+    } else {
+        // Force layout - add category clustering (only when showing all categories)
+        // Clear any fixed positions from other layouts
+        filteredNodes.forEach(node => {
+            node.fx = null;
+            node.fy = null;
+        });
+
+        if (!activeCategory) {
+            const categoryPositions = {};
+            const categoryCount = graphData.categories.length;
+            graphData.categories.forEach((cat, i) => {
+                const angle = (i / categoryCount) * 2 * Math.PI;
+                categoryPositions[cat.name] = {
+                    x: width / 2 + Math.cos(angle) * 100,
+                    y: height / 2 + Math.sin(angle) * 100
+                };
+            });
+
+            simulation.force('category', (alpha) => {
+                filteredNodes.forEach(node => {
+                    const target = categoryPositions[node.category];
+                    if (target) {
+                        node.vx += (target.x - node.x) * alpha * 0.08;
+                        node.vy += (target.y - node.y) * alpha * 0.08;
+                    }
+                });
+            });
+        }
+    }
+
+    // Draw category markers for dendrite/radial layouts
+    if (currentLayout === 'dendrite' || currentLayout === 'radial') {
+        const categoryPositions = [];
+
+        if (currentLayout === 'dendrite') {
+            graphData.categories.forEach((cat, i) => {
+                categoryPositions.push({
+                    name: cat.name,
+                    color: cat.color,
+                    x: 80 + (i % 3) * ((width - 160) / 2),
+                    y: 80 + Math.floor(i / 3) * ((height - 160) / 2)
+                });
+            });
+        } else { // radial
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const categoryRadius = Math.min(width, height) / 4;
+
+            graphData.categories.forEach((cat, i) => {
+                const angle = (i / graphData.categories.length) * 2 * Math.PI - Math.PI / 2;
+                categoryPositions.push({
+                    name: cat.name,
+                    color: cat.color,
+                    x: centerX + Math.cos(angle) * categoryRadius,
+                    y: centerY + Math.sin(angle) * categoryRadius
+                });
+            });
+        }
+
+        const categoryMarkers = g.select('.categories-layer')
+            .selectAll('.category-marker')
+            .data(categoryPositions)
+            .join('g')
+            .attr('class', 'category-marker')
+            .attr('transform', d => `translate(${d.x}, ${d.y})`);
+
+        categoryMarkers.append('circle')
+            .attr('r', 20)
+            .attr('fill', d => d.color)
+            .attr('opacity', 0.2)
+            .attr('stroke', d => d.color)
+            .attr('stroke-width', 2);
+
+        categoryMarkers.append('text')
+            .text(d => d.name.charAt(0).toUpperCase())
+            .attr('fill', d => d.color);
+    }
+
+    // Draw edges (curved for non-force layouts)
+    const useCurved = currentLayout !== 'force';
+
+    const link = g.select('.links-layer')
+        .selectAll(useCurved ? 'path' : 'line')
+        .data(links)
+        .join(useCurved ? 'path' : 'line')
+        .attr('class', `link ${useCurved ? 'curved' : ''}`)
+        .attr('stroke', '#4a5568')
+        .attr('stroke-width', d => 1 + d.weight * 2);
+
+    // Draw nodes
+    const node = g.select('.nodes-layer')
+        .selectAll('.node')
+        .data(filteredNodes)
+        .join('g')
+        .attr('class', d => `node ${selectedNodes.has(d.id) ? 'selected' : ''}`)
+        .attr('data-id', d => d.id)
+        .call(drag(simulation))
+        .on('click', (event, d) => {
+            if (event.shiftKey) {
+                // Multi-select mode
+                toggleNodeSelection(d);
+            } else {
+                // Single click - open preview modal
+                openNoteModal(d, adjacencyMap.get(d.id) || []);
+            }
+        })
+        .on('mouseenter', (event, d) => {
+            showTooltip(event, d);
+        })
+        .on('mouseleave', () => {
+            hideTooltip();
+        });
+
+    node.append('circle')
+        .attr('r', currentNodeSize)
+        .attr('fill', d => d.color)
+        .attr('stroke', d => selectedNodes.has(d.id) ? 'var(--accent-color)' : d3.color(d.color).darker(0.5))
+        .attr('stroke-width', d => selectedNodes.has(d.id) ? 3 : 1.5);
+
+    // Add labels
+    node.append('text')
+        .attr('dy', currentNodeSize + 10)
+        .text(d => d.title.length > 20 ? d.title.slice(0, 18) + '...' : d.title)
+        .style('opacity', 0.7);
+
+    // Update positions on tick
+    simulation.on('tick', () => {
+        if (useCurved) {
+            // Curved paths for dendrite/radial layouts
+            link.attr('d', d => {
+                const dx = d.target.x - d.source.x;
+                const dy = d.target.y - d.source.y;
+                const dr = Math.sqrt(dx * dx + dy * dy) * 1.5; // curve radius
+                return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+            });
+        } else {
+            // Straight lines for force layout
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+        }
+
+        node.attr('transform', d => `translate(${d.x}, ${d.y})`);
+    });
+}
+
+function updateNodeSizes() {
+    g.select('.nodes-layer')
+        .selectAll('.node circle')
+        .attr('r', currentNodeSize);
+
+    g.select('.nodes-layer')
+        .selectAll('.node text')
+        .attr('dy', currentNodeSize + 10);
+
+    if (simulation) {
+        simulation.force('collision', d3.forceCollide().radius(currentNodeSize + 3));
+        simulation.alpha(0.3).restart();
+    }
+}
+
+function drag(simulation) {
+    function dragstarted(event) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+    }
+
+    function dragged(event) {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+    }
+
+    function dragended(event) {
+        if (!event.active) simulation.alphaTarget(0);
+        event.subject.fx = null;
+        event.subject.fy = null;
+    }
+
+    return d3.drag()
+        .on('start', dragstarted)
+        .on('drag', dragged)
+        .on('end', dragended);
+}
+
+function showTooltip(event, d) {
+    const tooltip = document.getElementById('graphTooltip');
+    tooltip.innerHTML = `
+        <div style="font-weight: 500; margin-bottom: 0.25rem">${d.title}</div>
+        <div style="font-size: 0.7rem; color: ${d.color}">${d.category}</div>
+    `;
+    tooltip.style.left = (event.clientX + 10) + 'px';
+    tooltip.style.top = (event.clientY - 30) + 'px';
+    tooltip.classList.add('visible');
+}
+
+function hideTooltip() {
+    document.getElementById('graphTooltip').classList.remove('visible');
+}
+
+function resetZoom() {
+    svg.transition()
+        .duration(750)
+        .call(zoom.transform, d3.zoomIdentity);
+}
+
+function changeLayout(layout) {
+    currentLayout = layout;
+    renderGraph();
+}
+
+// ============ Layout Algorithms ============
+function applyDendriteLayout(nodes, categories, width, height) {
+    // Dendrite layout: categories as central nodes, notes branch out
+    const categoryMap = new Map();
+    categories.forEach((cat, i) => {
+        categoryMap.set(cat.name, {
+            x: 80 + (i % 3) * ((width - 160) / 2),
+            y: 80 + Math.floor(i / 3) * ((height - 160) / 2),
+            count: 0
+        });
+    });
+
+    // Position nodes around their category
+    nodes.forEach(node => {
+        const catPos = categoryMap.get(node.category);
+        if (catPos) {
+            const angle = (catPos.count / 8) * 2 * Math.PI;
+            const radius = 40 + Math.floor(catPos.count / 8) * 30;
+            node.x = catPos.x + Math.cos(angle) * radius;
+            node.y = catPos.y + Math.sin(angle) * radius;
+            node.fx = node.x;
+            node.fy = node.y;
+            catPos.count++;
+        }
+    });
+}
+
+function applyRadialLayout(nodes, categories, width, height) {
+    // Radial layout: categories arranged in a circle, notes radiate outward
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const categoryRadius = Math.min(width, height) / 4;
+
+    const categoryAngles = new Map();
+    categories.forEach((cat, i) => {
+        const angle = (i / categories.length) * 2 * Math.PI - Math.PI / 2;
+        categoryAngles.set(cat.name, {
+            angle,
+            x: centerX + Math.cos(angle) * categoryRadius,
+            y: centerY + Math.sin(angle) * categoryRadius,
+            count: 0
+        });
+    });
+
+    // Position nodes radiating from their category
+    nodes.forEach(node => {
+        const catInfo = categoryAngles.get(node.category);
+        if (catInfo) {
+            // Spread nodes in a cone from the category
+            const spreadAngle = Math.PI / 4; // 45 degree spread
+            const nodeAngle = catInfo.angle + (catInfo.count % 5 - 2) * (spreadAngle / 5);
+            const radius = categoryRadius + 50 + Math.floor(catInfo.count / 5) * 25;
+
+            node.x = centerX + Math.cos(nodeAngle) * radius;
+            node.y = centerY + Math.sin(nodeAngle) * radius;
+            node.fx = node.x;
+            node.fy = node.y;
+            catInfo.count++;
+        }
+    });
+}
+
+// ============ Selection System ============
+function toggleNodeSelection(nodeData) {
+    if (selectedNodes.has(nodeData.id)) {
+        selectedNodes.delete(nodeData.id);
+    } else {
+        if (selectedNodes.size >= 5) {
+            showError('Maximum 5 notes can be selected');
+            return;
+        }
+        selectedNodes.add(nodeData.id);
+        playNoteChime(nodeData);
+    }
+
+    updateSelectionUI();
+    updateNodeStyles();
+}
+
+function updateSelectionUI() {
+    const toolbar = document.getElementById('selectionToolbar');
+    const count = document.getElementById('selectedCount');
+
+    if (selectedNodes.size > 0) {
+        toolbar.classList.add('visible');
+        count.textContent = selectedNodes.size;
+    } else {
+        toolbar.classList.remove('visible');
+    }
+}
+
+function updateNodeStyles() {
+    g.select('.nodes-layer')
+        .selectAll('.node')
+        .classed('selected', d => selectedNodes.has(d.id))
+        .select('circle')
+        .attr('stroke', d => selectedNodes.has(d.id) ? 'var(--accent-color)' : d3.color(d.color).darker(0.5))
+        .attr('stroke-width', d => selectedNodes.has(d.id) ? 3 : 1.5);
+}
+
+function clearSelection() {
+    selectedNodes.clear();
+    updateSelectionUI();
+    updateNodeStyles();
+}
+
+async function createChordFromSelection() {
+    if (selectedNodes.size === 0) {
+        showError('No notes selected');
+        return;
+    }
+
+    const selectedNodeData = graphData.nodes.filter(n => selectedNodes.has(n.id));
+
+    // Play chord sound
+    playChordSound(selectedNodeData);
+
+    try {
+        const response = await fetch('/library/api/create-chord', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entry_ids: Array.from(selectedNodes)
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.queue_id) {
+            showSuccess(`Chord queued: ${data.queue_id}`);
+            clearSelection();
+            // Refresh to show new pending agent
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showError(data.error || 'Failed to create chord');
+        }
+    } catch (error) {
+        showError(error.message);
+    }
+}
+
+// ============ Note Preview Modal ============
+async function openNoteModal(nodeData, connectedNodeIds) {
+    currentModalNode = nodeData;
+
+    // Play chime and vibrate connected nodes
+    playNoteChime(nodeData);
+    vibrateConnectedNodes(nodeData, connectedNodeIds);
+
+    // Update modal content
+    document.getElementById('modalNoteTitle').textContent = nodeData.title;
+    document.getElementById('modalNoteCategory').textContent = nodeData.category;
+    document.getElementById('modalNoteCategory').className = `badge badge-${nodeData.category}`;
+    document.getElementById('modalOpenLink').href = `/library/entry/${nodeData.id}`;
+    document.getElementById('modalNoteContent').textContent = 'Loading...';
+
+    // Update add to selection button
+    const addBtn = document.getElementById('modalAddToChord');
+    if (selectedNodes.has(nodeData.id)) {
+        addBtn.textContent = 'Remove from Selection';
+    } else {
+        addBtn.textContent = 'Add to Selection';
+    }
+
+    // Show modal
+    document.getElementById('notePreviewModal').classList.add('visible');
+
+    // Fetch note content
+    try {
+        const response = await fetch(`/library/api/entry/${nodeData.id}`);
+        const data = await response.json();
+
+        if (data.content) {
+            // Show first 500 chars as preview
+            const preview = data.content.length > 500
+                ? data.content.substring(0, 500) + '...'
+                : data.content;
+            document.getElementById('modalNoteContent').textContent = preview;
+        } else {
+            document.getElementById('modalNoteContent').textContent = 'No content available';
+        }
+
+        if (data.created_at) {
+            document.getElementById('modalNoteDate').textContent = data.created_at.split('T')[0];
+        }
+    } catch (error) {
+        document.getElementById('modalNoteContent').textContent = 'Failed to load content';
+    }
+}
+
+function closeNoteModal() {
+    document.getElementById('notePreviewModal').classList.remove('visible');
+    currentModalNode = null;
+}
+
+function addModalNoteToSelection() {
+    if (currentModalNode) {
+        toggleNodeSelection(currentModalNode);
+
+        // Update button text
+        const addBtn = document.getElementById('modalAddToChord');
+        if (selectedNodes.has(currentModalNode.id)) {
+            addBtn.textContent = 'Remove from Selection';
+        } else {
+            addBtn.textContent = 'Add to Selection';
+        }
+    }
+}
+
+// ============ Window Resize ============
+window.addEventListener('resize', () => {
+    if (graphData.nodes.length > 0) {
+        const wrapper = document.getElementById('graphWrapper');
+        const width = wrapper.clientWidth;
+        const height = wrapper.clientHeight;
+        svg.attr('viewBox', [0, 0, width, height]);
+
+        if (simulation) {
+            simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(0.3).restart();
+        }
+    }
+});
 </script>
 {% endblock %}
