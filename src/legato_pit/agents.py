@@ -178,7 +178,7 @@ def api_create_agent():
 
         # Generate project name if not provided
         if not project_name:
-            slug = re.sub(r'[^a-z0-9]+', '-', primary['title'].lower()).strip('-')
+            slug = re.sub(r'[^a-z0-9]+', '_', primary['title'].lower()).strip('_')
             project_name = slug[:50]
 
         # Generate queue_id
@@ -358,7 +358,7 @@ def api_queue_from_entry():
 
     # Validate project name
     import re
-    project_name = re.sub(r'[^a-z0-9-]', '', project_name.lower())[:30]
+    project_name = re.sub(r'[^a-z0-9_]', '', project_name.lower().replace(' ', '_'))[:30]
     if len(project_name) < 2:
         return jsonify({'error': 'Project name must be at least 2 characters'}), 400
 
@@ -416,7 +416,7 @@ Implement the project as described in the knowledge entry.
             "domain_tags": [],
             "intent": entry.get('content', '')[:200],
             "key_phrases": [],
-            "path": f"Lab.{project_name}.Chord",
+            "path": f"{project_name}.Chord",
         }
 
         queue_id = generate_queue_id()
@@ -713,7 +713,7 @@ def api_approve_agent(queue_id: str):
                 from .rag.github_service import get_file_content, commit_file
 
                 legato_db = get_legato_db()
-                chord_repo_name = f"Lab.{agent['project_name']}.Chord"
+                chord_repo_name = f"{agent['project_name']}.Chord"
                 chord_repo_full = f"{org}/{chord_repo_name}"
 
                 # Handle single or multiple entry IDs

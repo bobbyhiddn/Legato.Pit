@@ -439,8 +439,8 @@ def view_entry(entry_id: str):
         org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
         entry_dict['chord'] = {
             'name': chord_info['project_name'],
-            'repo': f"Lab.{chord_info['project_name']}.Chord",
-            'url': f"https://github.com/{org}/Lab.{chord_info['project_name']}.Chord",
+            'repo': f"{chord_info['project_name']}.Chord",
+            'url': f"https://github.com/{org}/{chord_info['project_name']}.Chord",
             'approved_at': chord_info['approved_at'],
         }
 
@@ -900,7 +900,7 @@ def generate_chord_summary(entries: list[dict]) -> dict:
         # Fallback if no API key
         if len(entries) == 1:
             title = entries[0]['title']
-            slug = title.lower().replace(' ', '-')[:30]
+            slug = title.lower().replace(' ', '_')[:30]
             return {
                 "project_name": slug,
                 "title": title,
@@ -966,7 +966,7 @@ Only output the JSON, nothing else."""
 
         # Validate and sanitize
         import re
-        project_name = re.sub(r'[^a-z0-9-]', '', result.get('project_name', 'chord').lower())[:30]
+        project_name = re.sub(r'[^a-z0-9_]', '', result.get('project_name', 'chord').lower().replace(' ', '_').replace('-', '_'))[:30]
         if len(project_name) < 2:
             project_name = f"chord-{len(entries)}"
 
@@ -982,9 +982,9 @@ Only output the JSON, nothing else."""
         # Fallback
         if len(entries) == 1:
             title = entries[0]['title']
-            slug = title.lower().replace(' ', '-').replace('_', '-')[:30]
+            slug = title.lower().replace(' ', '_')[:30]
             import re
-            slug = re.sub(r'[^a-z0-9-]', '', slug)
+            slug = re.sub(r'[^a-z0-9_]', '', slug)
             return {
                 "project_name": slug or "single-note",
                 "title": title,
