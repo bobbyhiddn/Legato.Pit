@@ -260,16 +260,24 @@ TOOLS = [
     },
     {
         "name": "get_note",
-        "description": "Get the full content of a specific note by its entry ID.",
+        "description": "Get the full content of a specific note. Supports lookup by entry_id (most reliable), file_path (stable), or title (fuzzy match). At least one lookup param required. If multiple provided, uses fallback chain: entry_id → file_path → title.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entry_id": {
                     "type": "string",
-                    "description": "The entry ID (e.g., 'kb-abc12345')"
+                    "description": "The entry ID (e.g., 'kb-abc12345') - most reliable lookup"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "The file path in the library (e.g., 'concepts/2026-01-10-my-note.md') - stable identifier"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Note title for fuzzy matching - least reliable but convenient"
                 }
             },
-            "required": ["entry_id"]
+            "required": []
         }
     },
     {
@@ -321,6 +329,195 @@ TOOLS = [
             },
             "required": ["note_ids"]
         }
+    },
+    {
+        "name": "update_note",
+        "description": "Update an existing note in the Legato library. Updates both GitHub and local database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to update (e.g., 'kb-abc12345')"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title for the note (optional)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "New content for the note in markdown (optional)"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "New category for the note (optional)"
+                }
+            },
+            "required": ["entry_id"]
+        }
+    },
+    {
+        "name": "delete_note",
+        "description": "Delete a note from the Legato library. Removes from both GitHub and local database. Requires confirmation flag.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to delete"
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true to confirm deletion. This is a safety check."
+                }
+            },
+            "required": ["entry_id", "confirm"]
+        }
+    },
+    {
+        "name": "list_tasks",
+        "description": "List notes that have been marked as tasks with their status. Filter by status, due date, or category.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "done", "blocked"],
+                    "description": "Filter by task status"
+                },
+                "due_before": {
+                    "type": "string",
+                    "description": "Filter tasks due before this date (ISO format: YYYY-MM-DD)"
+                },
+                "due_after": {
+                    "type": "string",
+                    "description": "Filter tasks due after this date (ISO format: YYYY-MM-DD)"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Filter by note category"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of tasks to return (default: 50)",
+                    "default": 50
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "update_task_status",
+        "description": "Update the task status of a note. Quick status flip for task tracking.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to update"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "done", "blocked"],
+                    "description": "New task status"
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Optional due date in ISO format (YYYY-MM-DD)"
+                }
+            },
+            "required": ["entry_id", "status"]
+        }
+    },
+    {
+        "name": "link_notes",
+        "description": "Create an explicit relationship between two notes. Links are bidirectional for discovery.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_id": {
+                    "type": "string",
+                    "description": "Entry ID of the source note"
+                },
+                "target_id": {
+                    "type": "string",
+                    "description": "Entry ID of the target note"
+                },
+                "link_type": {
+                    "type": "string",
+                    "enum": ["related", "depends_on", "blocks", "implements", "references", "contradicts", "supports"],
+                    "description": "Type of relationship (default: 'related')",
+                    "default": "related"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional description of the relationship"
+                }
+            },
+            "required": ["source_id", "target_id"]
+        }
+    },
+    {
+        "name": "get_note_context",
+        "description": "Get a note with its full context: linked notes, semantic neighbors, and related projects.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note"
+                },
+                "include_semantic": {
+                    "type": "boolean",
+                    "description": "Include semantically similar notes (default: true)",
+                    "default": True
+                },
+                "semantic_limit": {
+                    "type": "integer",
+                    "description": "Max semantic neighbors to include (default: 5)",
+                    "default": 5
+                }
+            },
+            "required": ["entry_id"]
+        }
+    },
+    {
+        "name": "process_motif",
+        "description": "Push text or markdown content into the transcript processing pipeline. Returns a job ID to check status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The text or markdown content to process"
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["markdown", "text", "transcript"],
+                    "description": "Content format (default: 'markdown')",
+                    "default": "markdown"
+                },
+                "source_label": {
+                    "type": "string",
+                    "description": "Label for the source of this content (e.g., 'claude-conversation', 'external-doc')"
+                }
+            },
+            "required": ["content"]
+        }
+    },
+    {
+        "name": "get_processing_status",
+        "description": "Check the status of an async processing job.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": "The job ID returned from process_motif"
+                }
+            },
+            "required": ["job_id"]
+        }
     }
 ]
 
@@ -342,6 +539,14 @@ def handle_tool_call(params: dict) -> dict:
         'get_note': tool_get_note,
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
+        'update_note': tool_update_note,
+        'delete_note': tool_delete_note,
+        'list_tasks': tool_list_tasks,
+        'update_task_status': tool_update_task_status,
+        'link_notes': tool_link_notes,
+        'get_note_context': tool_get_note_context,
+        'process_motif': tool_process_motif,
+        'get_processing_status': tool_get_processing_status,
     }
 
     handler = tool_handlers.get(name)
@@ -551,7 +756,8 @@ key_phrases: []
         "entry_id": entry_id,
         "title": title,
         "category": category,
-        "file_path": file_path
+        "file_path": file_path,
+        "available_categories": sorted(valid_categories)
     }
 
 
@@ -584,25 +790,63 @@ def tool_list_categories(args: dict) -> dict:
 
 
 def tool_get_note(args: dict) -> dict:
-    """Get full content of a specific note."""
-    entry_id = args.get('entry_id', '').strip()
+    """Get full content of a specific note with multi-method lookup."""
+    entry_id = args.get('entry_id', '').strip() if args.get('entry_id') else None
+    file_path = args.get('file_path', '').strip() if args.get('file_path') else None
+    title = args.get('title', '').strip() if args.get('title') else None
 
-    if not entry_id:
-        return {"error": "entry_id is required"}
+    if not entry_id and not file_path and not title:
+        return {"error": "At least one lookup parameter required: entry_id, file_path, or title"}
 
     db = get_db()
-    entry = db.execute(
-        """
-        SELECT entry_id, title, category, content, file_path,
-               created_at, updated_at, chord_status, chord_repo
-        FROM knowledge_entries
-        WHERE entry_id = ?
-        """,
-        (entry_id,)
-    ).fetchone()
+    entry = None
+    lookup_method = None
+
+    # Fallback chain: entry_id → file_path → title
+    if entry_id:
+        entry = db.execute(
+            """
+            SELECT entry_id, title, category, content, file_path,
+                   created_at, updated_at, chord_status, chord_repo, task_status, due_date
+            FROM knowledge_entries
+            WHERE entry_id = ?
+            """,
+            (entry_id,)
+        ).fetchone()
+        lookup_method = "entry_id"
+
+    if not entry and file_path:
+        entry = db.execute(
+            """
+            SELECT entry_id, title, category, content, file_path,
+                   created_at, updated_at, chord_status, chord_repo, task_status, due_date
+            FROM knowledge_entries
+            WHERE file_path = ?
+            """,
+            (file_path,)
+        ).fetchone()
+        lookup_method = "file_path"
+
+    if not entry and title:
+        # Fuzzy match: case-insensitive LIKE search
+        entry = db.execute(
+            """
+            SELECT entry_id, title, category, content, file_path,
+                   created_at, updated_at, chord_status, chord_repo, task_status, due_date
+            FROM knowledge_entries
+            WHERE LOWER(title) LIKE LOWER(?)
+            ORDER BY
+                CASE WHEN LOWER(title) = LOWER(?) THEN 0 ELSE 1 END,
+                updated_at DESC
+            LIMIT 1
+            """,
+            (f'%{title}%', title)
+        ).fetchone()
+        lookup_method = "title"
 
     if not entry:
-        return {"error": f"Note not found: {entry_id}"}
+        search_term = entry_id or file_path or title
+        return {"error": f"Note not found: {search_term}"}
 
     return {
         "entry_id": entry['entry_id'],
@@ -613,7 +857,10 @@ def tool_get_note(args: dict) -> dict:
         "created_at": entry['created_at'],
         "updated_at": entry['updated_at'],
         "chord_status": entry['chord_status'],
-        "chord_repo": entry['chord_repo']
+        "chord_repo": entry['chord_repo'],
+        "task_status": entry['task_status'],
+        "due_date": entry['due_date'],
+        "lookup_method": lookup_method
     }
 
 
@@ -795,6 +1042,704 @@ def tool_spawn_agent(args: dict) -> dict:
     except Exception as e:
         logger.error(f"Failed to queue agent: {e}")
         return {"error": f"Failed to queue project: {str(e)}"}
+
+
+def tool_update_note(args: dict) -> dict:
+    """Update an existing note in both GitHub and local database."""
+    from .rag.database import get_user_categories
+    from .rag.github_service import commit_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    new_title = args.get('title', '').strip() if args.get('title') else None
+    new_content = args.get('content', '').strip() if args.get('content') else None
+    new_category = args.get('category', '').lower().strip() if args.get('category') else None
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    if not new_title and not new_content and not new_category:
+        return {"error": "At least one of title, content, or category must be provided"}
+
+    db = get_db()
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT entry_id, title, category, content, file_path
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Validate new category if provided
+    if new_category:
+        categories = get_user_categories(db, 'default')
+        valid_categories = {c['name'] for c in categories}
+        if new_category not in valid_categories:
+            return {"error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"}
+
+    # Use existing values as defaults
+    title = new_title or entry['title']
+    content = new_content if new_content is not None else entry['content']
+    category = new_category or entry['category']
+    file_path = entry['file_path']
+
+    # Get current file from GitHub to preserve frontmatter structure
+    token = current_app.config.get('SYSTEM_PAT')
+    repo = 'bobbyhiddn/Legato.Library'
+
+    try:
+        current_content = get_file_content(repo, file_path, token)
+        if current_content:
+            # Parse existing frontmatter
+            if current_content.startswith('---'):
+                parts = current_content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter_lines = parts[1].strip().split('\n')
+                    # Update frontmatter fields
+                    new_frontmatter_lines = []
+                    for line in frontmatter_lines:
+                        if line.startswith('title:') and new_title:
+                            new_frontmatter_lines.append(f'title: "{title}"')
+                        elif line.startswith('category:') and new_category:
+                            new_frontmatter_lines.append(f'category: {category}')
+                        else:
+                            new_frontmatter_lines.append(line)
+                    full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---\n\n{content}"
+                else:
+                    full_content = content
+            else:
+                full_content = content
+        else:
+            # File doesn't exist in GitHub, build new frontmatter
+            timestamp = datetime.utcnow().isoformat() + 'Z'
+            slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
+            full_content = f"""---
+id: library.{category}.{slug}
+title: "{title}"
+category: {category}
+created: {timestamp}
+source: mcp-claude
+domain_tags: []
+key_phrases: []
+---
+
+{content}"""
+
+        # Commit to GitHub
+        commit_file(
+            repo=repo,
+            path=file_path,
+            content=full_content,
+            message=f'Update note via MCP: {title}',
+            token=token
+        )
+
+        # Update local database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+            """,
+            (title, category, content, entry_id)
+        )
+        db.commit()
+
+        logger.info(f"MCP updated note: {entry_id} - {title}")
+
+        return {
+            "success": True,
+            "entry_id": entry_id,
+            "title": title,
+            "category": category,
+            "file_path": file_path,
+            "changes": {
+                "title": new_title is not None,
+                "content": new_content is not None,
+                "category": new_category is not None
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to update note: {e}")
+        return {"error": f"Failed to update note: {str(e)}"}
+
+
+def tool_delete_note(args: dict) -> dict:
+    """Delete a note from both GitHub and local database."""
+    from .rag.github_service import delete_file
+
+    entry_id = args.get('entry_id', '').strip()
+    confirm = args.get('confirm', False)
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    if not confirm:
+        return {
+            "error": "Deletion requires confirmation. Set confirm=true to proceed.",
+            "warning": "This will permanently delete the note from both GitHub and the local database."
+        }
+
+    db = get_db()
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT entry_id, title, file_path
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    token = current_app.config.get('SYSTEM_PAT')
+    repo = 'bobbyhiddn/Legato.Library'
+    file_path = entry['file_path']
+    title = entry['title']
+
+    try:
+        # Delete from GitHub
+        if file_path:
+            try:
+                delete_file(
+                    repo=repo,
+                    path=file_path,
+                    message=f'Delete note via MCP: {title}',
+                    token=token
+                )
+            except Exception as e:
+                # File might not exist in GitHub, continue with local deletion
+                logger.warning(f"Could not delete from GitHub (may not exist): {e}")
+
+        # Delete from local database
+        db.execute("DELETE FROM knowledge_entries WHERE entry_id = ?", (entry_id,))
+
+        # Also delete any links involving this note
+        db.execute("DELETE FROM note_links WHERE source_entry_id = ? OR target_entry_id = ?", (entry_id, entry_id))
+
+        # Delete embeddings
+        db.execute("DELETE FROM embeddings WHERE entry_id = (SELECT id FROM knowledge_entries WHERE entry_id = ?)", (entry_id,))
+
+        db.commit()
+
+        logger.info(f"MCP deleted note: {entry_id} - {title}")
+
+        return {
+            "success": True,
+            "deleted": {
+                "entry_id": entry_id,
+                "title": title,
+                "file_path": file_path
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete note: {e}")
+        return {"error": f"Failed to delete note: {str(e)}"}
+
+
+def tool_list_tasks(args: dict) -> dict:
+    """List notes marked as tasks with optional filtering."""
+    status = args.get('status')
+    due_before = args.get('due_before')
+    due_after = args.get('due_after')
+    category = args.get('category')
+    limit = min(args.get('limit', 50), 100)
+
+    db = get_db()
+
+    # Build query dynamically
+    sql = """
+        SELECT entry_id, title, category, task_status, due_date, created_at, updated_at
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+    """
+    params = []
+
+    if status:
+        sql += " AND task_status = ?"
+        params.append(status)
+
+    if due_before:
+        sql += " AND due_date <= ?"
+        params.append(due_before)
+
+    if due_after:
+        sql += " AND due_date >= ?"
+        params.append(due_after)
+
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+
+    sql += " ORDER BY CASE task_status WHEN 'blocked' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, due_date ASC NULLS LAST, updated_at DESC LIMIT ?"
+    params.append(limit)
+
+    tasks = db.execute(sql, params).fetchall()
+
+    # Get counts by status
+    status_counts = db.execute("""
+        SELECT task_status, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+        GROUP BY task_status
+    """).fetchall()
+
+    return {
+        "tasks": [
+            {
+                "entry_id": t['entry_id'],
+                "title": t['title'],
+                "category": t['category'],
+                "status": t['task_status'],
+                "due_date": t['due_date'],
+                "created_at": t['created_at'],
+                "updated_at": t['updated_at']
+            }
+            for t in tasks
+        ],
+        "count": len(tasks),
+        "status_counts": {r['task_status']: r['count'] for r in status_counts}
+    }
+
+
+def tool_update_task_status(args: dict) -> dict:
+    """Update task status for a note."""
+    entry_id = args.get('entry_id', '').strip()
+    status = args.get('status', '').strip()
+    due_date = args.get('due_date', '').strip() if args.get('due_date') else None
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    if not status:
+        return {"error": "status is required"}
+
+    valid_statuses = {'pending', 'in_progress', 'done', 'blocked'}
+    if status not in valid_statuses:
+        return {"error": f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}"}
+
+    db = get_db()
+
+    # Check note exists
+    entry = db.execute(
+        "SELECT entry_id, title, task_status FROM knowledge_entries WHERE entry_id = ?",
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    old_status = entry['task_status']
+
+    # Update task status and optionally due_date
+    if due_date:
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET task_status = ?, due_date = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+            """,
+            (status, due_date, entry_id)
+        )
+    else:
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET task_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE entry_id = ?
+            """,
+            (status, entry_id)
+        )
+    db.commit()
+
+    logger.info(f"MCP updated task status: {entry_id} {old_status} -> {status}")
+
+    return {
+        "success": True,
+        "entry_id": entry_id,
+        "title": entry['title'],
+        "old_status": old_status,
+        "new_status": status,
+        "due_date": due_date
+    }
+
+
+def tool_link_notes(args: dict) -> dict:
+    """Create an explicit relationship between two notes."""
+    source_id = args.get('source_id', '').strip()
+    target_id = args.get('target_id', '').strip()
+    link_type = args.get('link_type', 'related').strip()
+    description = args.get('description', '').strip() if args.get('description') else None
+
+    if not source_id or not target_id:
+        return {"error": "Both source_id and target_id are required"}
+
+    if source_id == target_id:
+        return {"error": "Cannot link a note to itself"}
+
+    valid_link_types = {'related', 'depends_on', 'blocks', 'implements', 'references', 'contradicts', 'supports'}
+    if link_type not in valid_link_types:
+        return {"error": f"Invalid link_type. Must be one of: {', '.join(sorted(valid_link_types))}"}
+
+    db = get_db()
+
+    # Verify both notes exist
+    source = db.execute("SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?", (source_id,)).fetchone()
+    target = db.execute("SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?", (target_id,)).fetchone()
+
+    if not source:
+        return {"error": f"Source note not found: {source_id}"}
+    if not target:
+        return {"error": f"Target note not found: {target_id}"}
+
+    try:
+        # Insert the link (ignore if already exists)
+        db.execute(
+            """
+            INSERT OR IGNORE INTO note_links (source_entry_id, target_entry_id, link_type, description, created_by)
+            VALUES (?, ?, ?, ?, 'mcp-claude')
+            """,
+            (source_id, target_id, link_type, description)
+        )
+
+        # For bidirectional discovery, also create reverse link for symmetric types
+        symmetric_types = {'related', 'contradicts'}
+        if link_type in symmetric_types:
+            db.execute(
+                """
+                INSERT OR IGNORE INTO note_links (source_entry_id, target_entry_id, link_type, description, created_by)
+                VALUES (?, ?, ?, ?, 'mcp-claude')
+                """,
+                (target_id, source_id, link_type, description)
+            )
+
+        db.commit()
+
+        logger.info(f"MCP linked notes: {source_id} --[{link_type}]--> {target_id}")
+
+        return {
+            "success": True,
+            "link": {
+                "source": {"entry_id": source_id, "title": source['title']},
+                "target": {"entry_id": target_id, "title": target['title']},
+                "type": link_type,
+                "description": description
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to link notes: {e}")
+        return {"error": f"Failed to create link: {str(e)}"}
+
+
+def tool_get_note_context(args: dict) -> dict:
+    """Get a note with its full context: linked notes and semantic neighbors."""
+    entry_id = args.get('entry_id', '').strip()
+    include_semantic = args.get('include_semantic', True)
+    semantic_limit = min(args.get('semantic_limit', 5), 20)
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    db = get_db()
+
+    # Get the main note
+    entry = db.execute(
+        """
+        SELECT entry_id, title, category, content, file_path, task_status, due_date,
+               created_at, updated_at, chord_status, chord_repo
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Get outgoing links (this note links to others)
+    outgoing = db.execute(
+        """
+        SELECT nl.target_entry_id, nl.link_type, nl.description,
+               ke.title, ke.category
+        FROM note_links nl
+        JOIN knowledge_entries ke ON ke.entry_id = nl.target_entry_id
+        WHERE nl.source_entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchall()
+
+    # Get incoming links (others link to this note)
+    incoming = db.execute(
+        """
+        SELECT nl.source_entry_id, nl.link_type, nl.description,
+               ke.title, ke.category
+        FROM note_links nl
+        JOIN knowledge_entries ke ON ke.entry_id = nl.source_entry_id
+        WHERE nl.target_entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchall()
+
+    # Get semantic neighbors if requested
+    semantic_neighbors = []
+    if include_semantic:
+        service = get_embedding_service()
+        if service:
+            try:
+                # Search for similar notes
+                search_result = service.hybrid_search(
+                    query=entry['title'] + " " + (entry['content'][:500] if entry['content'] else ""),
+                    entry_type='knowledge',
+                    limit=semantic_limit + 1,  # +1 to exclude self
+                    include_low_confidence=False,
+                )
+                for r in search_result.get('results', []):
+                    if r['entry_id'] != entry_id:
+                        semantic_neighbors.append({
+                            "entry_id": r['entry_id'],
+                            "title": r['title'],
+                            "category": r.get('category'),
+                            "similarity": round(r.get('similarity', 0), 3)
+                        })
+                        if len(semantic_neighbors) >= semantic_limit:
+                            break
+            except Exception as e:
+                logger.warning(f"Could not get semantic neighbors: {e}")
+
+    # Get related projects from agent queue
+    from .rag.database import get_db_path, get_connection
+    try:
+        agents_db = get_connection(get_db_path("agents.db"))
+        projects = agents_db.execute(
+            """
+            SELECT queue_id, project_name, project_type, status, title
+            FROM agent_queue
+            WHERE related_entry_id LIKE ?
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            (f'%{entry_id}%',)
+        ).fetchall()
+    except Exception:
+        projects = []
+
+    return {
+        "note": {
+            "entry_id": entry['entry_id'],
+            "title": entry['title'],
+            "category": entry['category'],
+            "content": entry['content'],
+            "file_path": entry['file_path'],
+            "task_status": entry['task_status'],
+            "due_date": entry['due_date'],
+            "created_at": entry['created_at'],
+            "updated_at": entry['updated_at'],
+            "chord_status": entry['chord_status'],
+            "chord_repo": entry['chord_repo']
+        },
+        "links": {
+            "outgoing": [
+                {
+                    "entry_id": l['target_entry_id'],
+                    "title": l['title'],
+                    "category": l['category'],
+                    "link_type": l['link_type'],
+                    "description": l['description']
+                }
+                for l in outgoing
+            ],
+            "incoming": [
+                {
+                    "entry_id": l['source_entry_id'],
+                    "title": l['title'],
+                    "category": l['category'],
+                    "link_type": l['link_type'],
+                    "description": l['description']
+                }
+                for l in incoming
+            ]
+        },
+        "semantic_neighbors": semantic_neighbors,
+        "related_projects": [
+            {
+                "queue_id": p['queue_id'],
+                "project_name": p['project_name'],
+                "project_type": p['project_type'],
+                "status": p['status'],
+                "title": p['title']
+            }
+            for p in projects
+        ]
+    }
+
+
+def tool_process_motif(args: dict) -> dict:
+    """Push content into the transcript processing pipeline."""
+    import secrets
+
+    content = args.get('content', '').strip()
+    content_format = args.get('format', 'markdown')
+    source_label = args.get('source_label', 'mcp-direct')
+
+    if not content:
+        return {"error": "content is required"}
+
+    if len(content) < 10:
+        return {"error": "Content too short. Minimum 10 characters required."}
+
+    # Generate job ID
+    job_id = f"pj-{secrets.token_hex(8)}"
+
+    db = get_db()
+
+    try:
+        # Insert processing job
+        db.execute(
+            """
+            INSERT INTO processing_jobs
+            (job_id, job_type, status, input_content, input_format, created_at, updated_at)
+            VALUES (?, 'motif', 'pending', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (job_id, content, content_format)
+        )
+        db.commit()
+
+        # For now, process synchronously for simple content
+        # TODO: Implement async processing for longer content
+        if len(content) < 5000:
+            try:
+                # Simple processing: create a note directly from the content
+                # Extract title from first line or generate one
+                lines = content.strip().split('\n')
+                if lines[0].startswith('#'):
+                    title = lines[0].lstrip('#').strip()
+                    body = '\n'.join(lines[1:]).strip()
+                else:
+                    title = lines[0][:100] if lines[0] else f"Motif {job_id}"
+                    body = content
+
+                # Create the note using existing tool
+                note_result = tool_create_note({
+                    'title': title,
+                    'content': body,
+                    'category': 'reflection'  # Default category for motifs
+                })
+
+                if note_result.get('success'):
+                    # Update job as completed
+                    db.execute(
+                        """
+                        UPDATE processing_jobs
+                        SET status = 'completed', result_entry_ids = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE job_id = ?
+                        """,
+                        (note_result.get('entry_id'), job_id)
+                    )
+                    db.commit()
+
+                    return {
+                        "success": True,
+                        "job_id": job_id,
+                        "status": "completed",
+                        "result": {
+                            "entry_ids": [note_result.get('entry_id')],
+                            "notes_created": 1
+                        }
+                    }
+                else:
+                    # Update job as failed
+                    db.execute(
+                        """
+                        UPDATE processing_jobs
+                        SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE job_id = ?
+                        """,
+                        (note_result.get('error', 'Unknown error'), job_id)
+                    )
+                    db.commit()
+
+                    return {
+                        "success": False,
+                        "job_id": job_id,
+                        "status": "failed",
+                        "error": note_result.get('error')
+                    }
+
+            except Exception as e:
+                db.execute(
+                    """
+                    UPDATE processing_jobs
+                    SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE job_id = ?
+                    """,
+                    (str(e), job_id)
+                )
+                db.commit()
+                return {"error": f"Processing failed: {str(e)}", "job_id": job_id}
+        else:
+            # For longer content, mark as pending for async processing
+            return {
+                "success": True,
+                "job_id": job_id,
+                "status": "pending",
+                "message": "Job queued for async processing. Use get_processing_status to check progress.",
+                "content_length": len(content)
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to process motif: {e}")
+        return {"error": f"Failed to queue processing job: {str(e)}"}
+
+
+def tool_get_processing_status(args: dict) -> dict:
+    """Check the status of an async processing job."""
+    job_id = args.get('job_id', '').strip()
+
+    if not job_id:
+        return {"error": "job_id is required"}
+
+    db = get_db()
+
+    job = db.execute(
+        """
+        SELECT job_id, job_type, status, input_format, result_entry_ids, error_message,
+               created_at, updated_at, completed_at
+        FROM processing_jobs
+        WHERE job_id = ?
+        """,
+        (job_id,)
+    ).fetchone()
+
+    if not job:
+        return {"error": f"Job not found: {job_id}"}
+
+    result = {
+        "job_id": job['job_id'],
+        "job_type": job['job_type'],
+        "status": job['status'],
+        "created_at": job['created_at'],
+        "updated_at": job['updated_at']
+    }
+
+    if job['status'] == 'completed':
+        result['completed_at'] = job['completed_at']
+        result['result_entry_ids'] = job['result_entry_ids'].split(',') if job['result_entry_ids'] else []
+
+    if job['status'] == 'failed':
+        result['error'] = job['error_message']
+
+    return result
 
 
 # ============ Resource Handlers ============

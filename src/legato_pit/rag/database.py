@@ -238,6 +238,19 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Migration: Fix NULL colors for existing categories
+    # This ensures existing categories get their proper default colors
+    default_color_map = {cat[0]: cat[5] for cat in DEFAULT_CATEGORIES}
+    for name, color in default_color_map.items():
+        cursor.execute(
+            "UPDATE user_categories SET color = ? WHERE name = ? AND (color IS NULL OR color = '')",
+            (color, name)
+        )
+    # For any other categories without colors, set a default
+    cursor.execute(
+        "UPDATE user_categories SET color = '#6366f1' WHERE color IS NULL OR color = ''"
+    )
+
     # OAuth clients (Dynamic Client Registration - RFC 7591)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS oauth_clients (
@@ -279,13 +292,60 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
+    # Note links for explicit relationships between notes
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS note_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_entry_id TEXT NOT NULL,
+            target_entry_id TEXT NOT NULL,
+            link_type TEXT DEFAULT 'related',
+            description TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT DEFAULT 'mcp-claude',
+            UNIQUE(source_entry_id, target_entry_id, link_type)
+        )
+    """)
+
+    # Pipeline processing jobs for motif/transcript processing
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processing_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT UNIQUE NOT NULL,
+            job_type TEXT NOT NULL DEFAULT 'motif',
+            status TEXT NOT NULL DEFAULT 'pending',
+            input_content TEXT NOT NULL,
+            input_format TEXT DEFAULT 'markdown',
+            result_entry_ids TEXT,
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME
+        )
+    """)
+
+    # Migration: Add task_status column to knowledge_entries if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN task_status TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: Add due_date column to knowledge_entries if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN due_date DATE")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_needs_chord ON knowledge_entries(needs_chord, chord_status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_task_status ON knowledge_entries(task_status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_categories_user ON user_categories(user_id, is_active)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_links_source ON note_links(source_entry_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_entry_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_clients ON oauth_clients(client_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
