@@ -139,6 +139,69 @@ def oauth_protected_resource():
 
 # ============ Dynamic Client Registration (RFC 7591) ============
 
+# Trusted MCP client domains that can be auto-registered if not in database
+# This allows recovery from database resets without manual re-registration
+TRUSTED_MCP_DOMAINS = [
+    'claude.ai',
+    'chatgpt.com',
+    'openai.com',
+]
+
+
+def _is_trusted_redirect_uri(redirect_uri: str) -> bool:
+    """Check if redirect_uri is from a trusted MCP client domain."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(redirect_uri)
+        host = parsed.netloc.lower()
+        return any(host == domain or host.endswith(f'.{domain}') for domain in TRUSTED_MCP_DOMAINS)
+    except Exception:
+        return False
+
+
+def _auto_register_trusted_client(client_id: str, redirect_uri: str, client_name: str = None) -> bool:
+    """Auto-register a client from a trusted domain if not already registered.
+
+    Returns True if client was registered (or already existed), False on failure.
+    """
+    db = get_db()
+
+    # Check if already registered
+    existing = db.execute(
+        "SELECT client_id FROM oauth_clients WHERE client_id = ?",
+        (client_id,)
+    ).fetchone()
+
+    if existing:
+        return True
+
+    # Determine client name from redirect URI if not provided
+    if not client_name:
+        from urllib.parse import urlparse
+        try:
+            host = urlparse(redirect_uri).netloc.lower()
+            if 'chatgpt' in host or 'openai' in host:
+                client_name = 'ChatGPT'
+            elif 'claude' in host:
+                client_name = 'Claude'
+            else:
+                client_name = f'MCP Client ({host})'
+        except Exception:
+            client_name = 'Unknown MCP Client'
+
+    try:
+        db.execute("""
+            INSERT INTO oauth_clients (client_id, client_name, redirect_uris)
+            VALUES (?, ?, ?)
+        """, (client_id, client_name, json.dumps([redirect_uri])))
+        db.commit()
+        logger.info(f"Auto-registered trusted OAuth client: {client_id} ({client_name}) with redirect_uri: {redirect_uri}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to auto-register OAuth client: {e}")
+        return False
+
+
 @oauth_bp.route('/oauth/register', methods=['POST'])
 def register_client():
     """Dynamic Client Registration endpoint.
@@ -246,15 +309,38 @@ def authorize():
     ).fetchone()
 
     if not client:
+        # Auto-register trusted clients (ChatGPT, Claude) if not in database
+        # This handles database resets gracefully
+        if client_id.startswith('mcp-') and _is_trusted_redirect_uri(redirect_uri):
+            logger.info(f"Auto-registering trusted client {client_id} with redirect_uri {redirect_uri}")
+            if _auto_register_trusted_client(client_id, redirect_uri):
+                # Re-fetch the client after registration
+                client = db.execute(
+                    "SELECT * FROM oauth_clients WHERE client_id = ?",
+                    (client_id,)
+                ).fetchone()
+
+    if not client:
+        logger.warning(f"OAuth authorize: unregistered client {client_id} from {redirect_uri}")
         return jsonify({"error": "invalid_client", "error_description": "Client not registered"}), 400
 
     # Verify redirect_uri matches registration
     registered_uris = json.loads(client['redirect_uris'])
     if redirect_uri not in registered_uris:
-        return jsonify({
-            "error": "invalid_redirect_uri",
-            "error_description": "redirect_uri not registered for this client"
-        }), 400
+        # For trusted clients, add the new redirect_uri to their registration
+        if _is_trusted_redirect_uri(redirect_uri):
+            registered_uris.append(redirect_uri)
+            db.execute(
+                "UPDATE oauth_clients SET redirect_uris = ? WHERE client_id = ?",
+                (json.dumps(registered_uris), client_id)
+            )
+            db.commit()
+            logger.info(f"Added new redirect_uri {redirect_uri} to trusted client {client_id}")
+        else:
+            return jsonify({
+                "error": "invalid_redirect_uri",
+                "error_description": "redirect_uri not registered for this client"
+            }), 400
 
     # Store OAuth request in session for after GitHub callback
     session['mcp_oauth_request'] = {
