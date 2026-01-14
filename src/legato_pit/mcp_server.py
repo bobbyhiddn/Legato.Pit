@@ -60,6 +60,7 @@ def get_embedding_service():
 # ============ Protocol Version Discovery ============
 
 @mcp_bp.route('', methods=['HEAD', 'OPTIONS'])
+@mcp_bp.route('/', methods=['HEAD', 'OPTIONS'])
 def mcp_head():
     """Protocol version discovery and CORS preflight.
 
@@ -82,6 +83,7 @@ def mcp_head():
 # ============ Main JSON-RPC Handler ============
 
 @mcp_bp.route('', methods=['POST'])
+@mcp_bp.route('/', methods=['POST'])
 @require_mcp_auth
 def mcp_post():
     """Handle MCP JSON-RPC 2.0 requests.
