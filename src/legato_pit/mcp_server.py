@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 mcp_bp = Blueprint('mcp', __name__, url_prefix='/mcp')
 
+# Disable strict slashes so /mcp and /mcp/ both work
+mcp_bp.strict_slashes = False
+
 # MCP Protocol version (as of June 2025 spec)
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
@@ -57,6 +60,7 @@ def get_embedding_service():
 # ============ Protocol Version Discovery ============
 
 @mcp_bp.route('', methods=['HEAD', 'OPTIONS'])
+@mcp_bp.route('/', methods=['HEAD', 'OPTIONS'])
 def mcp_head():
     """Protocol version discovery and CORS preflight.
 
@@ -79,6 +83,7 @@ def mcp_head():
 # ============ Main JSON-RPC Handler ============
 
 @mcp_bp.route('', methods=['POST'])
+@mcp_bp.route('/', methods=['POST'])
 @require_mcp_auth
 def mcp_post():
     """Handle MCP JSON-RPC 2.0 requests.
