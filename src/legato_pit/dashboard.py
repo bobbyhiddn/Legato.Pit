@@ -248,7 +248,7 @@ def get_stats():
     from .rag.database import init_db
 
     stats = {
-        'transcripts': 0,
+        'motifs': 0,
         'notes': 0,
         'chords': 0
     }
@@ -264,7 +264,7 @@ def get_stats():
             FROM knowledge_entries
             WHERE source_transcript IS NOT NULL AND source_transcript != ''
         """).fetchone()
-        stats['transcripts'] = result[0] if result else 0
+        stats['motifs'] = result[0] if result else 0
 
         # Count total notes
         result = db.execute("SELECT COUNT(*) FROM knowledge_entries").fetchone()
