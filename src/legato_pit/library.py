@@ -861,47 +861,42 @@ def api_sync_status():
 @library_bp.route('/tasks')
 @login_required
 def tasks_view():
-    """View notes marked as tasks with status filtering."""
+    """View notes marked as tasks in a Kanban board layout."""
     db = get_db()
 
-    # Get filter from query params
-    status_filter = request.args.get('status', '')
-
-    # Build query dynamically
+    # Fetch all tasks ordered by due_date and updated_at
     sql = """
         SELECT entry_id, title, category, task_status, due_date, created_at, updated_at
         FROM knowledge_entries
         WHERE task_status IS NOT NULL
+        ORDER BY due_date ASC NULLS LAST, updated_at DESC
     """
-    params = []
+    tasks = db.execute(sql).fetchall()
 
-    if status_filter:
-        sql += " AND task_status = ?"
-        params.append(status_filter)
-
-    sql += " ORDER BY CASE task_status WHEN 'blocked' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, due_date ASC NULLS LAST, updated_at DESC"
-
-    tasks = db.execute(sql, params).fetchall()
+    # Group tasks by status for Kanban columns
+    tasks_by_status = {
+        'blocked': [],
+        'in_progress': [],
+        'pending': [],
+        'done': []
+    }
+    for task in tasks:
+        task_dict = dict(task)
+        status = task_dict.get('task_status', 'pending')
+        if status in tasks_by_status:
+            tasks_by_status[status].append(task_dict)
 
     # Get counts by status
-    status_counts = db.execute("""
-        SELECT task_status, COUNT(*) as count
-        FROM knowledge_entries
-        WHERE task_status IS NOT NULL
-        GROUP BY task_status
-    """).fetchall()
-
-    counts = {r['task_status']: r['count'] for r in status_counts}
-    total = sum(counts.values())
+    status_counts = {status: len(tasks) for status, tasks in tasks_by_status.items()}
+    total = sum(status_counts.values())
 
     # Get categories for sidebar
     categories = get_categories_with_counts()
 
     return render_template(
         'library_tasks.html',
-        tasks=[dict(t) for t in tasks],
-        status_filter=status_filter,
-        status_counts=counts,
+        tasks_by_status=tasks_by_status,
+        status_counts=status_counts,
         total_tasks=total,
         categories=categories,
     )
