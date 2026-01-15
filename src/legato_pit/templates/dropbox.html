@@ -2,6 +2,208 @@
 
 {% block title %}Motif - {{ app_name }}{% endblock %}
 
+{% block head %}
+<style>
+/* Voice Recording Styles */
+.record-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+    gap: 1.5rem;
+}
+
+.record-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 4px solid var(--border-color);
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.record-btn:hover {
+    border-color: var(--accent-red);
+    background: rgba(248, 81, 73, 0.1);
+}
+
+.record-btn.recording {
+    border-color: var(--accent-red);
+    background: rgba(248, 81, 73, 0.15);
+    animation: pulse-record 1.5s ease-in-out infinite;
+}
+
+.record-btn.recording:hover {
+    background: rgba(248, 81, 73, 0.25);
+}
+
+@keyframes pulse-record {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
+    50% { box-shadow: 0 0 0 20px rgba(248, 81, 73, 0); }
+}
+
+.record-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent-red);
+    transition: all 0.2s ease;
+}
+
+.record-btn.recording .record-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+}
+
+.record-status {
+    text-align: center;
+}
+
+.record-time {
+    font-size: 2rem;
+    font-weight: 600;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    color: var(--text-primary);
+}
+
+.record-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.record-hint.recording {
+    color: var(--accent-red);
+}
+
+/* Audio Visualizer */
+.audio-visualizer {
+    width: 100%;
+    max-width: 400px;
+    height: 60px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 1rem;
+}
+
+.visualizer-bar {
+    width: 4px;
+    height: 100%;
+    background: var(--accent-blue);
+    border-radius: 2px;
+    transition: height 0.05s ease;
+}
+
+.audio-visualizer.recording .visualizer-bar {
+    background: var(--accent-red);
+}
+
+/* Transcription Preview */
+.transcription-preview {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: none;
+}
+
+.transcription-preview.visible {
+    display: block;
+}
+
+.transcription-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.transcription-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.transcription-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.transcription-text {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.transcription-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Recording Controls */
+.recording-controls {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.recording-controls .btn {
+    min-width: 100px;
+}
+
+/* Voice unavailable state */
+.voice-unavailable {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-secondary);
+}
+
+.voice-unavailable .icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Tab disabled state */
+.tab-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="dropbox">
     <header class="page-header">
@@ -9,13 +211,14 @@
         <p class="subtitle">Drop an idea into the system</p>
     </header>
 
-    <form action="{{ url_for('dropbox.upload') }}" method="POST" enctype="multipart/form-data" class="upload-form">
+    <form action="{{ url_for('dropbox.upload') }}" method="POST" enctype="multipart/form-data" class="upload-form" id="uploadForm">
         <div class="form-section">
             <label class="form-label">Input Method</label>
 
             <div class="upload-tabs">
                 <button type="button" class="tab-btn active" onclick="showTab('text')">Paste Text</button>
                 <button type="button" class="tab-btn" onclick="showTab('file')">Upload File</button>
+                <button type="button" class="tab-btn" id="voiceTabBtn" onclick="showTab('voice')">Record Voice</button>
             </div>
 
             <div id="tab-text" class="tab-content active">
@@ -39,9 +242,48 @@
                 </div>
                 <div id="file-name" class="file-name-display"></div>
             </div>
+
+            <div id="tab-voice" class="tab-content">
+                <div id="voiceUnavailable" class="voice-unavailable" style="display: none;">
+                    <div class="icon">🎤</div>
+                    <p>Voice recording requires microphone access and a modern browser.</p>
+                    <p class="form-hint">Make sure to allow microphone permissions when prompted.</p>
+                </div>
+
+                <div id="voiceRecorder" class="record-container">
+                    <div class="audio-visualizer" id="audioVisualizer">
+                        <!-- Bars will be generated by JS -->
+                    </div>
+
+                    <button type="button" class="record-btn" id="recordBtn" onclick="toggleRecording()">
+                        <div class="record-icon"></div>
+                    </button>
+
+                    <div class="record-status">
+                        <div class="record-time" id="recordTime">00:00:00</div>
+                        <div class="record-hint" id="recordHint">Tap to start recording</div>
+                    </div>
+
+                    <div class="recording-controls" id="recordingControls" style="display: none;">
+                        <button type="button" class="btn btn-secondary" onclick="discardRecording()">Discard</button>
+                        <button type="button" class="btn btn-primary" onclick="transcribeRecording()">Transcribe</button>
+                    </div>
+
+                    <div class="transcription-preview" id="transcriptionPreview">
+                        <div class="transcription-header">
+                            <span class="transcription-label">Transcription</span>
+                            <div class="transcription-actions">
+                                <button type="button" class="btn btn-small" onclick="editTranscription()">Edit</button>
+                                <button type="button" class="btn btn-small" onclick="copyTranscription()">Copy</button>
+                            </div>
+                        </div>
+                        <div class="transcription-text" id="transcriptionText"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-large btn-submit">
+        <button type="submit" class="btn btn-primary btn-large btn-submit" id="submitBtn">
             Submit Motif
         </button>
     </form>
@@ -50,6 +292,63 @@
 
 {% block scripts %}
 <script>
+// Voice recording state
+let mediaRecorder = null;
+let audioChunks = [];
+let audioBlob = null;
+let audioStream = null;
+let audioContext = null;
+let analyser = null;
+let recordingStartTime = null;
+let timerInterval = null;
+let isRecording = false;
+let currentTranscript = '';
+let voiceAvailable = false;
+
+// Check voice availability on load
+document.addEventListener('DOMContentLoaded', async function() {
+    await checkVoiceAvailability();
+    initVisualizer();
+});
+
+async function checkVoiceAvailability() {
+    const voiceTabBtn = document.getElementById('voiceTabBtn');
+
+    // Check browser support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        voiceTabBtn.classList.add('disabled');
+        voiceTabBtn.title = 'Voice recording not supported in this browser';
+        return;
+    }
+
+    // Check if Whisper API is available
+    try {
+        const response = await fetch('/dropbox/api/transcribe/status');
+        const data = await response.json();
+        if (!data.available) {
+            voiceTabBtn.classList.add('disabled');
+            voiceTabBtn.title = 'Voice transcription not configured on server';
+            return;
+        }
+    } catch (e) {
+        console.error('Failed to check transcription status:', e);
+    }
+
+    voiceAvailable = true;
+}
+
+function initVisualizer() {
+    const visualizer = document.getElementById('audioVisualizer');
+    visualizer.innerHTML = '';
+    // Create 32 bars for the visualizer
+    for (let i = 0; i < 32; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'visualizer-bar';
+        bar.style.height = '4px';
+        visualizer.appendChild(bar);
+    }
+}
+
 function showTab(tab) {
     // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -59,13 +358,299 @@ function showTab(tab) {
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
 
-    // Clear the other input when switching
+    // Clear other inputs when switching
     if (tab === 'text') {
         document.getElementById('file').value = '';
         document.getElementById('file-name').textContent = '';
-    } else {
+        clearVoiceRecording();
+    } else if (tab === 'file') {
         document.getElementById('transcript').value = '';
+        clearVoiceRecording();
+    } else if (tab === 'voice') {
+        document.getElementById('transcript').value = '';
+        document.getElementById('file').value = '';
+        document.getElementById('file-name').textContent = '';
+
+        // Show appropriate UI based on availability
+        if (!voiceAvailable) {
+            document.getElementById('voiceUnavailable').style.display = 'block';
+            document.getElementById('voiceRecorder').style.display = 'none';
+        } else {
+            document.getElementById('voiceUnavailable').style.display = 'none';
+            document.getElementById('voiceRecorder').style.display = 'flex';
+        }
     }
+}
+
+async function toggleRecording() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        await startRecording();
+    }
+}
+
+async function startRecording() {
+    try {
+        // Request microphone access
+        audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            }
+        });
+
+        // Set up audio context for visualization
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(audioStream);
+        source.connect(analyser);
+
+        // Determine best supported format
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+            mimeType = 'audio/ogg';
+        }
+
+        // Create MediaRecorder with chunking for long recordings
+        mediaRecorder = new MediaRecorder(audioStream, {
+            mimeType: mimeType,
+            // Request data every 10 seconds to prevent memory issues with long recordings
+        });
+
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            audioBlob = new Blob(audioChunks, { type: mimeType });
+            console.log('Recording stopped. Audio size:', audioBlob.size, 'bytes');
+        };
+
+        // Start recording, request data every 10 seconds for long recordings
+        mediaRecorder.start(10000);
+        isRecording = true;
+        recordingStartTime = Date.now();
+
+        // Update UI
+        document.getElementById('recordBtn').classList.add('recording');
+        document.getElementById('audioVisualizer').classList.add('recording');
+        document.getElementById('recordHint').textContent = 'Tap to stop recording';
+        document.getElementById('recordHint').classList.add('recording');
+        document.getElementById('recordingControls').style.display = 'none';
+        document.getElementById('transcriptionPreview').classList.remove('visible');
+
+        // Start timer
+        timerInterval = setInterval(updateTimer, 100);
+
+        // Start visualizer
+        visualize();
+
+    } catch (error) {
+        console.error('Failed to start recording:', error);
+        if (error.name === 'NotAllowedError') {
+            showError('Microphone access denied. Please allow microphone permissions.');
+        } else if (error.name === 'NotFoundError') {
+            showError('No microphone found. Please connect a microphone.');
+        } else {
+            showError('Failed to start recording: ' + error.message);
+        }
+    }
+}
+
+function stopRecording() {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+
+    mediaRecorder.stop();
+    isRecording = false;
+
+    // Stop audio stream
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Stop timer
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    // Update UI
+    document.getElementById('recordBtn').classList.remove('recording');
+    document.getElementById('audioVisualizer').classList.remove('recording');
+    document.getElementById('recordHint').textContent = 'Recording complete';
+    document.getElementById('recordHint').classList.remove('recording');
+    document.getElementById('recordingControls').style.display = 'flex';
+
+    // Reset visualizer bars
+    const bars = document.querySelectorAll('.visualizer-bar');
+    bars.forEach(bar => bar.style.height = '4px');
+}
+
+function updateTimer() {
+    if (!recordingStartTime) return;
+
+    const elapsed = Date.now() - recordingStartTime;
+    const hours = Math.floor(elapsed / 3600000);
+    const minutes = Math.floor((elapsed % 3600000) / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+
+    document.getElementById('recordTime').textContent =
+        String(hours).padStart(2, '0') + ':' +
+        String(minutes).padStart(2, '0') + ':' +
+        String(seconds).padStart(2, '0');
+}
+
+function visualize() {
+    if (!analyser || !isRecording) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteFrequencyData(dataArray);
+
+    const bars = document.querySelectorAll('.visualizer-bar');
+    const barCount = bars.length;
+
+    for (let i = 0; i < barCount; i++) {
+        const index = Math.floor(i * bufferLength / barCount);
+        const value = dataArray[index];
+        const height = Math.max(4, (value / 255) * 56); // Min 4px, max 56px
+        bars[i].style.height = height + 'px';
+    }
+
+    if (isRecording) {
+        requestAnimationFrame(visualize);
+    }
+}
+
+function discardRecording() {
+    clearVoiceRecording();
+    showInfo('Recording discarded');
+}
+
+function clearVoiceRecording() {
+    // Stop any ongoing recording
+    if (isRecording) {
+        stopRecording();
+    }
+
+    // Clean up
+    audioChunks = [];
+    audioBlob = null;
+    currentTranscript = '';
+    recordingStartTime = null;
+
+    if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+    }
+
+    // Reset UI
+    document.getElementById('recordTime').textContent = '00:00:00';
+    document.getElementById('recordHint').textContent = 'Tap to start recording';
+    document.getElementById('recordHint').classList.remove('recording');
+    document.getElementById('recordingControls').style.display = 'none';
+    document.getElementById('transcriptionPreview').classList.remove('visible');
+    document.getElementById('transcriptionText').textContent = '';
+
+    // Reset visualizer
+    const bars = document.querySelectorAll('.visualizer-bar');
+    bars.forEach(bar => bar.style.height = '4px');
+}
+
+async function transcribeRecording() {
+    if (!audioBlob) {
+        showError('No recording to transcribe');
+        return;
+    }
+
+    // Check file size
+    const maxSize = 25 * 1024 * 1024; // 25MB
+    if (audioBlob.size > maxSize) {
+        showError('Recording too large. Maximum size is 25MB.');
+        return;
+    }
+
+    // Show loading state
+    const previewDiv = document.getElementById('transcriptionPreview');
+    const textDiv = document.getElementById('transcriptionText');
+    previewDiv.classList.add('visible');
+    textDiv.innerHTML = '<div class="transcription-loading"><div class="loading-spinner"></div><span>Transcribing audio...</span></div>';
+
+    // Disable transcribe button
+    const transcribeBtn = document.querySelector('[onclick="transcribeRecording()"]');
+    transcribeBtn.disabled = true;
+    transcribeBtn.textContent = 'Transcribing...';
+
+    try {
+        // Prepare form data
+        const formData = new FormData();
+        const ext = audioBlob.type.includes('mp4') ? 'mp4' : audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
+        formData.append('audio', audioBlob, 'recording.' + ext);
+
+        // Send to server
+        const response = await fetch('/dropbox/api/transcribe', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            currentTranscript = data.transcript;
+            textDiv.textContent = currentTranscript;
+            showSuccess('Transcription complete!');
+
+            // Pre-fill the transcript textarea so form submission works
+            document.getElementById('transcript').value = currentTranscript;
+        } else {
+            textDiv.textContent = '';
+            previewDiv.classList.remove('visible');
+            showError(data.error || 'Transcription failed');
+        }
+    } catch (error) {
+        console.error('Transcription error:', error);
+        textDiv.textContent = '';
+        previewDiv.classList.remove('visible');
+        showError('Network error during transcription');
+    } finally {
+        transcribeBtn.disabled = false;
+        transcribeBtn.textContent = 'Transcribe';
+    }
+}
+
+function editTranscription() {
+    // Switch to text tab with the transcript
+    document.getElementById('transcript').value = currentTranscript;
+
+    // Find and click the text tab button
+    const textTabBtn = document.querySelector('.tab-btn');
+    textTabBtn.click();
+
+    // Focus the textarea
+    setTimeout(() => {
+        document.getElementById('transcript').focus();
+    }, 100);
+}
+
+function copyTranscription() {
+    if (!currentTranscript) return;
+
+    navigator.clipboard.writeText(currentTranscript).then(() => {
+        showSuccess('Copied to clipboard');
+    }).catch(err => {
+        showError('Failed to copy');
+    });
 }
 
 // File input handling
@@ -84,14 +669,21 @@ document.getElementById('file').addEventListener('change', function(e) {
     }
 });
 
-// Prevent form submission if no content
-document.querySelector('.upload-form').addEventListener('submit', function(e) {
+// Form submission validation
+document.getElementById('uploadForm').addEventListener('submit', function(e) {
     const text = document.getElementById('transcript').value.trim();
     const file = document.getElementById('file').files[0];
+    const activeTab = document.querySelector('.tab-content.active').id;
+
+    // If on voice tab with transcript, use the transcript
+    if (activeTab === 'tab-voice' && currentTranscript) {
+        document.getElementById('transcript').value = currentTranscript;
+        return; // Allow submission
+    }
 
     if (!text && !file) {
         e.preventDefault();
-        showWarning('Please enter text or select a file to upload.');
+        showWarning('Please enter text, select a file, or record a voice note.');
     }
 });
 </script>
