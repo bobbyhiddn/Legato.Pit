@@ -42,6 +42,16 @@
     background: rgba(248, 81, 73, 0.25);
 }
 
+.record-btn.paused {
+    border-color: var(--accent-yellow);
+    background: rgba(210, 153, 34, 0.15);
+    animation: none;
+}
+
+.record-btn.paused:hover {
+    background: rgba(210, 153, 34, 0.25);
+}
+
 @keyframes pulse-record {
     0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
     50% { box-shadow: 0 0 0 20px rgba(248, 81, 73, 0); }
@@ -59,6 +69,13 @@
     width: 32px;
     height: 32px;
     border-radius: 6px;
+}
+
+.record-btn.paused .record-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent-yellow);
 }
 
 .record-status {
@@ -80,6 +97,41 @@
 
 .record-hint.recording {
     color: var(--accent-red);
+}
+
+.record-hint.paused {
+    color: var(--accent-yellow);
+}
+
+/* Segment indicator */
+.segment-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.segment-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+}
+
+.segment-dot.pending {
+    background: var(--accent-yellow);
+}
+
+.segment-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: 9999px;
+    font-size: 0.75rem;
 }
 
 /* Audio Visualizer */
@@ -109,6 +161,10 @@
     background: var(--accent-red);
 }
 
+.audio-visualizer.paused .visualizer-bar {
+    background: var(--accent-yellow);
+}
+
 /* Transcription Preview */
 .transcription-preview {
     width: 100%;
@@ -134,6 +190,9 @@
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .transcription-actions {
@@ -147,7 +206,7 @@
     color: var(--text-primary);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
 }
 
@@ -171,6 +230,16 @@
     to { transform: rotate(360deg); }
 }
 
+/* Segment divider in transcript */
+.segment-divider {
+    display: block;
+    margin: 0.75rem 0;
+    padding: 0.25rem 0;
+    border-top: 1px dashed var(--border-color);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
 /* Recording Controls */
 .recording-controls {
     display: flex;
@@ -181,6 +250,26 @@
 
 .recording-controls .btn {
     min-width: 100px;
+}
+
+.btn-transcribe {
+    position: relative;
+}
+
+.btn-transcribe .pending-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-yellow);
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Voice unavailable state */
@@ -262,16 +351,31 @@
                     <div class="record-status">
                         <div class="record-time" id="recordTime">00:00:00</div>
                         <div class="record-hint" id="recordHint">Tap to start recording</div>
+                        <div class="segment-indicator" id="segmentIndicator" style="display: none;">
+                            <span class="segment-count" id="segmentCount">
+                                <span class="segment-dot"></span>
+                                <span id="segmentText">0 segments</span>
+                            </span>
+                        </div>
                     </div>
 
                     <div class="recording-controls" id="recordingControls" style="display: none;">
-                        <button type="button" class="btn btn-secondary" onclick="discardRecording()">Discard</button>
-                        <button type="button" class="btn btn-primary" onclick="transcribeRecording()">Transcribe</button>
+                        <button type="button" class="btn btn-secondary" onclick="discardRecording()">Discard All</button>
+                        <button type="button" class="btn btn-primary btn-transcribe" id="transcribeBtn" onclick="transcribeRecording()">
+                            Transcribe
+                            <span class="pending-badge" id="pendingBadge" style="display: none;">1</span>
+                        </button>
                     </div>
 
                     <div class="transcription-preview" id="transcriptionPreview">
                         <div class="transcription-header">
-                            <span class="transcription-label">Transcription</span>
+                            <span class="transcription-label">
+                                Transcription
+                                <span class="segment-count" id="transcribedCount" style="display: none;">
+                                    <span class="segment-dot"></span>
+                                    <span id="transcribedText">0 transcribed</span>
+                                </span>
+                            </span>
                             <div class="transcription-actions">
                                 <button type="button" class="btn btn-small" onclick="editTranscription()">Edit</button>
                                 <button type="button" class="btn btn-small" onclick="copyTranscription()">Copy</button>
@@ -292,18 +396,29 @@
 
 {% block scripts %}
 <script>
+// Recording state machine
+const RecordingState = {
+    IDLE: 'idle',
+    RECORDING: 'recording',
+    PAUSED: 'paused'
+};
+
 // Voice recording state
+let recordingState = RecordingState.IDLE;
 let mediaRecorder = null;
-let audioChunks = [];
-let audioBlob = null;
+let currentChunks = [];      // Chunks for current segment
+let audioSegments = [];      // Array of {blob, transcribed: bool, transcript: string}
 let audioStream = null;
 let audioContext = null;
 let analyser = null;
 let recordingStartTime = null;
+let pausedTime = 0;          // Accumulated time from previous segments
 let timerInterval = null;
-let isRecording = false;
-let currentTranscript = '';
 let voiceAvailable = false;
+let currentMimeType = 'audio/webm';
+
+// Accumulated transcript
+let fullTranscript = '';
 
 // Check voice availability on load
 document.addEventListener('DOMContentLoaded', async function() {
@@ -362,12 +477,11 @@ function showTab(tab) {
     if (tab === 'text') {
         document.getElementById('file').value = '';
         document.getElementById('file-name').textContent = '';
-        clearVoiceRecording();
+        // Don't clear voice recording - user might want to switch back
     } else if (tab === 'file') {
         document.getElementById('transcript').value = '';
-        clearVoiceRecording();
+        // Don't clear voice recording
     } else if (tab === 'voice') {
-        document.getElementById('transcript').value = '';
         document.getElementById('file').value = '';
         document.getElementById('file-name').textContent = '';
 
@@ -383,10 +497,16 @@ function showTab(tab) {
 }
 
 async function toggleRecording() {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        await startRecording();
+    switch (recordingState) {
+        case RecordingState.IDLE:
+            await startRecording();
+            break;
+        case RecordingState.RECORDING:
+            pauseRecording();
+            break;
+        case RecordingState.PAUSED:
+            await resumeRecording();
+            break;
     }
 }
 
@@ -409,46 +529,46 @@ async function startRecording() {
         source.connect(analyser);
 
         // Determine best supported format
-        let mimeType = 'audio/webm';
+        currentMimeType = 'audio/webm';
         if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            mimeType = 'audio/webm;codecs=opus';
+            currentMimeType = 'audio/webm;codecs=opus';
         } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-            mimeType = 'audio/mp4';
+            currentMimeType = 'audio/mp4';
         } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-            mimeType = 'audio/ogg';
+            currentMimeType = 'audio/ogg';
         }
 
-        // Create MediaRecorder with chunking for long recordings
-        mediaRecorder = new MediaRecorder(audioStream, {
-            mimeType: mimeType,
-            // Request data every 10 seconds to prevent memory issues with long recordings
-        });
-
-        audioChunks = [];
+        // Create MediaRecorder
+        mediaRecorder = new MediaRecorder(audioStream, { mimeType: currentMimeType });
+        currentChunks = [];
 
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
-                audioChunks.push(event.data);
+                currentChunks.push(event.data);
             }
         };
 
         mediaRecorder.onstop = () => {
-            audioBlob = new Blob(audioChunks, { type: mimeType });
-            console.log('Recording stopped. Audio size:', audioBlob.size, 'bytes');
+            // Save current segment
+            if (currentChunks.length > 0) {
+                const segmentBlob = new Blob(currentChunks, { type: currentMimeType });
+                audioSegments.push({
+                    blob: segmentBlob,
+                    transcribed: false,
+                    transcript: ''
+                });
+                currentChunks = [];
+                updateSegmentUI();
+            }
         };
 
-        // Start recording, request data every 10 seconds for long recordings
+        // Start recording with chunking
         mediaRecorder.start(10000);
-        isRecording = true;
+        recordingState = RecordingState.RECORDING;
         recordingStartTime = Date.now();
 
         // Update UI
-        document.getElementById('recordBtn').classList.add('recording');
-        document.getElementById('audioVisualizer').classList.add('recording');
-        document.getElementById('recordHint').textContent = 'Tap to stop recording';
-        document.getElementById('recordHint').classList.add('recording');
-        document.getElementById('recordingControls').style.display = 'none';
-        document.getElementById('transcriptionPreview').classList.remove('visible');
+        updateRecordingUI();
 
         // Start timer
         timerInterval = setInterval(updateTimer, 100);
@@ -468,39 +588,173 @@ async function startRecording() {
     }
 }
 
-function stopRecording() {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+function pauseRecording() {
+    if (!mediaRecorder || recordingState !== RecordingState.RECORDING) return;
 
+    // Stop the current recording segment
     mediaRecorder.stop();
-    isRecording = false;
+    recordingState = RecordingState.PAUSED;
 
-    // Stop audio stream
-    if (audioStream) {
-        audioStream.getTracks().forEach(track => track.stop());
-    }
+    // Save elapsed time
+    pausedTime += Date.now() - recordingStartTime;
 
-    // Stop timer
+    // Stop timer but keep the time
     if (timerInterval) {
         clearInterval(timerInterval);
         timerInterval = null;
     }
 
     // Update UI
-    document.getElementById('recordBtn').classList.remove('recording');
-    document.getElementById('audioVisualizer').classList.remove('recording');
-    document.getElementById('recordHint').textContent = 'Recording complete';
-    document.getElementById('recordHint').classList.remove('recording');
-    document.getElementById('recordingControls').style.display = 'flex';
+    updateRecordingUI();
 
-    // Reset visualizer bars
-    const bars = document.querySelectorAll('.visualizer-bar');
-    bars.forEach(bar => bar.style.height = '4px');
+    // Show controls
+    document.getElementById('recordingControls').style.display = 'flex';
+}
+
+async function resumeRecording() {
+    if (recordingState !== RecordingState.PAUSED) return;
+
+    try {
+        // Check if we need to get a new stream
+        if (!audioStream || audioStream.getTracks().every(t => t.readyState === 'ended')) {
+            audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                }
+            });
+
+            // Reconnect audio context
+            if (audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 64;
+            }
+            const source = audioContext.createMediaStreamSource(audioStream);
+            source.connect(analyser);
+        }
+
+        // Create new MediaRecorder for this segment
+        mediaRecorder = new MediaRecorder(audioStream, { mimeType: currentMimeType });
+        currentChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                currentChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            if (currentChunks.length > 0) {
+                const segmentBlob = new Blob(currentChunks, { type: currentMimeType });
+                audioSegments.push({
+                    blob: segmentBlob,
+                    transcribed: false,
+                    transcript: ''
+                });
+                currentChunks = [];
+                updateSegmentUI();
+            }
+        };
+
+        // Start recording
+        mediaRecorder.start(10000);
+        recordingState = RecordingState.RECORDING;
+        recordingStartTime = Date.now();
+
+        // Update UI
+        updateRecordingUI();
+
+        // Start timer
+        timerInterval = setInterval(updateTimer, 100);
+
+        // Start visualizer
+        visualize();
+
+    } catch (error) {
+        console.error('Failed to resume recording:', error);
+        showError('Failed to resume recording: ' + error.message);
+    }
+}
+
+function updateRecordingUI() {
+    const btn = document.getElementById('recordBtn');
+    const visualizer = document.getElementById('audioVisualizer');
+    const hint = document.getElementById('recordHint');
+    const controls = document.getElementById('recordingControls');
+
+    btn.classList.remove('recording', 'paused');
+    visualizer.classList.remove('recording', 'paused');
+    hint.classList.remove('recording', 'paused');
+
+    switch (recordingState) {
+        case RecordingState.IDLE:
+            hint.textContent = 'Tap to start recording';
+            controls.style.display = 'none';
+            break;
+        case RecordingState.RECORDING:
+            btn.classList.add('recording');
+            visualizer.classList.add('recording');
+            hint.classList.add('recording');
+            hint.textContent = 'Tap to pause';
+            controls.style.display = 'none';
+            break;
+        case RecordingState.PAUSED:
+            btn.classList.add('paused');
+            visualizer.classList.add('paused');
+            hint.classList.add('paused');
+            hint.textContent = 'Tap to continue recording';
+            controls.style.display = 'flex';
+            break;
+    }
+
+    // Reset visualizer bars when not recording
+    if (recordingState !== RecordingState.RECORDING) {
+        const bars = document.querySelectorAll('.visualizer-bar');
+        bars.forEach(bar => bar.style.height = '4px');
+    }
+}
+
+function updateSegmentUI() {
+    const indicator = document.getElementById('segmentIndicator');
+    const segmentText = document.getElementById('segmentText');
+    const pendingBadge = document.getElementById('pendingBadge');
+    const transcribedCount = document.getElementById('transcribedCount');
+    const transcribedText = document.getElementById('transcribedText');
+
+    const totalSegments = audioSegments.length;
+    const pendingSegments = audioSegments.filter(s => !s.transcribed).length;
+    const transcribedSegments = totalSegments - pendingSegments;
+
+    if (totalSegments > 0) {
+        indicator.style.display = 'flex';
+        segmentText.textContent = `${totalSegments} segment${totalSegments !== 1 ? 's' : ''}`;
+
+        // Update pending badge
+        if (pendingSegments > 0) {
+            pendingBadge.style.display = 'flex';
+            pendingBadge.textContent = pendingSegments;
+        } else {
+            pendingBadge.style.display = 'none';
+        }
+
+        // Update transcribed count
+        if (transcribedSegments > 0) {
+            transcribedCount.style.display = 'inline-flex';
+            transcribedText.textContent = `${transcribedSegments} transcribed`;
+        } else {
+            transcribedCount.style.display = 'none';
+        }
+    } else {
+        indicator.style.display = 'none';
+        pendingBadge.style.display = 'none';
+        transcribedCount.style.display = 'none';
+    }
 }
 
 function updateTimer() {
-    if (!recordingStartTime) return;
-
-    const elapsed = Date.now() - recordingStartTime;
+    const elapsed = pausedTime + (recordingStartTime ? Date.now() - recordingStartTime : 0);
     const hours = Math.floor(elapsed / 3600000);
     const minutes = Math.floor((elapsed % 3600000) / 60000);
     const seconds = Math.floor((elapsed % 60000) / 1000);
@@ -512,7 +766,7 @@ function updateTimer() {
 }
 
 function visualize() {
-    if (!analyser || !isRecording) return;
+    if (!analyser || recordingState !== RecordingState.RECORDING) return;
 
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -524,60 +778,74 @@ function visualize() {
     for (let i = 0; i < barCount; i++) {
         const index = Math.floor(i * bufferLength / barCount);
         const value = dataArray[index];
-        const height = Math.max(4, (value / 255) * 56); // Min 4px, max 56px
+        const height = Math.max(4, (value / 255) * 56);
         bars[i].style.height = height + 'px';
     }
 
-    if (isRecording) {
+    if (recordingState === RecordingState.RECORDING) {
         requestAnimationFrame(visualize);
     }
 }
 
 function discardRecording() {
-    clearVoiceRecording();
-    showInfo('Recording discarded');
-}
-
-function clearVoiceRecording() {
     // Stop any ongoing recording
-    if (isRecording) {
-        stopRecording();
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
     }
 
-    // Clean up
-    audioChunks = [];
-    audioBlob = null;
-    currentTranscript = '';
-    recordingStartTime = null;
+    // Stop audio stream
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
 
-    if (audioContext) {
+    // Stop timer
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    // Close audio context
+    if (audioContext && audioContext.state !== 'closed') {
         audioContext.close();
         audioContext = null;
     }
 
+    // Reset all state
+    recordingState = RecordingState.IDLE;
+    currentChunks = [];
+    audioSegments = [];
+    recordingStartTime = null;
+    pausedTime = 0;
+    fullTranscript = '';
+
     // Reset UI
     document.getElementById('recordTime').textContent = '00:00:00';
-    document.getElementById('recordHint').textContent = 'Tap to start recording';
-    document.getElementById('recordHint').classList.remove('recording');
-    document.getElementById('recordingControls').style.display = 'none';
     document.getElementById('transcriptionPreview').classList.remove('visible');
     document.getElementById('transcriptionText').textContent = '';
+    document.getElementById('transcript').value = '';
 
-    // Reset visualizer
-    const bars = document.querySelectorAll('.visualizer-bar');
-    bars.forEach(bar => bar.style.height = '4px');
+    updateRecordingUI();
+    updateSegmentUI();
+
+    showInfo('Recording discarded');
 }
 
 async function transcribeRecording() {
-    if (!audioBlob) {
-        showError('No recording to transcribe');
+    // Find untranscribed segments
+    const pendingSegments = audioSegments.filter(s => !s.transcribed);
+
+    if (pendingSegments.length === 0) {
+        showInfo('All segments already transcribed');
         return;
     }
 
-    // Check file size
-    const maxSize = 25 * 1024 * 1024; // 25MB
-    if (audioBlob.size > maxSize) {
-        showError('Recording too large. Maximum size is 25MB.');
+    // Check total size of pending segments
+    const totalSize = pendingSegments.reduce((sum, s) => sum + s.blob.size, 0);
+    const maxSize = 25 * 1024 * 1024;
+
+    if (totalSize > maxSize) {
+        showError('Pending audio too large. Please transcribe in smaller chunks.');
         return;
     }
 
@@ -585,18 +853,29 @@ async function transcribeRecording() {
     const previewDiv = document.getElementById('transcriptionPreview');
     const textDiv = document.getElementById('transcriptionText');
     previewDiv.classList.add('visible');
-    textDiv.innerHTML = '<div class="transcription-loading"><div class="loading-spinner"></div><span>Transcribing audio...</span></div>';
+
+    // Show existing transcript with loading indicator for new content
+    const loadingHtml = '<div class="transcription-loading"><div class="loading-spinner"></div><span>Transcribing new segment...</span></div>';
+    if (fullTranscript) {
+        textDiv.innerHTML = fullTranscript + '<span class="segment-divider">New segment</span>' + loadingHtml;
+    } else {
+        textDiv.innerHTML = loadingHtml;
+    }
 
     // Disable transcribe button
-    const transcribeBtn = document.querySelector('[onclick="transcribeRecording()"]');
+    const transcribeBtn = document.getElementById('transcribeBtn');
     transcribeBtn.disabled = true;
-    transcribeBtn.textContent = 'Transcribing...';
+    transcribeBtn.childNodes[0].textContent = 'Transcribing...';
 
     try {
+        // Combine all pending segments into one blob
+        const pendingBlobs = pendingSegments.map(s => s.blob);
+        const combinedBlob = new Blob(pendingBlobs, { type: currentMimeType });
+
         // Prepare form data
         const formData = new FormData();
-        const ext = audioBlob.type.includes('mp4') ? 'mp4' : audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
-        formData.append('audio', audioBlob, 'recording.' + ext);
+        const ext = currentMimeType.includes('mp4') ? 'mp4' : currentMimeType.includes('ogg') ? 'ogg' : 'webm';
+        formData.append('audio', combinedBlob, 'recording.' + ext);
 
         // Send to server
         const response = await fetch('/dropbox/api/transcribe', {
@@ -607,31 +886,53 @@ async function transcribeRecording() {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            currentTranscript = data.transcript;
-            textDiv.textContent = currentTranscript;
-            showSuccess('Transcription complete!');
+            const newTranscript = data.transcript.trim();
 
-            // Pre-fill the transcript textarea so form submission works
-            document.getElementById('transcript').value = currentTranscript;
+            // Mark all pending segments as transcribed
+            pendingSegments.forEach(s => {
+                s.transcribed = true;
+                s.transcript = newTranscript; // Store for reference
+            });
+
+            // Append to full transcript
+            if (fullTranscript) {
+                fullTranscript += '\n\n' + newTranscript;
+            } else {
+                fullTranscript = newTranscript;
+            }
+
+            // Update display
+            textDiv.textContent = fullTranscript;
+
+            // Update the hidden textarea for form submission
+            document.getElementById('transcript').value = fullTranscript;
+
+            updateSegmentUI();
+            showSuccess('Transcription complete!');
         } else {
-            textDiv.textContent = '';
-            previewDiv.classList.remove('visible');
+            // Restore previous transcript on error
+            textDiv.textContent = fullTranscript || '';
+            if (!fullTranscript) {
+                previewDiv.classList.remove('visible');
+            }
             showError(data.error || 'Transcription failed');
         }
     } catch (error) {
         console.error('Transcription error:', error);
-        textDiv.textContent = '';
-        previewDiv.classList.remove('visible');
+        textDiv.textContent = fullTranscript || '';
+        if (!fullTranscript) {
+            previewDiv.classList.remove('visible');
+        }
         showError('Network error during transcription');
     } finally {
         transcribeBtn.disabled = false;
-        transcribeBtn.textContent = 'Transcribe';
+        transcribeBtn.childNodes[0].textContent = 'Transcribe';
     }
 }
 
 function editTranscription() {
     // Switch to text tab with the transcript
-    document.getElementById('transcript').value = currentTranscript;
+    document.getElementById('transcript').value = fullTranscript;
 
     // Find and click the text tab button
     const textTabBtn = document.querySelector('.tab-btn');
@@ -644,9 +945,9 @@ function editTranscription() {
 }
 
 function copyTranscription() {
-    if (!currentTranscript) return;
+    if (!fullTranscript) return;
 
-    navigator.clipboard.writeText(currentTranscript).then(() => {
+    navigator.clipboard.writeText(fullTranscript).then(() => {
         showSuccess('Copied to clipboard');
     }).catch(err => {
         showError('Failed to copy');
@@ -675,15 +976,24 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
     const file = document.getElementById('file').files[0];
     const activeTab = document.querySelector('.tab-content.active').id;
 
-    // If on voice tab with transcript, use the transcript
-    if (activeTab === 'tab-voice' && currentTranscript) {
-        document.getElementById('transcript').value = currentTranscript;
+    // If on voice tab with transcript, use the full transcript
+    if (activeTab === 'tab-voice' && fullTranscript) {
+        document.getElementById('transcript').value = fullTranscript;
         return; // Allow submission
     }
 
     if (!text && !file) {
         e.preventDefault();
         showWarning('Please enter text, select a file, or record a voice note.');
+    }
+});
+
+// Warn before leaving with unsaved recording
+window.addEventListener('beforeunload', function(e) {
+    if (audioSegments.length > 0 || recordingState !== RecordingState.IDLE) {
+        e.preventDefault();
+        e.returnValue = 'You have an unsaved recording. Are you sure you want to leave?';
+        return e.returnValue;
     }
 });
 </script>
