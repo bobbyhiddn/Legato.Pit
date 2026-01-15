@@ -1,0 +1,540 @@
+{% extends "base.html" %}
+
+{% block title %}Tasks - Library - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .library-layout {
+        display: flex;
+        gap: 1rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0 1rem;
+    }
+
+    .library-sidebar {
+        width: 180px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 70px;
+        height: fit-content;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+        gap: 0.5rem;
+    }
+
+    .sidebar-link span:not(.status-dot):not(.sidebar-count) {
+        flex: 1;
+    }
+
+    .sidebar-link .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .sidebar-link.active .sidebar-count {
+        background: rgba(255,255,255,0.2);
+        color: white;
+    }
+
+    .tasks-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .tasks-header h1 {
+        margin: 0 0 0.25rem 0;
+    }
+
+    .tasks-header .subtitle {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .task-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .task-card {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: border-color 0.2s;
+    }
+
+    .task-card:hover {
+        border-color: var(--accent-color);
+    }
+
+    .task-card.status-blocked {
+        border-left: 3px solid var(--danger-color, #dc3545);
+    }
+
+    .task-card.status-in_progress {
+        border-left: 3px solid var(--warning-color, #f59e0b);
+    }
+
+    .task-card.status-pending {
+        border-left: 3px solid var(--accent-color);
+    }
+
+    .task-card.status-done {
+        border-left: 3px solid var(--success-color, #22c55e);
+        opacity: 0.7;
+    }
+
+    .task-checkbox {
+        flex-shrink: 0;
+        margin-top: 0.125rem;
+    }
+
+    .task-checkbox input {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--success-color, #22c55e);
+    }
+
+    .task-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .task-link {
+        display: block;
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .task-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        word-wrap: break-word;
+    }
+
+    .task-card.status-done .task-title {
+        text-decoration: line-through;
+        color: var(--text-secondary);
+    }
+
+    .task-link:hover .task-title {
+        color: var(--accent-color);
+    }
+
+    .task-meta {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .task-category {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .task-category .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+    }
+
+    .task-due {
+        color: var(--text-secondary);
+    }
+
+    .task-due.overdue {
+        color: var(--danger-color, #dc3545);
+        font-weight: 500;
+    }
+
+    .task-due.soon {
+        color: var(--warning-color, #f59e0b);
+    }
+
+    .task-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-shrink: 0;
+    }
+
+    .status-select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding: 0.25rem 1.5rem 0.25rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.4rem center;
+    }
+
+    .status-select:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .status-select.status-blocked {
+        color: var(--danger-color, #dc3545);
+    }
+
+    .status-select.status-in_progress {
+        color: var(--warning-color, #f59e0b);
+    }
+
+    .status-select.status-done {
+        color: var(--success-color, #22c55e);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--text-secondary);
+    }
+
+    .status-stats {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .status-stat {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        font-size: 0.875rem;
+    }
+
+    .status-stat .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+    }
+
+    .status-stat .count {
+        font-weight: 600;
+    }
+
+    .dot-blocked { background: var(--danger-color, #dc3545); }
+    .dot-in_progress { background: var(--warning-color, #f59e0b); }
+    .dot-pending { background: var(--accent-color); }
+    .dot-done { background: var(--success-color, #22c55e); }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .sidebar-nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-section">
+            <h3>Filter by Status</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.tasks_view') }}"
+                   class="sidebar-link {% if not status_filter %}active{% endif %}">
+                    <span>All Tasks</span>
+                    <span class="sidebar-count">{{ total_tasks }}</span>
+                </a>
+                <a href="{{ url_for('library.tasks_view', status='blocked') }}"
+                   class="sidebar-link {% if status_filter == 'blocked' %}active{% endif %}">
+                    <span class="status-dot dot-blocked"></span>
+                    <span>Blocked</span>
+                    <span class="sidebar-count">{{ status_counts.get('blocked', 0) }}</span>
+                </a>
+                <a href="{{ url_for('library.tasks_view', status='in_progress') }}"
+                   class="sidebar-link {% if status_filter == 'in_progress' %}active{% endif %}">
+                    <span class="status-dot dot-in_progress"></span>
+                    <span>In Progress</span>
+                    <span class="sidebar-count">{{ status_counts.get('in_progress', 0) }}</span>
+                </a>
+                <a href="{{ url_for('library.tasks_view', status='pending') }}"
+                   class="sidebar-link {% if status_filter == 'pending' %}active{% endif %}">
+                    <span class="status-dot dot-pending"></span>
+                    <span>Pending</span>
+                    <span class="sidebar-count">{{ status_counts.get('pending', 0) }}</span>
+                </a>
+                <a href="{{ url_for('library.tasks_view', status='done') }}"
+                   class="sidebar-link {% if status_filter == 'done' %}active{% endif %}">
+                    <span class="status-dot dot-done"></span>
+                    <span>Done</span>
+                    <span class="sidebar-count">{{ status_counts.get('done', 0) }}</span>
+                </a>
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Quick Links</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Library</span>
+                </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
+                    <span>Daily View</span>
+                </a>
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
+                    <span class="status-dot" style="background: {{ cat.color or '#6366f1' }}"></span>
+                    <span>{{ cat.display_name or cat.category }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <header class="tasks-header">
+            <h1>Tasks</h1>
+            <p class="subtitle">{{ tasks|length }} task{% if tasks|length != 1 %}s{% endif %}{% if status_filter %} ({{ status_filter | replace('_', ' ') }}){% endif %}</p>
+        </header>
+
+        {% if total_tasks > 0 %}
+        <div class="status-stats">
+            {% if status_counts.get('blocked', 0) > 0 %}
+            <div class="status-stat">
+                <span class="dot dot-blocked"></span>
+                <span class="count">{{ status_counts.get('blocked', 0) }}</span>
+                <span>Blocked</span>
+            </div>
+            {% endif %}
+            {% if status_counts.get('in_progress', 0) > 0 %}
+            <div class="status-stat">
+                <span class="dot dot-in_progress"></span>
+                <span class="count">{{ status_counts.get('in_progress', 0) }}</span>
+                <span>In Progress</span>
+            </div>
+            {% endif %}
+            {% if status_counts.get('pending', 0) > 0 %}
+            <div class="status-stat">
+                <span class="dot dot-pending"></span>
+                <span class="count">{{ status_counts.get('pending', 0) }}</span>
+                <span>Pending</span>
+            </div>
+            {% endif %}
+            {% if status_counts.get('done', 0) > 0 %}
+            <div class="status-stat">
+                <span class="dot dot-done"></span>
+                <span class="count">{{ status_counts.get('done', 0) }}</span>
+                <span>Done</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="task-list">
+            {% for task in tasks %}
+            <div class="task-card status-{{ task.task_status }}" data-entry-id="{{ task.entry_id }}">
+                <div class="task-checkbox">
+                    <input type="checkbox"
+                           {% if task.task_status == 'done' %}checked{% endif %}
+                           onchange="toggleTaskDone('{{ task.entry_id }}', this.checked, '{{ task.task_status }}')"
+                           title="Mark as {% if task.task_status == 'done' %}not done{% else %}done{% endif %}">
+                </div>
+                <div class="task-info">
+                    <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
+                        <span class="task-title">{{ task.title }}</span>
+                    </a>
+                    <div class="task-meta">
+                        {% if task.category %}
+                        <span class="task-category">
+                            {% set cat_color = categories | selectattr('category', 'equalto', task.category) | map(attribute='color') | first | default('#6366f1') %}
+                            <span class="dot" style="background: {{ cat_color }}"></span>
+                            {{ task.category }}
+                        </span>
+                        {% endif %}
+                        {% if task.due_date %}
+                        <span class="task-due {% if task.due_date < now().strftime('%Y-%m-%d') and task.task_status != 'done' %}overdue{% elif task.due_date == now().strftime('%Y-%m-%d') %}soon{% endif %}">
+                            Due: {{ task.due_date }}
+                        </span>
+                        {% endif %}
+                        <span class="task-updated">Updated: {{ task.updated_at[:10] }}</span>
+                    </div>
+                </div>
+                <div class="task-actions">
+                    <select class="status-select status-{{ task.task_status }}"
+                            onchange="updateTaskStatus('{{ task.entry_id }}', this.value)"
+                            title="Change status">
+                        <option value="blocked" {% if task.task_status == 'blocked' %}selected{% endif %}>Blocked</option>
+                        <option value="in_progress" {% if task.task_status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                        <option value="pending" {% if task.task_status == 'pending' %}selected{% endif %}>Pending</option>
+                        <option value="done" {% if task.task_status == 'done' %}selected{% endif %}>Done</option>
+                    </select>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>No tasks found{% if status_filter %} with status "{{ status_filter | replace('_', ' ') }}"{% endif %}</p>
+                <p style="font-size: 0.875rem; margin-top: 0.5rem;">
+                    Tasks are notes with a task_status field. You can mark notes as tasks through the MCP API.
+                </p>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function now() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    async function updateTaskStatus(entryId, newStatus) {
+        try {
+            const response = await fetch(`/library/api/task/${entryId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                // Update the card visually
+                const card = document.querySelector(`[data-entry-id="${entryId}"]`);
+                if (card) {
+                    // Remove old status class, add new one
+                    card.className = card.className.replace(/status-\w+/g, '');
+                    card.classList.add('task-card', `status-${newStatus}`);
+
+                    // Update checkbox
+                    const checkbox = card.querySelector('input[type="checkbox"]');
+                    if (checkbox) {
+                        checkbox.checked = (newStatus === 'done');
+                    }
+
+                    // Update select styling
+                    const select = card.querySelector('.status-select');
+                    if (select) {
+                        select.className = `status-select status-${newStatus}`;
+                    }
+
+                    // Update title styling
+                    const title = card.querySelector('.task-title');
+                    if (title) {
+                        if (newStatus === 'done') {
+                            title.style.textDecoration = 'line-through';
+                            title.style.color = 'var(--text-secondary)';
+                        } else {
+                            title.style.textDecoration = 'none';
+                            title.style.color = '';
+                        }
+                    }
+                }
+                showSuccess(`Task updated to "${newStatus.replace('_', ' ')}"`);
+            } else {
+                showError(data.error || 'Failed to update task');
+                // Reload to reset state
+                window.location.reload();
+            }
+        } catch (error) {
+            showError(error.message);
+            window.location.reload();
+        }
+    }
+
+    function toggleTaskDone(entryId, isDone, currentStatus) {
+        if (isDone) {
+            updateTaskStatus(entryId, 'done');
+        } else {
+            // If unchecking, go back to pending
+            updateTaskStatus(entryId, 'pending');
+        }
+    }
+</script>
+{% endblock %}

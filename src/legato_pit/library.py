@@ -858,6 +858,127 @@ def api_sync_status():
         return jsonify({'error': str(e)}), 500
 
 
+@library_bp.route('/tasks')
+@login_required
+def tasks_view():
+    """View notes marked as tasks with status filtering."""
+    db = get_db()
+
+    # Get filter from query params
+    status_filter = request.args.get('status', '')
+
+    # Build query dynamically
+    sql = """
+        SELECT entry_id, title, category, task_status, due_date, created_at, updated_at
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+    """
+    params = []
+
+    if status_filter:
+        sql += " AND task_status = ?"
+        params.append(status_filter)
+
+    sql += " ORDER BY CASE task_status WHEN 'blocked' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, due_date ASC NULLS LAST, updated_at DESC"
+
+    tasks = db.execute(sql, params).fetchall()
+
+    # Get counts by status
+    status_counts = db.execute("""
+        SELECT task_status, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+        GROUP BY task_status
+    """).fetchall()
+
+    counts = {r['task_status']: r['count'] for r in status_counts}
+    total = sum(counts.values())
+
+    # Get categories for sidebar
+    categories = get_categories_with_counts()
+
+    return render_template(
+        'library_tasks.html',
+        tasks=[dict(t) for t in tasks],
+        status_filter=status_filter,
+        status_counts=counts,
+        total_tasks=total,
+        categories=categories,
+    )
+
+
+@library_bp.route('/api/task/<path:entry_id>/status', methods=['POST'])
+@login_required
+def api_update_task_status(entry_id: str):
+    """Update task status for a note.
+
+    Request body:
+    {
+        "status": "pending" | "in_progress" | "done" | "blocked",
+        "due_date": "2024-01-15"  // optional
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    status = data.get('status', '').strip()
+    due_date = data.get('due_date', '').strip() if data.get('due_date') else None
+
+    valid_statuses = {'pending', 'in_progress', 'done', 'blocked'}
+    if status not in valid_statuses:
+        return jsonify({'error': f'Invalid status. Must be one of: {", ".join(sorted(valid_statuses))}'}), 400
+
+    try:
+        db = get_db()
+
+        # Check note exists
+        entry = db.execute(
+            "SELECT entry_id, title, task_status FROM knowledge_entries WHERE entry_id = ?",
+            (entry_id,)
+        ).fetchone()
+
+        if not entry:
+            return jsonify({'error': 'Entry not found'}), 404
+
+        old_status = entry['task_status']
+
+        # Update task status and optionally due_date
+        if due_date:
+            db.execute(
+                """
+                UPDATE knowledge_entries
+                SET task_status = ?, due_date = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE entry_id = ?
+                """,
+                (status, due_date, entry_id)
+            )
+        else:
+            db.execute(
+                """
+                UPDATE knowledge_entries
+                SET task_status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE entry_id = ?
+                """,
+                (status, entry_id)
+            )
+        db.commit()
+
+        logger.info(f"Updated task status: {entry_id} {old_status} -> {status}")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'old_status': old_status,
+            'new_status': status,
+            'due_date': due_date
+        })
+
+    except Exception as e:
+        logger.error(f"Update task status failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @library_bp.route('/projects')
 @login_required
 def list_projects():

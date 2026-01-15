@@ -246,7 +246,7 @@
                     {% if agent.related_entry_id %}
                     {% set note_ids = agent.related_entry_id.split(',') %}
                     {% if note_ids | length > 1 %}
-                    <span class="agent-source">Linked notes: {{ note_ids | length }} notes from this transcript</span>
+                    <span class="agent-source">Linked notes: {{ note_ids | length }} notes from this motif</span>
                     {% else %}
                     <span class="agent-source">Linked note: <a href="{{ url_for('library.view_entry', entry_id=note_ids[0]) }}" class="agent-note-link">{{ agent.related_note_title or note_ids[0] }}</a></span>
                     {% endif %}
