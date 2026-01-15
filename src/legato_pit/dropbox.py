@@ -30,13 +30,21 @@ dropbox_bp = Blueprint('dropbox', __name__, url_prefix='/dropbox')
 
 # Configuration
 MAX_TRANSCRIPT_SIZE = 500 * 1024  # 500KB
+MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB (Whisper API limit)
 ALLOWED_EXTENSIONS = {'txt', 'md', 'text'}
+ALLOWED_AUDIO_EXTENSIONS = {'webm', 'mp3', 'mp4', 'm4a', 'wav', 'ogg', 'flac'}
 
 
 def allowed_file(filename):
     """Check if file extension is allowed."""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def allowed_audio_file(filename):
+    """Check if audio file extension is allowed."""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_AUDIO_EXTENSIONS
 
 
 def sanitize_source_id(source_id):
@@ -256,3 +264,85 @@ def api_upload():
         })
     else:
         return jsonify({'error': message}), 500
+
+
+@dropbox_bp.route('/api/transcribe', methods=['POST'])
+@login_required
+def api_transcribe():
+    """
+    Transcribe audio using OpenAI Whisper.
+
+    Accepts audio file upload via multipart/form-data.
+    Returns: {"success": true, "transcript": "..."} or {"error": "..."}
+    """
+    from .rag.whisper_service import get_whisper_service
+
+    # Check if Whisper service is available
+    whisper = get_whisper_service()
+    if not whisper:
+        return jsonify({
+            'error': 'Voice transcription not available. OPENAI_API_KEY not configured.'
+        }), 503
+
+    # Check for audio file
+    if 'audio' not in request.files:
+        return jsonify({'error': 'No audio file provided'}), 400
+
+    audio_file = request.files['audio']
+    if not audio_file.filename:
+        return jsonify({'error': 'No audio file selected'}), 400
+
+    # Validate file type
+    filename = audio_file.filename
+    if not allowed_audio_file(filename):
+        return jsonify({
+            'error': f'Invalid audio format. Supported: {", ".join(ALLOWED_AUDIO_EXTENSIONS)}'
+        }), 400
+
+    # Read audio data
+    audio_data = audio_file.read()
+
+    if len(audio_data) > MAX_AUDIO_SIZE:
+        return jsonify({
+            'error': f'Audio file too large. Maximum size is {MAX_AUDIO_SIZE // (1024*1024)}MB.'
+        }), 400
+
+    if len(audio_data) == 0:
+        return jsonify({'error': 'Empty audio file'}), 400
+
+    logger.info(f"Received audio for transcription: {filename}, {len(audio_data)} bytes")
+
+    # Transcribe
+    success, result = whisper.transcribe(audio_data, filename)
+
+    if success:
+        return jsonify({
+            'success': True,
+            'transcript': result
+        })
+    else:
+        return jsonify({'error': result}), 500
+
+
+@dropbox_bp.route('/api/transcribe/status', methods=['GET'])
+@login_required
+def api_transcribe_status():
+    """
+    Check if voice transcription is available.
+
+    Returns: {"available": true/false, "model": "whisper-1"}
+    """
+    from .rag.whisper_service import get_whisper_service
+
+    whisper = get_whisper_service()
+    if whisper:
+        return jsonify({
+            'available': True,
+            'model': whisper.model,
+            'max_size_mb': MAX_AUDIO_SIZE // (1024 * 1024)
+        })
+    else:
+        return jsonify({
+            'available': False,
+            'reason': 'OPENAI_API_KEY not configured'
+        })
