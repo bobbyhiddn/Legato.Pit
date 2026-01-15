@@ -1,0 +1,864 @@
+{% extends "base.html" %}
+
+{% block title %}3D Knowledge Graph - {{ app_name }}{% endblock %}
+
+{% block head %}
+<script src="https://unpkg.com/3d-force-graph@1"></script>
+<style>
+    .graph-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 80px);
+        max-width: 100%;
+        margin: 0;
+        padding: 0 1rem;
+    }
+
+    .graph-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .graph-header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+    }
+
+    .graph-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .control-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .control-group label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .control-group input[type="range"] {
+        width: 80px;
+    }
+
+    .control-group select {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        font-size: 0.8rem;
+    }
+
+    .control-group .value {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        min-width: 2em;
+    }
+
+    .graph-wrapper {
+        flex: 1;
+        position: relative;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    #graph-container {
+        width: 100%;
+        height: 100%;
+    }
+
+    /* Legend */
+    .graph-legend {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: rgba(22, 27, 34, 0.9);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem;
+        max-width: 150px;
+        font-size: 0.75rem;
+        z-index: 100;
+    }
+
+    .graph-legend.collapsed {
+        max-width: auto;
+        padding: 0.25rem 0.5rem;
+    }
+
+    .graph-legend.collapsed .legend-items {
+        display: none;
+    }
+
+    .legend-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        gap: 0.5rem;
+    }
+
+    .legend-toggle {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        font-size: 0.8rem;
+        line-height: 1;
+    }
+
+    .legend-toggle:hover {
+        color: var(--text-primary);
+    }
+
+    .legend-title {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+    }
+
+    .legend-items {
+        margin-top: 0.25rem;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-bottom: 0.15rem;
+        cursor: pointer;
+        padding: 0.15rem 0.25rem;
+        border-radius: 3px;
+    }
+
+    .legend-item:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .legend-item.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .legend-count {
+        color: var(--text-secondary);
+        font-size: 0.65rem;
+        margin-left: auto;
+    }
+
+    /* Tooltip */
+    .graph-tooltip {
+        position: absolute;
+        background: rgba(22, 27, 34, 0.95);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        max-width: 200px;
+        z-index: 200;
+    }
+
+    .graph-tooltip.visible {
+        opacity: 1;
+    }
+
+    /* Stats bar */
+    .graph-stats {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.5rem 0;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .graph-stats span {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    /* Back link */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+        color: var(--accent-color);
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(22, 27, 34, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+    }
+
+    /* Selection toolbar */
+    .selection-toolbar {
+        position: absolute;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--card-bg);
+        border: 1px solid var(--accent-color);
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        display: none;
+        align-items: center;
+        gap: 1rem;
+        z-index: 100;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .selection-toolbar.visible {
+        display: flex;
+    }
+
+    .selection-count {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+
+    .selection-count span {
+        color: var(--accent-color);
+        font-weight: 600;
+    }
+
+    /* Controls hint */
+    .controls-hint {
+        position: absolute;
+        bottom: 1rem;
+        left: 1rem;
+        background: rgba(22, 27, 34, 0.9);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        z-index: 100;
+    }
+
+    .controls-hint kbd {
+        background: var(--bg-tertiary);
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+        font-family: monospace;
+    }
+
+    /* Note Preview Modal */
+    .note-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 300;
+    }
+
+    .note-modal.visible {
+        display: flex;
+    }
+
+    .note-modal-content {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        width: 90%;
+        max-width: 500px;
+        max-height: 70vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .note-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 1rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .note-modal-header h3 {
+        margin: 0 0 0.25rem 0;
+        font-size: 1.1rem;
+    }
+
+    .note-modal-meta {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .note-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.25rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+    }
+
+    .note-modal-close:hover {
+        color: var(--text-primary);
+    }
+
+    .note-modal-body {
+        padding: 1rem;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    .note-modal-preview {
+        font-size: 0.85rem;
+        line-height: 1.5;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+    }
+
+    .note-modal-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        border-top: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+    }
+
+    .note-modal-actions .btn {
+        flex: 1;
+        font-size: 0.8rem;
+        padding: 0.4rem 0.75rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="graph-container">
+    <a href="{{ url_for('dashboard.index') }}" class="back-link">
+        &larr; Back to Dashboard
+    </a>
+
+    <div class="graph-header">
+        <h1>3D Knowledge Graph</h1>
+        <div class="graph-controls">
+            <div class="control-group">
+                <label>Layout:</label>
+                <select id="layoutSelect" onchange="changeLayout(this.value)">
+                    <option value="force">Force</option>
+                    <option value="dendrite">Dendrite</option>
+                    <option value="radial">Radial</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Similarity:</label>
+                <input type="range" id="thresholdSlider" min="0.1" max="0.9" step="0.05" value="0.65">
+                <span class="value" id="thresholdValue">0.65</span>
+            </div>
+            <div class="control-group">
+                <label>Node Size:</label>
+                <input type="range" id="nodeSizeSlider" min="2" max="10" step="1" value="4">
+            </div>
+            <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">2D View</a>
+        </div>
+    </div>
+
+    <div class="graph-wrapper" id="graphWrapper">
+        <div class="loading-overlay" id="loadingOverlay">
+            <span style="color: var(--text-secondary)">Loading 3D graph...</span>
+        </div>
+        <div id="graph-container"></div>
+        <div class="graph-legend" id="graphLegend"></div>
+        <div class="graph-tooltip" id="graphTooltip"></div>
+        <div class="selection-toolbar" id="selectionToolbar">
+            <span class="selection-count"><span id="selectedCount">0</span> notes selected</span>
+            <button class="btn btn-small btn-primary" onclick="createChordFromSelection()">Create Chord</button>
+            <button class="btn btn-small btn-secondary" onclick="clearSelection()">Clear</button>
+        </div>
+        <div class="controls-hint">
+            <kbd>Left-drag</kbd> rotate | <kbd>Right-drag</kbd> pan | <kbd>Scroll</kbd> zoom | <kbd>Click</kbd> preview | <kbd>Shift+click</kbd> select
+        </div>
+    </div>
+
+    <div class="graph-stats">
+        Nodes: <span id="nodeCount">0</span> |
+        Edges: <span id="edgeCount">0</span> |
+        Categories: <span id="categoryCount">0</span>
+    </div>
+</div>
+
+<!-- Note Preview Modal -->
+<div class="note-modal" id="notePreviewModal">
+    <div class="note-modal-content">
+        <div class="note-modal-header">
+            <div>
+                <h3 id="modalNoteTitle">Note Title</h3>
+                <div class="note-modal-meta">
+                    <span class="badge" id="modalNoteCategory">category</span>
+                    <span id="modalNoteDate"></span>
+                </div>
+            </div>
+            <button class="note-modal-close" onclick="closeNoteModal()">&times;</button>
+        </div>
+        <div class="note-modal-body">
+            <div class="note-modal-preview" id="modalNoteContent">Loading...</div>
+        </div>
+        <div class="note-modal-actions">
+            <a href="#" id="modalOpenLink" class="btn btn-primary">Open Note</a>
+            <button class="btn btn-secondary" id="modalAddToChord" onclick="addModalNoteToSelection()">Add to Selection</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ============ Graph State ============
+let graphData = { nodes: [], edges: [], categories: [] };
+let graph = null;
+let currentThreshold = 0.65;
+let currentNodeSize = 4;
+let currentLayout = 'force';
+let activeCategory = null;
+let selectedNodes = new Set();
+let currentModalNode = null;
+
+// ============ Initialization ============
+document.addEventListener('DOMContentLoaded', () => {
+    initGraph();
+    loadGraphData();
+
+    // Control listeners
+    document.getElementById('thresholdSlider').addEventListener('input', (e) => {
+        currentThreshold = parseFloat(e.target.value);
+        document.getElementById('thresholdValue').textContent = currentThreshold.toFixed(2);
+    });
+
+    document.getElementById('thresholdSlider').addEventListener('change', () => {
+        loadGraphData();
+    });
+
+    document.getElementById('nodeSizeSlider').addEventListener('input', (e) => {
+        currentNodeSize = parseInt(e.target.value);
+        if (graph) {
+            graph.nodeVal(currentNodeSize);
+        }
+    });
+
+    // Modal keyboard handling
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeNoteModal();
+        }
+    });
+
+    // Click outside modal to close
+    document.getElementById('notePreviewModal').addEventListener('click', (e) => {
+        if (e.target.id === 'notePreviewModal') {
+            closeNoteModal();
+        }
+    });
+});
+
+function initGraph() {
+    const container = document.getElementById('graph-container');
+
+    graph = ForceGraph3D()(container)
+        .backgroundColor('#0d1117')
+        .nodeId('id')
+        .nodeLabel('')  // We'll use custom tooltip
+        .nodeColor(node => {
+            if (selectedNodes.has(node.id)) {
+                return '#58a6ff';  // Highlight selected
+            }
+            return node.color;
+        })
+        .nodeVal(currentNodeSize)
+        .nodeOpacity(0.9)
+        .linkSource('source')
+        .linkTarget('target')
+        .linkWidth(link => 0.5 + link.weight * 2)
+        .linkOpacity(0.25)
+        .linkColor(() => '#4a5568')
+        .onNodeClick((node, event) => {
+            if (event.shiftKey) {
+                toggleNodeSelection(node);
+            } else {
+                openNoteModal(node);
+            }
+        })
+        .onNodeHover(node => {
+            container.style.cursor = node ? 'pointer' : 'default';
+            if (node) {
+                showTooltip(node);
+            } else {
+                hideTooltip();
+            }
+        });
+
+    // Configure default forces
+    graph.d3Force('charge').strength(-60);
+    graph.d3Force('link').distance(link => 50 * (1 - link.weight));
+}
+
+async function loadGraphData() {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.style.display = 'flex';
+
+    try {
+        const response = await fetch(`/library/api/graph?threshold=${currentThreshold}&limit=200`);
+        graphData = await response.json();
+
+        if (graphData.error) {
+            throw new Error(graphData.error);
+        }
+
+        // Update stats
+        document.getElementById('nodeCount').textContent = graphData.nodes.length;
+        document.getElementById('edgeCount').textContent = graphData.edges.length;
+        document.getElementById('categoryCount').textContent = graphData.categories.length;
+
+        renderLegend();
+        renderGraph();
+
+    } catch (error) {
+        console.error('Failed to load graph:', error);
+        loadingOverlay.innerHTML = `<span style="color: var(--text-secondary)">Error: ${error.message}</span>`;
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
+}
+
+function renderLegend() {
+    const legend = document.getElementById('graphLegend');
+    const isCollapsed = legend.classList.contains('collapsed');
+    legend.innerHTML = `
+        <div class="legend-header" onclick="toggleLegend()">
+            <div class="legend-title">Categories</div>
+            <button class="legend-toggle" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▶' : '▼'}</button>
+        </div>
+        <div class="legend-items">
+            <div class="legend-item ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)">
+                <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
+                <span>All</span>
+                <span class="legend-count">${graphData.nodes.length}</span>
+            </div>
+            ${graphData.categories.map(cat => `
+                <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
+                     onclick="filterByCategory('${cat.name}')">
+                    <span class="legend-dot" style="background: ${cat.color}"></span>
+                    <span>${cat.name}</span>
+                    <span class="legend-count">${cat.count}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function toggleLegend() {
+    const legend = document.getElementById('graphLegend');
+    legend.classList.toggle('collapsed');
+    renderLegend();
+}
+
+function filterByCategory(category) {
+    activeCategory = category;
+    renderLegend();
+    renderGraph();
+}
+
+function changeLayout(layout) {
+    currentLayout = layout;
+    renderGraph();
+}
+
+function renderGraph() {
+    // Filter nodes by active category
+    let filteredNodes = graphData.nodes.map(n => ({...n}));  // Clone to avoid mutating original
+    if (activeCategory) {
+        filteredNodes = filteredNodes.filter(n => n.category === activeCategory);
+    }
+
+    // Create node ID set for filtering edges
+    const nodeIds = new Set(filteredNodes.map(n => n.id));
+
+    // Filter edges to only include those between visible nodes
+    const filteredEdges = graphData.edges
+        .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+        .map(e => ({...e}));  // Clone
+
+    // Apply layout positioning
+    if (currentLayout === 'dendrite') {
+        applyDendriteLayout(filteredNodes, graphData.categories);
+    } else if (currentLayout === 'radial') {
+        applyRadialLayout(filteredNodes, graphData.categories);
+    } else {
+        // Force layout - clear fixed positions
+        filteredNodes.forEach(node => {
+            node.fx = undefined;
+            node.fy = undefined;
+            node.fz = undefined;
+        });
+    }
+
+    // Update the graph
+    graph.graphData({
+        nodes: filteredNodes,
+        links: filteredEdges
+    });
+
+    // Adjust forces based on layout
+    if (currentLayout === 'force') {
+        graph.d3Force('charge').strength(-60);
+        graph.d3Force('link').distance(link => 50 * (1 - link.weight));
+    } else {
+        // Weaker forces for structured layouts
+        graph.d3Force('charge').strength(-20);
+        graph.d3Force('link').distance(30);
+    }
+}
+
+// ============ Layout Algorithms ============
+function applyDendriteLayout(nodes, categories) {
+    // Dendrite: Categories arranged in 3D grid, nodes branch from category centers
+    const categoryMap = new Map();
+    const gridSize = Math.ceil(Math.cbrt(categories.length));
+    const spacing = 150;
+
+    categories.forEach((cat, i) => {
+        const x = (i % gridSize) * spacing - (gridSize * spacing) / 2;
+        const y = (Math.floor(i / gridSize) % gridSize) * spacing - (gridSize * spacing) / 2;
+        const z = Math.floor(i / (gridSize * gridSize)) * spacing - spacing;
+        categoryMap.set(cat.name, { x, y, z, count: 0 });
+    });
+
+    nodes.forEach(node => {
+        const catPos = categoryMap.get(node.category);
+        if (catPos) {
+            // Spiral outward from category center
+            const angle = (catPos.count / 6) * 2 * Math.PI;
+            const radius = 30 + Math.floor(catPos.count / 6) * 20;
+            const zOffset = (catPos.count % 3 - 1) * 15;
+
+            node.fx = catPos.x + Math.cos(angle) * radius;
+            node.fy = catPos.y + Math.sin(angle) * radius;
+            node.fz = catPos.z + zOffset;
+            catPos.count++;
+        }
+    });
+}
+
+function applyRadialLayout(nodes, categories) {
+    // Radial: Categories arranged in a sphere, nodes radiate outward
+    const categoryAngles = new Map();
+    const categoryRadius = 100;
+
+    categories.forEach((cat, i) => {
+        // Distribute categories on a sphere using golden angle
+        const phi = Math.acos(1 - 2 * (i + 0.5) / categories.length);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+
+        categoryAngles.set(cat.name, {
+            x: categoryRadius * Math.sin(phi) * Math.cos(theta),
+            y: categoryRadius * Math.sin(phi) * Math.sin(theta),
+            z: categoryRadius * Math.cos(phi),
+            phi, theta,
+            count: 0
+        });
+    });
+
+    nodes.forEach(node => {
+        const catInfo = categoryAngles.get(node.category);
+        if (catInfo) {
+            // Radiate outward from category position
+            const distance = categoryRadius + 40 + Math.floor(catInfo.count / 5) * 20;
+            const spread = 0.3;  // Angular spread
+            const localTheta = catInfo.theta + (catInfo.count % 5 - 2) * spread * 0.2;
+            const localPhi = catInfo.phi + Math.floor(catInfo.count / 5) * spread * 0.1;
+
+            node.fx = distance * Math.sin(localPhi) * Math.cos(localTheta);
+            node.fy = distance * Math.sin(localPhi) * Math.sin(localTheta);
+            node.fz = distance * Math.cos(localPhi);
+            catInfo.count++;
+        }
+    });
+}
+
+// ============ Selection System ============
+function toggleNodeSelection(nodeData) {
+    if (selectedNodes.has(nodeData.id)) {
+        selectedNodes.delete(nodeData.id);
+    } else {
+        if (selectedNodes.size >= 5) {
+            alert('Maximum 5 notes can be selected');
+            return;
+        }
+        selectedNodes.add(nodeData.id);
+    }
+
+    updateSelectionUI();
+    // Re-render to update node colors
+    graph.nodeColor(node => selectedNodes.has(node.id) ? '#58a6ff' : node.color);
+}
+
+function updateSelectionUI() {
+    const toolbar = document.getElementById('selectionToolbar');
+    const count = document.getElementById('selectedCount');
+
+    if (selectedNodes.size > 0) {
+        toolbar.classList.add('visible');
+        count.textContent = selectedNodes.size;
+    } else {
+        toolbar.classList.remove('visible');
+    }
+}
+
+function clearSelection() {
+    selectedNodes.clear();
+    updateSelectionUI();
+    graph.nodeColor(node => node.color);
+}
+
+async function createChordFromSelection() {
+    if (selectedNodes.size === 0) {
+        alert('No notes selected');
+        return;
+    }
+
+    try {
+        const response = await fetch('/library/api/create-chord', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entry_ids: Array.from(selectedNodes)
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.queue_id) {
+            alert(`Chord queued: ${data.queue_id}`);
+            clearSelection();
+            setTimeout(() => window.location.href = '/dashboard/', 1500);
+        } else {
+            alert(data.error || 'Failed to create chord');
+        }
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+// ============ Note Preview Modal ============
+async function openNoteModal(nodeData) {
+    currentModalNode = nodeData;
+
+    document.getElementById('modalNoteTitle').textContent = nodeData.title;
+    document.getElementById('modalNoteCategory').textContent = nodeData.category;
+    document.getElementById('modalNoteCategory').className = `badge badge-${nodeData.category}`;
+    document.getElementById('modalOpenLink').href = `/library/entry/${nodeData.id}`;
+    document.getElementById('modalNoteContent').textContent = 'Loading...';
+
+    const addBtn = document.getElementById('modalAddToChord');
+    addBtn.textContent = selectedNodes.has(nodeData.id) ? 'Remove from Selection' : 'Add to Selection';
+
+    document.getElementById('notePreviewModal').classList.add('visible');
+
+    try {
+        const response = await fetch(`/library/api/entry/${nodeData.id}`);
+        const data = await response.json();
+
+        if (data.content) {
+            const preview = data.content.length > 400 ? data.content.substring(0, 400) + '...' : data.content;
+            document.getElementById('modalNoteContent').textContent = preview;
+        } else {
+            document.getElementById('modalNoteContent').textContent = 'No content available';
+        }
+
+        if (data.created_at) {
+            document.getElementById('modalNoteDate').textContent = data.created_at.split('T')[0];
+        }
+    } catch (error) {
+        document.getElementById('modalNoteContent').textContent = 'Failed to load content';
+    }
+}
+
+function closeNoteModal() {
+    document.getElementById('notePreviewModal').classList.remove('visible');
+    currentModalNode = null;
+}
+
+function addModalNoteToSelection() {
+    if (currentModalNode) {
+        toggleNodeSelection(currentModalNode);
+        const addBtn = document.getElementById('modalAddToChord');
+        addBtn.textContent = selectedNodes.has(currentModalNode.id) ? 'Remove from Selection' : 'Add to Selection';
+    }
+}
+
+// ============ Tooltip ============
+function showTooltip(node) {
+    const tooltip = document.getElementById('graphTooltip');
+    tooltip.innerHTML = `
+        <div style="font-weight: 500; margin-bottom: 0.25rem">${node.title}</div>
+        <div style="font-size: 0.7rem; color: ${node.color}">${node.category}</div>
+    `;
+    tooltip.style.left = '1rem';
+    tooltip.style.top = '4rem';
+    tooltip.classList.add('visible');
+}
+
+function hideTooltip() {
+    document.getElementById('graphTooltip').classList.remove('visible');
+}
+
+// ============ Window Resize ============
+window.addEventListener('resize', () => {
+    if (graph) {
+        const container = document.getElementById('graph-container');
+        graph.width(container.clientWidth);
+        graph.height(container.clientHeight);
+    }
+});
+</script>
+{% endblock %}
