@@ -907,29 +907,39 @@ def tasks_view():
 def api_update_task_status(entry_id: str):
     """Update task status for a note.
 
+    Updates both the local database AND syncs to GitHub by updating frontmatter.
+
     Request body:
     {
-        "status": "pending" | "in_progress" | "done" | "blocked",
+        "status": "pending" | "in_progress" | "done" | "blocked" | null,
         "due_date": "2024-01-15"  // optional
     }
+
+    Set status to null to remove task_status from the note.
     """
+    import re
+    from .rag.github_service import get_file_content, commit_file
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    status = data.get('status', '').strip()
+    status = data.get('status')
+    if status is not None:
+        status = str(status).strip() if status else None
+
     due_date = data.get('due_date', '').strip() if data.get('due_date') else None
 
     valid_statuses = {'pending', 'in_progress', 'done', 'blocked'}
-    if status not in valid_statuses:
+    if status is not None and status not in valid_statuses:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(sorted(valid_statuses))}'}), 400
 
     try:
         db = get_db()
 
-        # Check note exists
+        # Get full entry info including file_path
         entry = db.execute(
-            "SELECT entry_id, title, task_status FROM knowledge_entries WHERE entry_id = ?",
+            "SELECT entry_id, title, task_status, file_path, content FROM knowledge_entries WHERE entry_id = ?",
             (entry_id,)
         ).fetchone()
 
@@ -937,8 +947,84 @@ def api_update_task_status(entry_id: str):
             return jsonify({'error': 'Entry not found'}), 404
 
         old_status = entry['task_status']
+        file_path = entry['file_path']
 
-        # Update task status and optionally due_date
+        github_updated = False
+
+        # Sync to GitHub if file_path exists
+        if file_path:
+            try:
+                token = current_app.config.get('SYSTEM_PAT')
+                repo = 'bobbyhiddn/Legato.Library'
+
+                if token:
+                    # Get current content from GitHub
+                    content = get_file_content(repo, file_path, token)
+                    if content:
+                        # Update frontmatter with new task_status
+                        if content.startswith('---'):
+                            parts = content.split('---', 2)
+                            if len(parts) >= 3:
+                                frontmatter = parts[1]
+                                body = parts[2]
+
+                                # Check if task_status already exists in frontmatter
+                                has_task_status = re.search(r'^task_status:\s*.*$', frontmatter, re.MULTILINE)
+
+                                if status is None:
+                                    # Remove task_status from frontmatter
+                                    new_frontmatter = re.sub(
+                                        r'^task_status:\s*.*\n?',
+                                        '',
+                                        frontmatter,
+                                        flags=re.MULTILINE
+                                    )
+                                    commit_message = f'Remove task status from {entry["title"]}'
+                                elif has_task_status:
+                                    # Update existing task_status
+                                    new_frontmatter = re.sub(
+                                        r'^task_status:\s*.*$',
+                                        f'task_status: {status}',
+                                        frontmatter,
+                                        flags=re.MULTILINE
+                                    )
+                                    commit_message = f'Update task status: {old_status or "none"} -> {status}'
+                                else:
+                                    # Add task_status to frontmatter (before closing ---)
+                                    new_frontmatter = frontmatter.rstrip() + f'\ntask_status: {status}\n'
+                                    commit_message = f'Add task status: {status}'
+
+                                new_content = f'---{new_frontmatter}---{body}'
+
+                                # Commit to GitHub
+                                commit_file(
+                                    repo=repo,
+                                    path=file_path,
+                                    content=new_content,
+                                    message=commit_message,
+                                    token=token
+                                )
+                                github_updated = True
+                                logger.info(f"Synced task status to GitHub: {file_path}")
+                        else:
+                            # No frontmatter exists, add it
+                            if status is not None:
+                                new_content = f'---\ntask_status: {status}\n---\n\n{content}'
+                                commit_file(
+                                    repo=repo,
+                                    path=file_path,
+                                    content=new_content,
+                                    message=f'Add task status: {status}',
+                                    token=token
+                                )
+                                github_updated = True
+                                logger.info(f"Added frontmatter with task status to: {file_path}")
+
+            except Exception as e:
+                logger.warning(f"Could not sync task status to GitHub: {e}")
+                # Continue anyway - DB will be updated
+
+        # Update local database
         if due_date:
             db.execute(
                 """
@@ -966,7 +1052,8 @@ def api_update_task_status(entry_id: str):
             'entry_id': entry_id,
             'old_status': old_status,
             'new_status': status,
-            'due_date': due_date
+            'due_date': due_date,
+            'github_updated': github_updated
         })
 
     except Exception as e:

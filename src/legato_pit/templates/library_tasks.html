@@ -179,6 +179,7 @@
         padding: 0.75rem;
         cursor: grab;
         transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+        position: relative;
     }
 
     .task-card:hover {
@@ -195,11 +196,19 @@
         opacity: 0.7;
     }
 
+    .task-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
     .task-link {
         display: block;
         text-decoration: none;
         color: inherit;
-        margin-bottom: 0.5rem;
+        flex: 1;
+        min-width: 0;
     }
 
     .task-title {
@@ -217,6 +226,84 @@
 
     .task-link:hover .task-title {
         color: var(--accent-color);
+    }
+
+    /* Status dropdown on task cards */
+    .task-status-selector {
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .task-status-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .task-status-btn:hover {
+        transform: scale(1.2);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+
+    .task-status-btn.status-blocked { background: var(--danger-color, #dc3545); }
+    .task-status-btn.status-in_progress { background: var(--warning-color, #f59e0b); }
+    .task-status-btn.status-pending { background: var(--accent-color); }
+    .task-status-btn.status-done { background: var(--success-color, #22c55e); }
+
+    .task-status-dropdown {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.25rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 200;
+        display: none;
+        min-width: 140px;
+        overflow: hidden;
+    }
+
+    .task-status-dropdown.open {
+        display: block;
+    }
+
+    .task-status-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+
+    .task-status-option:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .task-status-option.current {
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+
+    .task-status-option .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
     }
 
     .task-meta {
@@ -351,12 +438,32 @@
                     {% for task in tasks_by_status.blocked %}
                     <div class="task-card status-blocked"
                          data-entry-id="{{ task.entry_id }}"
+                         data-status="blocked"
                          draggable="true"
                          ondragstart="handleDragStart(event)"
                          ondragend="handleDragEnd(event)">
-                        <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
-                            <span class="task-title">{{ task.title }}</span>
-                        </a>
+                        <div class="task-header">
+                            <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
+                                <span class="task-title">{{ task.title }}</span>
+                            </a>
+                            <div class="task-status-selector">
+                                <button class="task-status-btn status-blocked" onclick="toggleStatusDropdown(event, '{{ task.entry_id }}')" title="Change status"></button>
+                                <div class="task-status-dropdown" id="status-dropdown-{{ task.entry_id }}">
+                                    <button class="task-status-option current" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'blocked')">
+                                        <span class="status-dot dot-blocked"></span> Blocked
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'in_progress')">
+                                        <span class="status-dot dot-in_progress"></span> In Progress
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'pending')">
+                                        <span class="status-dot dot-pending"></span> Pending
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'done')">
+                                        <span class="status-dot dot-done"></span> Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="task-meta">
                             {% if task.category %}
                             <span class="task-category">
@@ -392,12 +499,32 @@
                     {% for task in tasks_by_status.in_progress %}
                     <div class="task-card status-in_progress"
                          data-entry-id="{{ task.entry_id }}"
+                         data-status="in_progress"
                          draggable="true"
                          ondragstart="handleDragStart(event)"
                          ondragend="handleDragEnd(event)">
-                        <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
-                            <span class="task-title">{{ task.title }}</span>
-                        </a>
+                        <div class="task-header">
+                            <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
+                                <span class="task-title">{{ task.title }}</span>
+                            </a>
+                            <div class="task-status-selector">
+                                <button class="task-status-btn status-in_progress" onclick="toggleStatusDropdown(event, '{{ task.entry_id }}')" title="Change status"></button>
+                                <div class="task-status-dropdown" id="status-dropdown-{{ task.entry_id }}">
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'blocked')">
+                                        <span class="status-dot dot-blocked"></span> Blocked
+                                    </button>
+                                    <button class="task-status-option current" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'in_progress')">
+                                        <span class="status-dot dot-in_progress"></span> In Progress
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'pending')">
+                                        <span class="status-dot dot-pending"></span> Pending
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'done')">
+                                        <span class="status-dot dot-done"></span> Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="task-meta">
                             {% if task.category %}
                             <span class="task-category">
@@ -433,12 +560,32 @@
                     {% for task in tasks_by_status.pending %}
                     <div class="task-card status-pending"
                          data-entry-id="{{ task.entry_id }}"
+                         data-status="pending"
                          draggable="true"
                          ondragstart="handleDragStart(event)"
                          ondragend="handleDragEnd(event)">
-                        <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
-                            <span class="task-title">{{ task.title }}</span>
-                        </a>
+                        <div class="task-header">
+                            <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
+                                <span class="task-title">{{ task.title }}</span>
+                            </a>
+                            <div class="task-status-selector">
+                                <button class="task-status-btn status-pending" onclick="toggleStatusDropdown(event, '{{ task.entry_id }}')" title="Change status"></button>
+                                <div class="task-status-dropdown" id="status-dropdown-{{ task.entry_id }}">
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'blocked')">
+                                        <span class="status-dot dot-blocked"></span> Blocked
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'in_progress')">
+                                        <span class="status-dot dot-in_progress"></span> In Progress
+                                    </button>
+                                    <button class="task-status-option current" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'pending')">
+                                        <span class="status-dot dot-pending"></span> Pending
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'done')">
+                                        <span class="status-dot dot-done"></span> Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="task-meta">
                             {% if task.category %}
                             <span class="task-category">
@@ -474,12 +621,32 @@
                     {% for task in tasks_by_status.done %}
                     <div class="task-card status-done"
                          data-entry-id="{{ task.entry_id }}"
+                         data-status="done"
                          draggable="true"
                          ondragstart="handleDragStart(event)"
                          ondragend="handleDragEnd(event)">
-                        <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
-                            <span class="task-title">{{ task.title }}</span>
-                        </a>
+                        <div class="task-header">
+                            <a href="{{ url_for('library.view_entry', entry_id=task.entry_id) }}" class="task-link">
+                                <span class="task-title">{{ task.title }}</span>
+                            </a>
+                            <div class="task-status-selector">
+                                <button class="task-status-btn status-done" onclick="toggleStatusDropdown(event, '{{ task.entry_id }}')" title="Change status"></button>
+                                <div class="task-status-dropdown" id="status-dropdown-{{ task.entry_id }}">
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'blocked')">
+                                        <span class="status-dot dot-blocked"></span> Blocked
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'in_progress')">
+                                        <span class="status-dot dot-in_progress"></span> In Progress
+                                    </button>
+                                    <button class="task-status-option" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'pending')">
+                                        <span class="status-dot dot-pending"></span> Pending
+                                    </button>
+                                    <button class="task-status-option current" onclick="changeTaskStatus(event, '{{ task.entry_id }}', 'done')">
+                                        <span class="status-dot dot-done"></span> Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="task-meta">
                             {% if task.category %}
                             <span class="task-category">
@@ -625,6 +792,112 @@
             'done': 'Done'
         };
         return labels[status] || status;
+    }
+
+    // Status dropdown functions
+    function toggleStatusDropdown(event, entryId) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        // Close all other dropdowns
+        document.querySelectorAll('.task-status-dropdown.open').forEach(d => {
+            if (d.id !== `status-dropdown-${entryId}`) {
+                d.classList.remove('open');
+            }
+        });
+
+        const dropdown = document.getElementById(`status-dropdown-${entryId}`);
+        dropdown.classList.toggle('open');
+    }
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.task-status-selector')) {
+            document.querySelectorAll('.task-status-dropdown.open').forEach(d => {
+                d.classList.remove('open');
+            });
+        }
+    });
+
+    async function changeTaskStatus(event, entryId, newStatus) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        // Close dropdown
+        document.querySelectorAll('.task-status-dropdown.open').forEach(d => {
+            d.classList.remove('open');
+        });
+
+        const card = document.querySelector(`.task-card[data-entry-id="${entryId}"]`);
+        if (!card) return;
+
+        const oldStatus = card.dataset.status;
+        if (oldStatus === newStatus) return;
+
+        // Optimistically move the card
+        const targetColumn = document.querySelector(`.column-body[data-status="${newStatus}"]`);
+        const emptyState = targetColumn.querySelector('.column-empty');
+        if (emptyState) {
+            emptyState.remove();
+        }
+        targetColumn.appendChild(card);
+
+        // Update card data and styling
+        card.dataset.status = newStatus;
+        card.className = card.className.replace(/status-\w+/g, '');
+        card.classList.add('task-card', `status-${newStatus}`);
+
+        // Update the status button
+        const statusBtn = card.querySelector('.task-status-btn');
+        statusBtn.className = `task-status-btn status-${newStatus}`;
+
+        // Update current marker in dropdown
+        const dropdown = card.querySelector('.task-status-dropdown');
+        dropdown.querySelectorAll('.task-status-option').forEach(opt => {
+            opt.classList.remove('current');
+            if (opt.textContent.toLowerCase().includes(newStatus.replace('_', ' '))) {
+                opt.classList.add('current');
+            }
+        });
+
+        // Check if old column is now empty
+        const oldColumn = document.querySelector(`.column-body[data-status="${oldStatus}"]`);
+        if (oldColumn && oldColumn.querySelectorAll('.task-card').length === 0) {
+            const statusLabels = {
+                'blocked': 'No blocked tasks',
+                'in_progress': 'No tasks in progress',
+                'pending': 'No pending tasks',
+                'done': 'No completed tasks'
+            };
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'column-empty';
+            emptyDiv.textContent = statusLabels[oldStatus];
+            oldColumn.appendChild(emptyDiv);
+        }
+
+        // Update counts
+        updateColumnCounts();
+
+        // Send update to server
+        try {
+            const response = await fetch(`/library/api/task/${entryId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess(`Status changed to "${formatStatus(newStatus)}"`);
+            } else {
+                showError(data.error || 'Failed to update status');
+                window.location.reload();
+            }
+        } catch (error) {
+            showError(error.message);
+            window.location.reload();
+        }
     }
 </script>
 {% endblock %}

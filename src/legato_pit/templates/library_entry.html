@@ -194,6 +194,127 @@
         text-transform: none;
     }
 
+    /* Status selector (similar to category) */
+    .status-selector {
+        position: relative;
+        display: inline-block;
+    }
+
+    .status-badge {
+        cursor: pointer;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: white;
+        border: none;
+        transition: filter 0.2s;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .status-badge:hover {
+        filter: brightness(1.1);
+    }
+
+    .status-badge.status-blocked { background: var(--danger-color, #dc3545); }
+    .status-badge.status-in_progress { background: var(--warning-color, #f59e0b); }
+    .status-badge.status-pending { background: var(--accent-color); }
+    .status-badge.status-done { background: var(--success-color, #22c55e); }
+
+    .status-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 0.25rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 100;
+        display: none;
+        min-width: 160px;
+    }
+
+    .status-dropdown.open {
+        display: block;
+    }
+
+    .status-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.875rem;
+    }
+
+    .status-option:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .status-option.current {
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+
+    .status-option .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .status-dot.dot-blocked { background: var(--danger-color, #dc3545); }
+    .status-dot.dot-in_progress { background: var(--warning-color, #f59e0b); }
+    .status-dot.dot-pending { background: var(--accent-color); }
+    .status-dot.dot-done { background: var(--success-color, #22c55e); }
+
+    /* Add status button for non-task notes */
+    .add-status-btn {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border: 1px dashed var(--border-color);
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .add-status-btn:hover {
+        background: var(--accent-color);
+        color: white;
+        border-color: var(--accent-color);
+        border-style: solid;
+    }
+
+    .add-status-btn svg {
+        width: 12px;
+        height: 12px;
+    }
+
+    /* Remove status link */
+    .status-remove-option {
+        border-top: 1px solid var(--border-color);
+        color: var(--danger-color, #dc3545) !important;
+    }
+
+    .status-remove-option:hover {
+        background: rgba(220, 53, 69, 0.1);
+    }
+
     .btn-danger {
         background: var(--danger-color, #dc3545);
         color: white;
@@ -413,6 +534,47 @@
                             </div>
                         </div>
                         {% endif %}
+                        {% if entry.task_status %}
+                        <div class="status-selector">
+                            <button class="status-badge status-{{ entry.task_status }}" onclick="toggleStatusDropdown(event)">
+                                <span class="status-dot dot-{{ entry.task_status }}"></span>
+                                {{ entry.task_status | replace('_', ' ') | title }}
+                            </button>
+                            <div class="status-dropdown" id="statusDropdown">
+                                <button class="status-option {% if entry.task_status == 'blocked' %}current{% endif %}" onclick="changeStatus('blocked')">
+                                    <span class="status-dot dot-blocked"></span> Blocked
+                                </button>
+                                <button class="status-option {% if entry.task_status == 'in_progress' %}current{% endif %}" onclick="changeStatus('in_progress')">
+                                    <span class="status-dot dot-in_progress"></span> In Progress
+                                </button>
+                                <button class="status-option {% if entry.task_status == 'pending' %}current{% endif %}" onclick="changeStatus('pending')">
+                                    <span class="status-dot dot-pending"></span> Pending
+                                </button>
+                                <button class="status-option {% if entry.task_status == 'done' %}current{% endif %}" onclick="changeStatus('done')">
+                                    <span class="status-dot dot-done"></span> Done
+                                </button>
+                                <button class="status-option status-remove-option" onclick="removeStatus()">
+                                    Remove from Tasks
+                                </button>
+                            </div>
+                        </div>
+                        {% else %}
+                        <button class="add-status-btn" onclick="showAddStatusDropdown(event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                            Add to Tasks
+                        </button>
+                        <div class="status-dropdown" id="addStatusDropdown">
+                            <button class="status-option" onclick="addStatus('pending')">
+                                <span class="status-dot dot-pending"></span> Pending
+                            </button>
+                            <button class="status-option" onclick="addStatus('in_progress')">
+                                <span class="status-dot dot-in_progress"></span> In Progress
+                            </button>
+                            <button class="status-option" onclick="addStatus('blocked')">
+                                <span class="status-dot dot-blocked"></span> Blocked
+                            </button>
+                        </div>
+                        {% endif %}
                         <span class="entry-date">{{ entry.created_at[:10] }}</span>
                     </div>
                 </header>
@@ -446,6 +608,14 @@
                         {% if entry.file_path %}
                         <dt>File Path</dt>
                         <dd><code>{{ entry.file_path }}</code></dd>
+                        {% endif %}
+                        {% if entry.task_status %}
+                        <dt>Task Status</dt>
+                        <dd><span class="status-dot dot-{{ entry.task_status }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:0.25rem;vertical-align:middle;"></span>{{ entry.task_status | replace('_', ' ') | title }}</dd>
+                        {% endif %}
+                        {% if entry.due_date %}
+                        <dt>Due Date</dt>
+                        <dd>{{ entry.due_date }}</dd>
                         {% endif %}
                         <dt>Created</dt>
                         <dd>{{ entry.created_at }}</dd>
@@ -760,6 +930,130 @@
             confirmBtn.disabled = false;
             confirmBtn.querySelector('span').textContent = 'Click again to confirm delete';
         }
+    }
+
+    // Status dropdown functions
+    function toggleStatusDropdown(event) {
+        event.stopPropagation();
+        const dropdown = document.getElementById('statusDropdown');
+        dropdown.classList.toggle('open');
+        // Close add status dropdown if open
+        const addDropdown = document.getElementById('addStatusDropdown');
+        if (addDropdown) addDropdown.classList.remove('open');
+    }
+
+    function showAddStatusDropdown(event) {
+        event.stopPropagation();
+        const dropdown = document.getElementById('addStatusDropdown');
+        dropdown.classList.toggle('open');
+    }
+
+    // Close all status dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.status-selector') && !e.target.closest('.add-status-btn')) {
+            const statusDropdown = document.getElementById('statusDropdown');
+            const addDropdown = document.getElementById('addStatusDropdown');
+            if (statusDropdown) statusDropdown.classList.remove('open');
+            if (addDropdown) addDropdown.classList.remove('open');
+        }
+    });
+
+    async function changeStatus(newStatus) {
+        const dropdown = document.getElementById('statusDropdown');
+        dropdown.classList.remove('open');
+
+        const badge = document.querySelector('.status-badge');
+        const originalText = badge.textContent.trim();
+        badge.textContent = 'Updating...';
+
+        try {
+            const response = await fetch(`/library/api/task/${entryId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess(`Status changed to "${formatStatusLabel(newStatus)}"`);
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                showError(data.error || 'Failed to update status');
+                badge.textContent = originalText;
+            }
+        } catch (error) {
+            showError(error.message);
+            badge.textContent = originalText;
+        }
+    }
+
+    async function addStatus(status) {
+        const dropdown = document.getElementById('addStatusDropdown');
+        dropdown.classList.remove('open');
+
+        const btn = document.querySelector('.add-status-btn');
+        btn.textContent = 'Adding...';
+
+        try {
+            const response = await fetch(`/library/api/task/${entryId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: status })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess(`Added to tasks as "${formatStatusLabel(status)}"`);
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                showError(data.error || 'Failed to add status');
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Add to Tasks';
+            }
+        } catch (error) {
+            showError(error.message);
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Add to Tasks';
+        }
+    }
+
+    async function removeStatus() {
+        const dropdown = document.getElementById('statusDropdown');
+        dropdown.classList.remove('open');
+
+        const badge = document.querySelector('.status-badge');
+        badge.textContent = 'Removing...';
+
+        try {
+            const response = await fetch(`/library/api/task/${entryId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: null })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess('Removed from tasks');
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                showError(data.error || 'Failed to remove status');
+                window.location.reload();
+            }
+        } catch (error) {
+            showError(error.message);
+            window.location.reload();
+        }
+    }
+
+    function formatStatusLabel(status) {
+        const labels = {
+            'blocked': 'Blocked',
+            'in_progress': 'In Progress',
+            'pending': 'Pending',
+            'done': 'Done'
+        };
+        return labels[status] || status;
     }
 </script>
 {% endblock %}
