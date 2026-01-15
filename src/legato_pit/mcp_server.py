@@ -234,7 +234,7 @@ TOOLS = [
     },
     {
         "name": "create_note",
-        "description": "Create a new note in the Legato library. The note will be saved to GitHub and indexed for search.",
+        "description": "Create a new note in the Legato library. The note will be saved to GitHub and indexed for search. To create a task, include task_status (pending/in_progress/blocked/done) and optionally due_date.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -249,6 +249,15 @@ TOOLS = [
                 "category": {
                     "type": "string",
                     "description": "The category for the note (e.g., 'concept', 'epiphany', 'reflection', 'glimmer', 'reminder', 'worklog')"
+                },
+                "task_status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "blocked", "done"],
+                    "description": "Optional: Mark this note as a task with the given status. Tasks appear in the tasks view."
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Optional: Due date for tasks in ISO format (YYYY-MM-DD)"
                 }
             },
             "required": ["title", "content", "category"]
@@ -413,18 +422,18 @@ TOOLS = [
     },
     {
         "name": "update_task_status",
-        "description": "Update the task status of a note. Quick status flip for task tracking.",
+        "description": "Update or set the task status of a note. Use this to mark any existing note as a task, or to change the status of an existing task. Tasks appear in the dedicated tasks view.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entry_id": {
                     "type": "string",
-                    "description": "The entry ID of the note to update"
+                    "description": "The entry ID of the note to update (e.g., 'kb-abc12345')"
                 },
                 "status": {
                     "type": "string",
                     "enum": ["pending", "in_progress", "done", "blocked"],
-                    "description": "New task status"
+                    "description": "Task status: pending (not started), in_progress (active), blocked (waiting), done (completed)"
                 },
                 "due_date": {
                     "type": "string",
@@ -685,11 +694,18 @@ def tool_create_note(args: dict) -> dict:
     title = args.get('title', '').strip()
     content = args.get('content', '').strip()
     category = args.get('category', '').lower().strip()
+    task_status = args.get('task_status', '').strip() if args.get('task_status') else None
+    due_date = args.get('due_date', '').strip() if args.get('due_date') else None
 
     if not title:
         return {"error": "Title is required"}
     if not category:
         return {"error": "Category is required"}
+
+    # Validate task_status if provided
+    valid_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+    if task_status and task_status not in valid_statuses:
+        return {"error": f"Invalid task_status. Must be one of: {', '.join(sorted(valid_statuses))}"}
 
     # Validate category
     db = get_db()
@@ -716,19 +732,29 @@ def tool_create_note(args: dict) -> dict:
     folder = category_folders.get(category, f'{category}s')
     file_path = f'{folder}/{date_str}-{slug}.md'
 
-    # Build frontmatter
+    # Build frontmatter - include task fields if provided
     timestamp = datetime.utcnow().isoformat() + 'Z'
-    frontmatter = f"""---
-id: library.{category}.{slug}
-title: "{title}"
-category: {category}
-created: {timestamp}
-source: mcp-claude
-domain_tags: []
-key_phrases: []
----
+    frontmatter_lines = [
+        '---',
+        f'id: library.{category}.{slug}',
+        f'title: "{title}"',
+        f'category: {category}',
+        f'created: {timestamp}',
+        'source: mcp-claude',
+        'domain_tags: []',
+        'key_phrases: []',
+    ]
 
-"""
+    # Add task fields to frontmatter if this is a task
+    if task_status:
+        frontmatter_lines.append(f'task_status: {task_status}')
+    if due_date:
+        frontmatter_lines.append(f'due_date: {due_date}')
+
+    frontmatter_lines.append('---')
+    frontmatter_lines.append('')
+    frontmatter = '\n'.join(frontmatter_lines)
+
     full_content = frontmatter + content
 
     # Create file in GitHub
@@ -743,20 +769,30 @@ key_phrases: []
         token=token
     )
 
-    # Insert into local database
-    db.execute(
-        """
-        INSERT INTO knowledge_entries
-        (entry_id, title, category, content, file_path, source_transcript, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'mcp-claude', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """,
-        (entry_id, title, category, content, file_path)
-    )
+    # Insert into local database with task fields
+    if task_status:
+        db.execute(
+            """
+            INSERT INTO knowledge_entries
+            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (entry_id, title, category, content, file_path, task_status, due_date)
+        )
+    else:
+        db.execute(
+            """
+            INSERT INTO knowledge_entries
+            (entry_id, title, category, content, file_path, source_transcript, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (entry_id, title, category, content, file_path)
+        )
     db.commit()
 
-    logger.info(f"MCP created note: {entry_id} - {title}")
+    logger.info(f"MCP created note: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
 
-    return {
+    result = {
         "success": True,
         "entry_id": entry_id,
         "title": title,
@@ -764,6 +800,14 @@ key_phrases: []
         "file_path": file_path,
         "available_categories": sorted(valid_categories)
     }
+
+    # Include task fields in response if set
+    if task_status:
+        result["task_status"] = task_status
+    if due_date:
+        result["due_date"] = due_date
+
+    return result
 
 
 def tool_list_categories(args: dict) -> dict:

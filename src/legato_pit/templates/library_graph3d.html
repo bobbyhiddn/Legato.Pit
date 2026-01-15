@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Knowledge Graph - {{ app_name }}{% endblock %}
+{% block title %}3D Knowledge Graph - {{ app_name }}{% endblock %}
 
 {% block head %}
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1"></script>
 <style>
     .graph-container {
         display: flex;
@@ -64,39 +64,9 @@
         overflow: hidden;
     }
 
-    #graph-svg {
+    #graph-container {
         width: 100%;
         height: 100%;
-        cursor: grab;
-    }
-
-    #graph-svg:active {
-        cursor: grabbing;
-    }
-
-    .node {
-        cursor: pointer;
-    }
-
-    .node:hover circle {
-        stroke-width: 3px;
-        stroke: white;
-    }
-
-    .node text {
-        font-size: 9px;
-        fill: var(--text-secondary);
-        pointer-events: none;
-        text-anchor: middle;
-        dominant-baseline: middle;
-    }
-
-    .link {
-        stroke-opacity: 0.4;
-    }
-
-    .link:hover {
-        stroke-opacity: 1;
     }
 
     /* Legend */
@@ -109,6 +79,7 @@
         border-radius: 8px;
         padding: 0.75rem;
         max-width: 200px;
+        z-index: 100;
     }
 
     .legend-title {
@@ -125,6 +96,9 @@
         gap: 0.5rem;
         font-size: 0.875rem;
         margin-bottom: 0.25rem;
+        padding: 0.25rem;
+        cursor: pointer;
+        border-radius: 4px;
     }
 
     .legend-dot {
@@ -148,12 +122,10 @@
 
     .legend-item:hover {
         background: var(--bg-tertiary);
-        border-radius: 4px;
     }
 
     .legend-item.active {
         background: var(--accent-color);
-        border-radius: 4px;
         color: white;
     }
 
@@ -173,7 +145,7 @@
         opacity: 0;
         transition: opacity 0.2s;
         max-width: 250px;
-        z-index: 100;
+        z-index: 200;
     }
 
     .graph-tooltip.visible {
@@ -236,6 +208,27 @@
         font-size: 1rem;
         color: var(--text-secondary);
     }
+
+    /* Controls hint */
+    .controls-hint {
+        position: absolute;
+        bottom: 1rem;
+        left: 1rem;
+        background: rgba(22, 27, 34, 0.9);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        z-index: 100;
+    }
+
+    .controls-hint kbd {
+        background: var(--bg-tertiary);
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+        font-family: monospace;
+    }
 </style>
 {% endblock %}
 
@@ -246,7 +239,7 @@
     </a>
 
     <div class="graph-header">
-        <h1>Knowledge Graph</h1>
+        <h1>3D Knowledge Graph</h1>
         <div class="graph-controls">
             <div class="control-group">
                 <label>Similarity Threshold:</label>
@@ -255,10 +248,9 @@
             </div>
             <div class="control-group">
                 <label>Node Size:</label>
-                <input type="range" id="nodeSizeSlider" min="4" max="16" step="1" value="4">
+                <input type="range" id="nodeSizeSlider" min="2" max="12" step="1" value="4">
             </div>
-            <button class="btn btn-secondary btn-sm" onclick="resetZoom()">Reset View</button>
-            <a href="{{ url_for('library.graph3d_view') }}" class="btn btn-secondary btn-sm">3D View</a>
+            <a href="{{ url_for('library.graph_view') }}" class="btn btn-secondary btn-sm">2D View</a>
         </div>
     </div>
 
@@ -266,9 +258,12 @@
         <div class="loading-overlay" id="loadingOverlay">
             <span class="loading-text">Loading graph data...</span>
         </div>
-        <svg id="graph-svg"></svg>
+        <div id="graph-container"></div>
         <div class="graph-legend" id="graphLegend"></div>
         <div class="graph-tooltip" id="graphTooltip"></div>
+        <div class="controls-hint">
+            <kbd>Left-drag</kbd> rotate | <kbd>Right-drag</kbd> pan | <kbd>Scroll</kbd> zoom | <kbd>Click</kbd> node to view
+        </div>
     </div>
 
     <div class="graph-stats">
@@ -283,13 +278,10 @@
 <script>
     // Graph state
     let graphData = { nodes: [], edges: [], categories: [] };
-    let simulation = null;
-    let svg = null;
-    let g = null;
-    let zoom = null;
+    let graph = null;
     let currentThreshold = 0.65;
     let currentNodeSize = 4;
-    let activeCategory = null;  // For filtering
+    let activeCategory = null;
 
     // Initialize
     document.addEventListener('DOMContentLoaded', () => {
@@ -308,33 +300,42 @@
 
         document.getElementById('nodeSizeSlider').addEventListener('input', (e) => {
             currentNodeSize = parseInt(e.target.value);
-            updateNodeSizes();
+            if (graph) {
+                graph.nodeVal(currentNodeSize);
+            }
         });
     });
 
     function initGraph() {
-        const wrapper = document.getElementById('graphWrapper');
-        const width = wrapper.clientWidth;
-        const height = wrapper.clientHeight;
+        const container = document.getElementById('graph-container');
 
-        svg = d3.select('#graph-svg')
-            .attr('viewBox', [0, 0, width, height]);
-
-        // Add zoom behavior
-        zoom = d3.zoom()
-            .scaleExtent([0.2, 4])
-            .on('zoom', (event) => {
-                g.attr('transform', event.transform);
+        graph = ForceGraph3D()(container)
+            .backgroundColor('#0d1117')
+            .nodeId('id')
+            .nodeLabel(node => `${node.title}\n(${node.category})`)
+            .nodeColor(node => node.color)
+            .nodeVal(currentNodeSize)
+            .nodeOpacity(0.9)
+            .linkSource('source')
+            .linkTarget('target')
+            .linkWidth(link => 0.5 + link.weight * 2)
+            .linkOpacity(0.3)
+            .linkColor(() => '#4a5568')
+            .onNodeClick(node => {
+                window.location.href = `/library/entry/${node.id}`;
+            })
+            .onNodeHover(node => {
+                container.style.cursor = node ? 'pointer' : 'default';
+                if (node) {
+                    showTooltip(node);
+                } else {
+                    hideTooltip();
+                }
             });
 
-        svg.call(zoom);
-
-        // Container for graph elements
-        g = svg.append('g');
-
-        // Create layer groups
-        g.append('g').attr('class', 'links-layer');
-        g.append('g').attr('class', 'nodes-layer');
+        // Configure forces for better layout
+        graph.d3Force('charge').strength(-80);
+        graph.d3Force('link').distance(link => 60 * (1 - link.weight));
     }
 
     async function loadGraphData() {
@@ -369,15 +370,14 @@
         const legend = document.getElementById('graphLegend');
         legend.innerHTML = `
             <div class="legend-title">Categories <span style="font-size:0.65rem;font-weight:normal;opacity:0.7">(click to filter)</span></div>
-            <div class="legend-item legend-all ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)" style="cursor:pointer">
+            <div class="legend-item ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)">
                 <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
                 <span class="legend-label">All</span>
                 <span class="legend-count">${graphData.nodes.length}</span>
             </div>
             ${graphData.categories.map(cat => `
                 <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
-                     onclick="filterByCategory('${cat.name}')"
-                     style="cursor:pointer">
+                     onclick="filterByCategory('${cat.name}')">
                     <span class="legend-dot" style="background: ${cat.color}"></span>
                     <span class="legend-label">${cat.name}</span>
                     <span class="legend-count">${cat.count}</span>
@@ -393,19 +393,6 @@
     }
 
     function renderGraph() {
-        const wrapper = document.getElementById('graphWrapper');
-        const width = wrapper.clientWidth;
-        const height = wrapper.clientHeight;
-
-        // Stop existing simulation
-        if (simulation) {
-            simulation.stop();
-        }
-
-        // Clear existing elements
-        g.select('.links-layer').selectAll('*').remove();
-        g.select('.nodes-layer').selectAll('*').remove();
-
         // Filter nodes by active category
         let filteredNodes = graphData.nodes;
         if (activeCategory) {
@@ -415,149 +402,27 @@
         // Create node ID set for filtering edges
         const nodeIds = new Set(filteredNodes.map(n => n.id));
 
-        // Process edges - only include edges between visible nodes
-        const links = graphData.edges
-            .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
-            .map(e => ({
-                source: e.source,
-                target: e.target,
-                weight: e.weight
-            }));
+        // Filter edges to only include those between visible nodes
+        const filteredEdges = graphData.edges.filter(e =>
+            nodeIds.has(e.source) && nodeIds.has(e.target)
+        );
 
-        // Create simulation with category-based clustering
-        simulation = d3.forceSimulation(filteredNodes)
-            .force('link', d3.forceLink(links)
-                .id(d => d.id)
-                .distance(d => 80 * (1 - d.weight))  // Closer for higher similarity
-                .strength(d => d.weight * 0.6))
-            .force('charge', d3.forceManyBody()
-                .strength(-120)
-                .distanceMax(250))
-            .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(currentNodeSize + 3))
-            .force('x', d3.forceX(width / 2).strength(0.03))
-            .force('y', d3.forceY(height / 2).strength(0.03));
-
-        // Add category clustering force (only when showing all categories)
-        if (!activeCategory) {
-            const categoryPositions = {};
-            const categoryCount = graphData.categories.length;
-            graphData.categories.forEach((cat, i) => {
-                const angle = (i / categoryCount) * 2 * Math.PI;
-                categoryPositions[cat.name] = {
-                    x: width / 2 + Math.cos(angle) * 120,
-                    y: height / 2 + Math.sin(angle) * 120
-                };
-            });
-
-            simulation.force('category', (alpha) => {
-                filteredNodes.forEach(node => {
-                    const target = categoryPositions[node.category];
-                    if (target) {
-                        node.vx += (target.x - node.x) * alpha * 0.08;
-                        node.vy += (target.y - node.y) * alpha * 0.08;
-                    }
-                });
-            });
-        }
-
-        // Draw edges
-        const link = g.select('.links-layer')
-            .selectAll('line')
-            .data(links)
-            .join('line')
-            .attr('class', 'link')
-            .attr('stroke', '#4a5568')
-            .attr('stroke-width', d => 1 + d.weight * 2);
-
-        // Draw nodes
-        const node = g.select('.nodes-layer')
-            .selectAll('.node')
-            .data(filteredNodes)
-            .join('g')
-            .attr('class', 'node')
-            .call(drag(simulation))
-            .on('click', (event, d) => {
-                window.location.href = `/library/entry/${d.id}`;
-            })
-            .on('mouseenter', (event, d) => {
-                showTooltip(event, d);
-            })
-            .on('mouseleave', () => {
-                hideTooltip();
-            });
-
-        node.append('circle')
-            .attr('r', currentNodeSize)
-            .attr('fill', d => d.color)
-            .attr('stroke', d => d3.color(d.color).darker(0.5))
-            .attr('stroke-width', 1.5);
-
-        // Add labels - show immediately with slight transparency, full opacity on hover
-        node.append('text')
-            .attr('dy', currentNodeSize + 10)
-            .text(d => d.title.length > 25 ? d.title.slice(0, 23) + '...' : d.title)
-            .style('opacity', 0.8);
-
-        // Update positions on tick
-        simulation.on('tick', () => {
-            link
-                .attr('x1', d => d.source.x)
-                .attr('y1', d => d.source.y)
-                .attr('x2', d => d.target.x)
-                .attr('y2', d => d.target.y);
-
-            node.attr('transform', d => `translate(${d.x}, ${d.y})`);
+        // Update the graph
+        graph.graphData({
+            nodes: filteredNodes,
+            links: filteredEdges
         });
     }
 
-    function updateNodeSizes() {
-        g.select('.nodes-layer')
-            .selectAll('.node circle')
-            .attr('r', currentNodeSize);
-
-        g.select('.nodes-layer')
-            .selectAll('.node text')
-            .attr('dy', currentNodeSize + 12);
-
-        if (simulation) {
-            simulation.force('collision', d3.forceCollide().radius(currentNodeSize + 5));
-            simulation.alpha(0.3).restart();
-        }
-    }
-
-    function drag(simulation) {
-        function dragstarted(event) {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            event.subject.fx = event.subject.x;
-            event.subject.fy = event.subject.y;
-        }
-
-        function dragged(event) {
-            event.subject.fx = event.x;
-            event.subject.fy = event.y;
-        }
-
-        function dragended(event) {
-            if (!event.active) simulation.alphaTarget(0);
-            event.subject.fx = null;
-            event.subject.fy = null;
-        }
-
-        return d3.drag()
-            .on('start', dragstarted)
-            .on('drag', dragged)
-            .on('end', dragended);
-    }
-
-    function showTooltip(event, d) {
+    function showTooltip(node) {
         const tooltip = document.getElementById('graphTooltip');
         tooltip.innerHTML = `
-            <div class="tooltip-title">${d.title}</div>
-            <div class="tooltip-category" style="color: ${d.color}">${d.category}</div>
+            <div class="tooltip-title">${node.title}</div>
+            <div class="tooltip-category" style="color: ${node.color}">${node.category}</div>
         `;
-        tooltip.style.left = (event.pageX + 10) + 'px';
-        tooltip.style.top = (event.pageY - 30) + 'px';
+        // Position near top-left since 3D makes mouse position tricky
+        tooltip.style.left = '1rem';
+        tooltip.style.top = '4rem';
         tooltip.classList.add('visible');
     }
 
@@ -565,24 +430,12 @@
         document.getElementById('graphTooltip').classList.remove('visible');
     }
 
-    function resetZoom() {
-        svg.transition()
-            .duration(750)
-            .call(zoom.transform, d3.zoomIdentity);
-    }
-
     // Handle window resize
     window.addEventListener('resize', () => {
-        if (graphData.nodes.length > 0) {
-            const wrapper = document.getElementById('graphWrapper');
-            const width = wrapper.clientWidth;
-            const height = wrapper.clientHeight;
-            svg.attr('viewBox', [0, 0, width, height]);
-
-            if (simulation) {
-                simulation.force('center', d3.forceCenter(width / 2, height / 2));
-                simulation.alpha(0.3).restart();
-            }
+        if (graph) {
+            const container = document.getElementById('graph-container');
+            graph.width(container.clientWidth);
+            graph.height(container.clientHeight);
         }
     });
 </script>
