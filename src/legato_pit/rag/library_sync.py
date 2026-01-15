@@ -254,6 +254,16 @@ class LibrarySync:
         # Extract source transcript for tracking
         source_transcript = frontmatter.get('source_transcript')
 
+        # Extract task fields from frontmatter
+        task_status = frontmatter.get('task_status')
+        due_date = frontmatter.get('due_date')
+
+        # Validate task_status if present
+        valid_task_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+        if task_status and task_status not in valid_task_statuses:
+            logger.warning(f"Invalid task_status '{task_status}' in {path}, ignoring")
+            task_status = None
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -330,16 +340,18 @@ class LibrarySync:
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                    task_status = ?, due_date = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, source_transcript, path)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date, path)
             )
             self.conn.commit()
-            logger.debug(f"Updated: {entry_id} - {title}")
+            logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
             return 'updated'
         else:
             # Create new entry
@@ -348,15 +360,17 @@ class LibrarySync:
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
             return 'created'
 
     def sync_from_filesystem(self, library_path: str) -> Dict:
@@ -438,6 +452,16 @@ class LibrarySync:
         # Extract source transcript for tracking
         source_transcript = frontmatter.get('source_transcript')
 
+        # Extract task fields from frontmatter
+        task_status = frontmatter.get('task_status')
+        due_date = frontmatter.get('due_date')
+
+        # Validate task_status if present
+        valid_task_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+        if task_status and task_status not in valid_task_statuses:
+            logger.warning(f"Invalid task_status '{task_status}' in {relative_path}, ignoring")
+            task_status = None
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -502,16 +526,18 @@ class LibrarySync:
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                    task_status = ?, due_date = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, source_transcript, relative_path)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date, relative_path)
             )
             self.conn.commit()
-            logger.debug(f"Updated: {entry_id} - {title}")
+            logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
             return 'updated'
         else:
             self.conn.execute(
@@ -519,15 +545,17 @@ class LibrarySync:
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, relative_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript)
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else ""))
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
             return 'created'
 
     def _log_sync(self, source: str, branch: str, stats: Dict):

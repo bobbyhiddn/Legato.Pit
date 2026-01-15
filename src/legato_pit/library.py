@@ -1764,6 +1764,19 @@ def graph_view():
     )
 
 
+@library_bp.route('/graph3d')
+@login_required
+def graph3d_view():
+    """3D graph visualization of library entries by embedding similarity."""
+    # Get categories for the legend
+    categories = get_categories_with_counts()
+
+    return render_template(
+        'library_graph3d.html',
+        categories=categories,
+    )
+
+
 @library_bp.route('/api/graph')
 @login_required
 def api_graph():
