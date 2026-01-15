@@ -109,6 +109,38 @@
         border-radius: 8px;
         padding: 0.75rem;
         max-width: 200px;
+        z-index: 100;
+    }
+
+    .graph-legend.collapsed {
+        max-width: auto;
+        padding: 0.5rem 0.75rem;
+    }
+
+    .graph-legend.collapsed .legend-items {
+        display: none;
+    }
+
+    .legend-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        gap: 0.5rem;
+    }
+
+    .legend-toggle {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        font-size: 0.9rem;
+        line-height: 1;
+    }
+
+    .legend-toggle:hover {
+        color: var(--text-primary);
     }
 
     .legend-title {
@@ -116,7 +148,10 @@
         font-weight: 600;
         text-transform: uppercase;
         color: var(--text-secondary);
-        margin-bottom: 0.5rem;
+    }
+
+    .legend-items {
+        margin-top: 0.5rem;
     }
 
     .legend-item {
@@ -367,23 +402,35 @@
 
     function renderLegend() {
         const legend = document.getElementById('graphLegend');
+        const isCollapsed = legend.classList.contains('collapsed');
         legend.innerHTML = `
-            <div class="legend-title">Categories <span style="font-size:0.65rem;font-weight:normal;opacity:0.7">(click to filter)</span></div>
-            <div class="legend-item legend-all ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)" style="cursor:pointer">
-                <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
-                <span class="legend-label">All</span>
-                <span class="legend-count">${graphData.nodes.length}</span>
+            <div class="legend-header" onclick="toggleLegend()">
+                <div class="legend-title">Categories</div>
+                <button class="legend-toggle" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▶' : '▼'}</button>
             </div>
-            ${graphData.categories.map(cat => `
-                <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
-                     onclick="filterByCategory('${cat.name}')"
-                     style="cursor:pointer">
-                    <span class="legend-dot" style="background: ${cat.color}"></span>
-                    <span class="legend-label">${cat.name}</span>
-                    <span class="legend-count">${cat.count}</span>
+            <div class="legend-items">
+                <div class="legend-item legend-all ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)" style="cursor:pointer">
+                    <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
+                    <span class="legend-label">All</span>
+                    <span class="legend-count">${graphData.nodes.length}</span>
                 </div>
-            `).join('')}
+                ${graphData.categories.map(cat => `
+                    <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
+                         onclick="filterByCategory('${cat.name}')"
+                         style="cursor:pointer">
+                        <span class="legend-dot" style="background: ${cat.color}"></span>
+                        <span class="legend-label">${cat.name}</span>
+                        <span class="legend-count">${cat.count}</span>
+                    </div>
+                `).join('')}
+            </div>
         `;
+    }
+
+    function toggleLegend() {
+        const legend = document.getElementById('graphLegend');
+        legend.classList.toggle('collapsed');
+        renderLegend();
     }
 
     function filterByCategory(category) {

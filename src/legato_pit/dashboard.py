@@ -428,6 +428,17 @@ def index():
     )
 
 
+@dashboard_bp.route('/graph3d')
+@login_required
+def graph3d():
+    """3D graph visualization with force/dendrite/radial layouts."""
+    return render_template(
+        'dashboard_graph3d.html',
+        title='3D Knowledge Graph',
+        stats=get_stats()
+    )
+
+
 @dashboard_bp.route('/api/status')
 @login_required
 def api_status():

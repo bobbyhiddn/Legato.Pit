@@ -120,6 +120,38 @@
         padding: 0.5rem;
         max-width: 150px;
         font-size: 0.75rem;
+        z-index: 100;
+    }
+
+    .graph-legend.collapsed {
+        max-width: auto;
+        padding: 0.25rem 0.5rem;
+    }
+
+    .graph-legend.collapsed .legend-items {
+        display: none;
+    }
+
+    .legend-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        gap: 0.5rem;
+    }
+
+    .legend-toggle {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        font-size: 0.8rem;
+        line-height: 1;
+    }
+
+    .legend-toggle:hover {
+        color: var(--text-primary);
     }
 
     .legend-title {
@@ -355,7 +387,10 @@
     <section class="card graph-card">
         <h2>
             Knowledge Graph
-            <button class="btn btn-small btn-secondary" onclick="resetZoom()">Reset View</button>
+            <div style="display: flex; gap: 0.5rem;">
+                <a href="{{ url_for('dashboard.graph3d') }}" class="btn btn-small btn-secondary">3D View</a>
+                <button class="btn btn-small btn-secondary" onclick="resetZoom()">Reset View</button>
+            </div>
         </h2>
         <div class="graph-controls">
             <div class="control-group">
@@ -829,25 +864,35 @@ async function loadGraphData() {
 
 function renderLegend() {
     const legend = document.getElementById('graphLegend');
+    const isCollapsed = legend.classList.contains('collapsed');
     legend.innerHTML = `
-        <div class="legend-title" style="display: flex; justify-content: space-between; align-items: center;">
-            Categories
-            <button id="audioToggle" onclick="toggleAudio()" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Sound on (click to mute)">🔊</button>
+        <div class="legend-header" onclick="toggleLegend()">
+            <div class="legend-title">Categories</div>
+            <button class="legend-toggle" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▶' : '▼'}</button>
+            <button id="audioToggle" onclick="event.stopPropagation(); toggleAudio()" style="background:none;border:none;cursor:pointer;font-size:0.9rem;margin-left:auto;" title="Sound on (click to mute)">🔊</button>
         </div>
-        <div class="legend-item ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)">
-            <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
-            <span>All</span>
-            <span class="legend-count">${graphData.nodes.length}</span>
-        </div>
-        ${graphData.categories.map(cat => `
-            <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
-                 onclick="filterByCategory('${cat.name}')">
-                <span class="legend-dot" style="background: ${cat.color}"></span>
-                <span>${cat.name}</span>
-                <span class="legend-count">${cat.count}</span>
+        <div class="legend-items">
+            <div class="legend-item ${!activeCategory ? 'active' : ''}" onclick="filterByCategory(null)">
+                <span class="legend-dot" style="background: linear-gradient(135deg, #6366f1, #f59e0b, #ec4899)"></span>
+                <span>All</span>
+                <span class="legend-count">${graphData.nodes.length}</span>
             </div>
-        `).join('')}
+            ${graphData.categories.map(cat => `
+                <div class="legend-item ${activeCategory === cat.name ? 'active' : ''}"
+                     onclick="filterByCategory('${cat.name}')">
+                    <span class="legend-dot" style="background: ${cat.color}"></span>
+                    <span>${cat.name}</span>
+                    <span class="legend-count">${cat.count}</span>
+                </div>
+            `).join('')}
+        </div>
     `;
+}
+
+function toggleLegend() {
+    const legend = document.getElementById('graphLegend');
+    legend.classList.toggle('collapsed');
+    renderLegend();
 }
 
 function filterByCategory(category) {
