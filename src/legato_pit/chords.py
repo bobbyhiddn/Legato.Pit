@@ -366,3 +366,125 @@ def api_linked_notes(repo_name: str):
     except Exception as e:
         logger.error(f"Failed to get linked notes for {repo_name}: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@chords_bp.route('/api/repo/<path:repo_name>/incident', methods=['POST'])
+@login_required
+def api_create_incident(repo_name: str):
+    """Dispatch an incident to Conduct for an existing Chord repository.
+
+    This allows shooting new tasks at existing chords for Copilot to work.
+    The incident is dispatched to Conduct which creates the issue and assigns Copilot.
+
+    Request body:
+    {
+        "title": "Add feature X",
+        "description": "Detailed description of the incident",
+        "note_ids": ["kb-abc123"]  // Optional: link existing notes
+    }
+
+    Response:
+    {
+        "success": true,
+        "queue_id": "incident-abc123",
+        "dispatched": true
+    }
+    """
+    from flask import request
+    import os
+    import secrets
+
+    token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
+
+    if not token:
+        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+    conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    title = data.get('title', '').strip()
+    description = data.get('description', '').strip()
+    note_ids = data.get('note_ids', [])
+
+    if not title:
+        return jsonify({'error': 'title is required'}), 400
+
+    # Look up linked notes if provided
+    notes_section = ""
+    if note_ids:
+        db = get_legato_db()
+        notes = []
+        for nid in note_ids:
+            entry = db.execute(
+                "SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?",
+                (nid.strip(),)
+            ).fetchone()
+            if entry:
+                notes.append(dict(entry))
+
+        if notes:
+            notes_section = "\n### Linked Notes\n" + "\n".join(
+                [f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes]
+            )
+
+    # Build tasker body for Conduct
+    tasker_body = f"""## Incident: {title}
+
+{description}
+{notes_section}
+
+---
+*Incident dispatched via Legato Pit UI*
+"""
+
+    # Generate queue_id for tracking
+    queue_id = f"incident-{secrets.token_hex(6)}"
+
+    # Dispatch to Conduct with target_repo
+    payload = {
+        'event_type': 'spawn-agent',
+        'client_payload': {
+            'queue_id': queue_id,
+            'target_repo': repo_name,
+            'issue_title': title,
+            'tasker_body': tasker_body,
+        }
+    }
+
+    try:
+        response = requests.post(
+            f'https://api.github.com/repos/{org}/{conduct_repo}/dispatches',
+            json=payload,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+            timeout=15,
+        )
+
+        # 204 No Content = success for repository_dispatch
+        if response.status_code == 204:
+            logger.info(f"Dispatched incident to Conduct for {repo_name}: {queue_id}")
+
+            return jsonify({
+                'success': True,
+                'queue_id': queue_id,
+                'dispatched': True,
+                'message': f'Incident dispatched to Conduct. Copilot will create and work the issue.',
+            })
+        else:
+            logger.error(f"Dispatch failed: {response.status_code} - {response.text}")
+            return jsonify({
+                'error': f'Failed to dispatch incident: HTTP {response.status_code}',
+                'detail': response.text,
+            }), response.status_code
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to dispatch incident for {repo_name}: {e}")
+        return jsonify({'error': str(e)}), 500
