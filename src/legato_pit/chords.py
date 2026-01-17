@@ -366,3 +366,109 @@ def api_linked_notes(repo_name: str):
     except Exception as e:
         logger.error(f"Failed to get linked notes for {repo_name}: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@chords_bp.route('/api/repo/<path:repo_name>/incident', methods=['POST'])
+@login_required
+def api_create_incident(repo_name: str):
+    """Create an incident issue on an existing Chord repository.
+
+    This allows shooting new tasks at existing chords for Copilot to work.
+
+    Request body:
+    {
+        "title": "Add feature X",
+        "description": "Detailed description of the incident",
+        "note_ids": ["kb-abc123"]  // Optional: link existing notes
+    }
+
+    Response:
+    {
+        "success": true,
+        "issue_url": "https://github.com/org/repo/issues/42",
+        "issue_number": 42
+    }
+    """
+    from flask import request
+    import os
+
+    token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
+
+    if not token:
+        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    title = data.get('title', '').strip()
+    description = data.get('description', '').strip()
+    note_ids = data.get('note_ids', [])
+
+    if not title:
+        return jsonify({'error': 'title is required'}), 400
+
+    # Look up linked notes if provided
+    notes_section = ""
+    if note_ids:
+        db = get_legato_db()
+        notes = []
+        for nid in note_ids:
+            entry = db.execute(
+                "SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?",
+                (nid.strip(),)
+            ).fetchone()
+            if entry:
+                notes.append(dict(entry))
+
+        if notes:
+            notes_section = "\n### Linked Notes\n" + "\n".join(
+                [f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes]
+            )
+
+    # Build issue body
+    issue_body = f"""## Incident Request
+
+{description}
+{notes_section}
+
+---
+*Incident created via Legato Pit UI*
+"""
+
+    try:
+        response = requests.post(
+            f'https://api.github.com/repos/{repo_name}/issues',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            json={
+                'title': f'[INCIDENT] {title}',
+                'body': issue_body,
+                'labels': ['legato-incident'],
+            },
+            timeout=15,
+        )
+
+        if response.status_code == 201:
+            issue_data = response.json()
+            logger.info(f"Created incident on {repo_name}: {issue_data['html_url']}")
+
+            return jsonify({
+                'success': True,
+                'issue_url': issue_data['html_url'],
+                'issue_number': issue_data['number'],
+            })
+        elif response.status_code == 404:
+            return jsonify({'error': f'Repository not found: {repo_name}'}), 404
+        else:
+            return jsonify({
+                'error': f'Failed to create incident: HTTP {response.status_code}',
+                'detail': response.text,
+            }), response.status_code
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to create incident on {repo_name}: {e}")
+        return jsonify({'error': str(e)}), 500

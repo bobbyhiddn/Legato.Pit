@@ -339,6 +339,10 @@ TOOLS = [
                 "additional_comments": {
                     "type": "string",
                     "description": "Additional context, instructions, or requirements for the implementation"
+                },
+                "target_chord_repo": {
+                    "type": "string",
+                    "description": "Optional: Target an existing chord repository (e.g., 'org/repo-name.Chord') instead of creating a new one. When provided, creates an incident issue on that repo for Copilot to work."
                 }
             },
             "required": ["note_ids"]
@@ -956,16 +960,100 @@ def tool_list_recent_notes(args: dict) -> dict:
     }
 
 
+def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments: str) -> dict:
+    """Create an incident issue on an existing chord repository.
+
+    Args:
+        chord_repo: Full repo name (org/repo-name.Chord)
+        notes: List of note dicts with entry_id, title, content
+        additional_comments: Additional context for the incident
+
+    Returns:
+        dict with success/error and issue details
+    """
+    import os
+    import requests as http_requests
+
+    token = os.environ.get('SYSTEM_PAT')
+    if not token:
+        return {"error": "SYSTEM_PAT not configured"}
+
+    primary = notes[0]
+
+    # Build issue title
+    issue_title = f"[INCIDENT] {primary['title']}"
+
+    # Build issue body
+    notes_section = "\n".join([f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes])
+    issue_body = f"""## Incident Request
+
+### Linked Notes
+{notes_section}
+
+### Context
+{primary['content'][:1500] if primary['content'] else 'No content'}
+
+### Additional Comments
+{additional_comments if additional_comments else 'None provided'}
+
+---
+*Incident created via MCP by Claude | {len(notes)} note(s) linked*
+"""
+
+    try:
+        response = http_requests.post(
+            f'https://api.github.com/repos/{chord_repo}/issues',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json',
+            },
+            json={
+                'title': issue_title,
+                'body': issue_body,
+                'labels': ['legato-incident'],
+            },
+            timeout=15,
+        )
+
+        if response.status_code == 201:
+            issue_data = response.json()
+            logger.info(f"Created incident on {chord_repo}: {issue_data['html_url']}")
+
+            return {
+                "success": True,
+                "incident_created": True,
+                "chord_repo": chord_repo,
+                "issue_url": issue_data['html_url'],
+                "issue_number": issue_data['number'],
+                "notes_linked": len(notes),
+                "note_ids": [n['entry_id'] for n in notes],
+                "message": f"Incident created on {chord_repo}. Copilot will work this issue."
+            }
+        elif response.status_code == 404:
+            return {"error": f"Chord repository not found: {chord_repo}"}
+        else:
+            return {
+                "error": f"Failed to create incident: HTTP {response.status_code}",
+                "detail": response.text
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to create incident on {chord_repo}: {e}")
+        return {"error": f"Failed to create incident: {str(e)}"}
+
+
 def tool_spawn_agent(args: dict) -> dict:
-    """Queue a chord project from library notes for human approval."""
+    """Queue a chord project from library notes for human approval, or create an incident on an existing chord."""
     import secrets
     import re
+    import requests as http_requests
     from .rag.database import get_db_path, get_connection
 
     note_ids = args.get('note_ids', [])
     project_name = args.get('project_name', '').strip()
     project_type = args.get('project_type', 'note').lower()
     additional_comments = args.get('additional_comments', '').strip()
+    target_chord_repo = args.get('target_chord_repo', '').strip()
 
     # Validate note_ids
     if not note_ids:
@@ -997,6 +1085,10 @@ def tool_spawn_agent(args: dict) -> dict:
 
     # Use first note as primary
     primary = notes[0]
+
+    # If targeting an existing chord, create an incident issue instead of queuing
+    if target_chord_repo:
+        return _create_incident_on_chord(target_chord_repo, notes, additional_comments)
 
     # Generate project name if not provided
     if not project_name:
