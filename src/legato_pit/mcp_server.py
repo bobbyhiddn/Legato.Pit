@@ -961,7 +961,7 @@ def tool_list_recent_notes(args: dict) -> dict:
 
 
 def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments: str) -> dict:
-    """Create an incident issue on an existing chord repository.
+    """Dispatch an incident to Conduct for an existing chord repository.
 
     Args:
         chord_repo: Full repo name (org/repo-name.Chord)
@@ -969,23 +969,27 @@ def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments:
         additional_comments: Additional context for the incident
 
     Returns:
-        dict with success/error and issue details
+        dict with success/error and dispatch details
     """
     import os
+    import secrets
     import requests as http_requests
 
     token = os.environ.get('SYSTEM_PAT')
     if not token:
         return {"error": "SYSTEM_PAT not configured"}
 
+    org = os.environ.get('LEGATO_ORG', 'bobbyhiddn')
+    conduct_repo = os.environ.get('CONDUCT_REPO', 'Legato.Conduct')
+
     primary = notes[0]
 
-    # Build issue title
-    issue_title = f"[INCIDENT] {primary['title']}"
+    # Build issue title (Conduct will use this)
+    issue_title = primary['title']
 
-    # Build issue body
+    # Build tasker body for the incident
     notes_section = "\n".join([f"- **{n['title']}** (`{n['entry_id']}`)" for n in notes])
-    issue_body = f"""## Incident Request
+    tasker_body = f"""## Incident: {primary['title']}
 
 ### Linked Notes
 {notes_section}
@@ -997,49 +1001,58 @@ def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments:
 {additional_comments if additional_comments else 'None provided'}
 
 ---
-*Incident created via MCP by Claude | {len(notes)} note(s) linked*
+*Incident dispatched via MCP by Claude | {len(notes)} note(s) linked*
 """
+
+    # Generate a queue_id for tracking
+    queue_id = f"incident-{secrets.token_hex(6)}"
+
+    # Dispatch to Conduct with target_repo to create incident on existing chord
+    payload = {
+        'event_type': 'spawn-agent',
+        'client_payload': {
+            'queue_id': queue_id,
+            'target_repo': chord_repo,
+            'issue_title': issue_title,
+            'tasker_body': tasker_body,
+        }
+    }
 
     try:
         response = http_requests.post(
-            f'https://api.github.com/repos/{chord_repo}/issues',
+            f'https://api.github.com/repos/{org}/{conduct_repo}/dispatches',
+            json=payload,
             headers={
                 'Authorization': f'Bearer {token}',
                 'Accept': 'application/vnd.github+json',
-            },
-            json={
-                'title': issue_title,
-                'body': issue_body,
-                'labels': ['legato-incident'],
+                'X-GitHub-Api-Version': '2022-11-28',
             },
             timeout=15,
         )
 
-        if response.status_code == 201:
-            issue_data = response.json()
-            logger.info(f"Created incident on {chord_repo}: {issue_data['html_url']}")
+        # 204 No Content = success for repository_dispatch
+        if response.status_code == 204:
+            logger.info(f"Dispatched incident to Conduct for {chord_repo}: {queue_id}")
 
             return {
                 "success": True,
-                "incident_created": True,
+                "incident_dispatched": True,
+                "queue_id": queue_id,
                 "chord_repo": chord_repo,
-                "issue_url": issue_data['html_url'],
-                "issue_number": issue_data['number'],
                 "notes_linked": len(notes),
                 "note_ids": [n['entry_id'] for n in notes],
-                "message": f"Incident created on {chord_repo}. Copilot will work this issue."
+                "message": f"Incident dispatched to Conduct for {chord_repo}. Copilot will work this issue."
             }
-        elif response.status_code == 404:
-            return {"error": f"Chord repository not found: {chord_repo}"}
         else:
+            logger.error(f"Dispatch failed: {response.status_code} - {response.text}")
             return {
-                "error": f"Failed to create incident: HTTP {response.status_code}",
+                "error": f"Failed to dispatch incident: HTTP {response.status_code}",
                 "detail": response.text
             }
 
     except Exception as e:
-        logger.error(f"Failed to create incident on {chord_repo}: {e}")
-        return {"error": f"Failed to create incident: {str(e)}"}
+        logger.error(f"Failed to dispatch incident for {chord_repo}: {e}")
+        return {"error": f"Failed to dispatch incident: {str(e)}"}
 
 
 def tool_spawn_agent(args: dict) -> dict:

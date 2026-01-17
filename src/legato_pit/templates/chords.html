@@ -366,33 +366,12 @@
 
             if (response.ok) {
                 closeIncidentModal();
-                showToast(`Incident created! Issue #${data.issue_number}`, 'success');
+                showToast(`Incident dispatched to Conduct! (${data.queue_id})`, 'success');
 
-                // Refresh the details if they're loaded for this repo
-                const card = document.querySelector(`[data-repo="${repo}"]`);
-                if (card) {
-                    const index = Array.from(document.querySelectorAll('.chord-card')).indexOf(card) + 1;
-                    if (loadedDetails[repo]) {
-                        delete loadedDetails[repo];
-                        await loadRepoDetails(repo, index);
-                    }
-                    // Update issue count badge
-                    const badge = card.querySelector('.badge-issues');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent) || 0;
-                        badge.textContent = `${currentCount + 1} open`;
-                    } else {
-                        const meta = card.querySelector('.chord-meta');
-                        if (meta) {
-                            const newBadge = document.createElement('span');
-                            newBadge.className = 'badge badge-issues';
-                            newBadge.textContent = '1 open';
-                            meta.insertBefore(newBadge, meta.firstChild);
-                        }
-                    }
-                }
+                // Note: Issue will be created asynchronously by Conduct
+                // The user can refresh the details later to see the new issue
             } else {
-                throw new Error(data.error || 'Failed to create incident');
+                throw new Error(data.error || 'Failed to dispatch incident');
             }
 
         } catch (error) {
