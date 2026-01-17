@@ -536,6 +536,26 @@ TOOLS = [
             },
             "required": ["job_id"]
         }
+    },
+    {
+        "name": "list_chords",
+        "description": "List all Chord repositories - projects spawned from library notes and implemented by Copilot. Returns repo name, description, status, linked notes, and activity metrics.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of chords to return (default: 20)",
+                    "default": 20
+                },
+                "include_details": {
+                    "type": "boolean",
+                    "description": "Include detailed info: open issues, PRs, and recent commits (default: false)",
+                    "default": False
+                }
+            },
+            "required": []
+        }
     }
 ]
 
@@ -565,6 +585,7 @@ def handle_tool_call(params: dict) -> dict:
         'get_note_context': tool_get_note_context,
         'process_motif': tool_process_motif,
         'get_processing_status': tool_get_processing_status,
+        'list_chords': tool_list_chords,
     }
 
     handler = tool_handlers.get(name)
@@ -1894,6 +1915,176 @@ def tool_get_processing_status(args: dict) -> dict:
         result['error'] = job['error_message']
 
     return result
+
+
+def tool_list_chords(args: dict) -> dict:
+    """List all Chord repositories with their details and linked notes."""
+    import requests as http_requests
+    import os
+
+    limit = min(args.get('limit', 20), 50)  # Cap at 50
+    include_details = args.get('include_details', False)
+
+    token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
+    org = current_app.config.get('LEGATO_ORG') or os.environ.get('LEGATO_ORG', 'bobbyhiddn')
+
+    if not token:
+        return {"error": "SYSTEM_PAT not configured - cannot fetch chord repos from GitHub"}
+
+    # Fetch chord repos from GitHub (repos with legato-chord topic)
+    repos = []
+    try:
+        response = http_requests.get(
+            "https://api.github.com/search/repositories",
+            params={
+                "q": f"org:{org} topic:legato-chord",
+                "sort": "updated",
+                "order": "desc",
+                "per_page": limit,
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        for repo in data.get("items", []):
+            repos.append({
+                "name": repo["name"],
+                "full_name": repo["full_name"],
+                "description": repo["description"],
+                "html_url": repo["html_url"],
+                "created_at": repo["created_at"],
+                "updated_at": repo["updated_at"],
+                "open_issues_count": repo["open_issues_count"],
+                "topics": repo.get("topics", []),
+                "default_branch": repo.get("default_branch", "main"),
+            })
+
+    except http_requests.RequestException as e:
+        logger.error(f"Failed to fetch chord repos: {e}")
+        return {"error": f"Failed to fetch chord repos from GitHub: {str(e)}"}
+
+    # Enrich with linked notes count from local database
+    db = get_db()
+    chords = []
+
+    for repo in repos:
+        full_name = repo["full_name"]
+
+        # Get linked notes for this chord
+        linked = db.execute(
+            """
+            SELECT entry_id, title, category, chord_status
+            FROM knowledge_entries
+            WHERE chord_repo = ?
+            """,
+            (full_name,)
+        ).fetchall()
+
+        chord_data = {
+            "name": repo["name"],
+            "full_name": full_name,
+            "description": repo["description"],
+            "url": repo["html_url"],
+            "created_at": repo["created_at"],
+            "updated_at": repo["updated_at"],
+            "open_issues_count": repo["open_issues_count"],
+            "topics": [t for t in repo["topics"] if t != "legato-chord"],  # Exclude the topic marker
+            "linked_notes_count": len(linked),
+            "linked_notes": [
+                {
+                    "entry_id": n["entry_id"],
+                    "title": n["title"],
+                    "category": n["category"],
+                    "chord_status": n["chord_status"]
+                }
+                for n in linked
+            ],
+        }
+
+        # Fetch additional details if requested
+        if include_details:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                }
+
+                # Fetch open issues (not PRs)
+                issues_resp = http_requests.get(
+                    f"https://api.github.com/repos/{full_name}/issues",
+                    params={"state": "open", "per_page": 5},
+                    headers=headers,
+                    timeout=10,
+                )
+                if issues_resp.ok:
+                    chord_data["issues"] = [
+                        {
+                            "number": issue["number"],
+                            "title": issue["title"],
+                            "labels": [l["name"] for l in issue.get("labels", [])],
+                            "assignee": issue["assignee"]["login"] if issue.get("assignee") else None,
+                        }
+                        for issue in issues_resp.json()
+                        if "pull_request" not in issue
+                    ][:5]
+
+                # Fetch open PRs
+                prs_resp = http_requests.get(
+                    f"https://api.github.com/repos/{full_name}/pulls",
+                    params={"state": "open", "per_page": 5},
+                    headers=headers,
+                    timeout=10,
+                )
+                if prs_resp.ok:
+                    chord_data["pull_requests"] = [
+                        {
+                            "number": pr["number"],
+                            "title": pr["title"],
+                            "user": pr["user"]["login"],
+                            "draft": pr.get("draft", False),
+                        }
+                        for pr in prs_resp.json()
+                    ][:5]
+
+                # Fetch recent commits
+                commits_resp = http_requests.get(
+                    f"https://api.github.com/repos/{full_name}/commits",
+                    params={"per_page": 3},
+                    headers=headers,
+                    timeout=10,
+                )
+                if commits_resp.ok:
+                    chord_data["recent_commits"] = [
+                        {
+                            "sha": commit["sha"][:7],
+                            "message": commit["commit"]["message"].split("\n")[0][:80],
+                            "author": commit["commit"]["author"]["name"],
+                            "date": commit["commit"]["author"]["date"],
+                        }
+                        for commit in commits_resp.json()
+                    ][:3]
+
+            except http_requests.RequestException as e:
+                logger.warning(f"Could not fetch details for {full_name}: {e}")
+
+        chords.append(chord_data)
+
+    # Calculate summary stats
+    total_linked_notes = sum(c["linked_notes_count"] for c in chords)
+    total_open_issues = sum(c["open_issues_count"] for c in chords)
+
+    return {
+        "chords": chords,
+        "count": len(chords),
+        "total_linked_notes": total_linked_notes,
+        "total_open_issues": total_open_issues,
+        "organization": org,
+    }
 
 
 # ============ Resource Handlers ============
