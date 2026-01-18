@@ -212,15 +212,8 @@ def create_app():
                                 time.sleep(LIBRARY_SYNC_INTERVAL)
                                 continue
 
-                        # Clean up invalid/duplicate entries first (only on first run)
+                        # Clean up duplicate entries (same file_path)
                         cleanup_count = 0
-                        invalid = db.execute(
-                            "SELECT id FROM knowledge_entries WHERE entry_id NOT LIKE 'kb-%' OR LENGTH(entry_id) != 11"
-                        ).fetchall()
-                        for row in invalid:
-                            db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (row['id'],))
-                            db.execute("DELETE FROM knowledge_entries WHERE id = ?", (row['id'],))
-                            cleanup_count += 1
                         dups = db.execute("""
                             SELECT id FROM knowledge_entries
                             WHERE file_path IS NOT NULL AND id NOT IN (
