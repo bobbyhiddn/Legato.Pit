@@ -475,8 +475,8 @@ class LibrarySync:
                 logger.error(f"Error processing {file_path}: {e}")
                 stats['errors'] += 1
 
-        # Generate embeddings
-        if self.embedding_service:
+        # Generate embeddings only if we created/updated entries
+        if self.embedding_service and (stats['entries_created'] > 0 or stats['entries_updated'] > 0):
             stats['embeddings_generated'] = self.embedding_service.generate_missing_embeddings(
                 'knowledge', delay=0.1
             )
