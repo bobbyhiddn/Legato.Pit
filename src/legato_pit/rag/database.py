@@ -504,8 +504,8 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_installations_user ON github_app_installations(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_api_keys_user ON user_api_keys(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_repos_user ON user_repos(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, timestamp)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, timestamp)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_meters_user ON usage_meters(user_id, period)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events(user_id, timestamp)")
 
