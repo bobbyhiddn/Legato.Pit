@@ -357,6 +357,158 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
 
+    # ============ Multi-Tenant Tables ============
+
+    # Core user record (authenticated via GitHub)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT UNIQUE NOT NULL,
+            github_id INTEGER UNIQUE NOT NULL,
+            github_login TEXT NOT NULL,
+            email TEXT,
+            tier TEXT DEFAULT 'free',
+            tier_expires_at DATETIME,
+            refresh_token_encrypted BLOB,
+            settings TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Migration: add refresh_token_encrypted to users if missing
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN refresh_token_encrypted BLOB")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # GitHub App installations (per-user scoped tokens)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS github_app_installations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER UNIQUE NOT NULL,
+            user_id TEXT NOT NULL,
+            account_login TEXT,
+            account_type TEXT,
+            access_token_encrypted BLOB,
+            token_expires_at DATETIME,
+            permissions TEXT,
+            suspended INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
+    # Migration: rename github_login to account_login if needed
+    try:
+        cursor.execute("ALTER TABLE github_app_installations ADD COLUMN account_login TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE github_app_installations ADD COLUMN account_type TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    # User's API keys (encrypted, they provide for BYK tier)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            key_encrypted BLOB NOT NULL,
+            key_hint TEXT,
+            is_valid INTEGER DEFAULT 1,
+            last_used_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            UNIQUE(user_id, provider)
+        )
+    """)
+
+    # Migration: add updated_at to user_api_keys
+    try:
+        cursor.execute("ALTER TABLE user_api_keys ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass
+
+    # User's connected repos (Library, Conduct)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_repos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            repo_type TEXT NOT NULL,
+            repo_full_name TEXT NOT NULL,
+            installation_id INTEGER,
+            is_primary INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            UNIQUE(user_id, repo_type)
+        )
+    """)
+
+    # Migration: add updated_at to user_repos
+    try:
+        cursor.execute("ALTER TABLE user_repos ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass
+
+    # Audit log for security and debugging
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            action TEXT NOT NULL,
+            resource_type TEXT,
+            resource_id TEXT,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Usage metering for managed tier
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_meters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            period TEXT NOT NULL,
+            meter_type TEXT NOT NULL,
+            quantity INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, period, meter_type)
+        )
+    """)
+
+    # Usage events for detailed tracking
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            event_type TEXT NOT NULL,
+            provider TEXT,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            cost_microdollars INTEGER,
+            metadata TEXT
+        )
+    """)
+
+    # Multi-tenant indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_github ON users(github_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_login ON users(github_login)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_installations_user ON github_app_installations(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_api_keys_user ON user_api_keys(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_repos_user ON user_repos(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, timestamp)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, timestamp)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_meters_user ON usage_meters(user_id, period)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events(user_id, timestamp)")
+
     conn.commit()
     logger.info(f"Legato database initialized at {path}")
 

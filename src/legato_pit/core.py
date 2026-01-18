@@ -70,10 +70,19 @@ def create_app():
         GITHUB_CLIENT_SECRET=os.getenv('GH_OAUTH_CLIENT_SECRET'),
         GITHUB_ALLOWED_USERS=os.getenv('GH_ALLOWED_USERS', '').split(','),
 
-        # LEGATO configuration
+        # GitHub App (multi-tenant auth - only used when LEGATO_MODE=multi-tenant)
+        GITHUB_APP_ID=os.getenv('GITHUB_APP_ID'),
+        GITHUB_APP_CLIENT_ID=os.getenv('GITHUB_APP_CLIENT_ID'),
+        GITHUB_APP_CLIENT_SECRET=os.getenv('GITHUB_APP_CLIENT_SECRET'),
+        GITHUB_APP_SLUG=os.getenv('GITHUB_APP_SLUG', 'legato-studio'),
+
+        # Deployment mode: single-tenant (DIY) or multi-tenant (SaaS)
+        LEGATO_MODE=os.getenv('LEGATO_MODE', 'single-tenant'),
+
+        # LEGATO configuration (single-tenant mode)
         LEGATO_ORG=os.getenv('LEGATO_ORG', 'bobbyhiddn'),
         CONDUCT_REPO=os.getenv('CONDUCT_REPO', 'Legato.Conduct'),
-        SYSTEM_PAT=os.getenv('SYSTEM_PAT'),
+        SYSTEM_PAT=os.getenv('SYSTEM_PAT'),  # Only needed for single-tenant
 
         # App metadata
         APP_NAME='Legato.Pit',
