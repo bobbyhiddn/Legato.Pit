@@ -597,7 +597,7 @@ def trigger_sync():
         "clear": true  // Clear all entries before sync (fixes duplicates)
     }
     """
-        from .rag.library_sync import LibrarySync
+    from .rag.library_sync import LibrarySync
     from .rag.embedding_service import EmbeddingService
     from .rag.openai_provider import OpenAIEmbeddingProvider
 
@@ -678,7 +678,7 @@ def pipeline_status():
         return jsonify({'error': f'Missing required fields: {missing}'}), 400
 
     try:
-                import json
+        import json
 
         db = get_db()
 
@@ -746,7 +746,7 @@ def get_pre_classify_details(run_id: str):
     }
     """
     try:
-                import json
+        import json
 
         db = get_db()
 
@@ -796,7 +796,7 @@ def get_pipeline_status(run_id: str):
     }
     """
     try:
-                import json
+        import json
 
         db = get_db()
 
