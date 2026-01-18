@@ -725,42 +725,20 @@ def api_sync():
 @library_bp.route('/api/dedupe', methods=['POST'])
 @login_required
 def api_dedupe():
-    """Remove duplicate and invalid entries.
+    """Remove duplicate entries by file_path.
 
-    Removes:
-    1. Duplicates by file_path (keeps most recent)
-    2. Entries with non-standard entry_ids (not kb-xxxxxxxx format)
+    Removes duplicates by file_path (keeps most recent).
 
     Response:
     {
         "status": "success",
-        "duplicates_removed": 5,
-        "invalid_removed": 3
+        "duplicates_removed": 5
     }
     """
-    import re
-
     try:
         db = get_db()
 
-        # 1. Remove entries with invalid entry_ids (not kb-xxxxxxxx format)
-        invalid = db.execute(
-            """
-            SELECT id, entry_id, file_path
-            FROM knowledge_entries
-            WHERE entry_id NOT LIKE 'kb-%'
-            OR LENGTH(entry_id) != 11
-            """
-        ).fetchall()
-
-        invalid_count = 0
-        for inv in invalid:
-            db.execute("DELETE FROM embeddings WHERE entry_id = ? AND entry_type = 'knowledge'", (inv['id'],))
-            db.execute("DELETE FROM knowledge_entries WHERE id = ?", (inv['id'],))
-            invalid_count += 1
-            logger.info(f"Removed invalid entry: {inv['entry_id']}")
-
-        # 2. Find duplicates by file_path (keep the one with highest id = most recent)
+        # Find duplicates by file_path (keep the one with highest id = most recent)
         duplicates = db.execute(
             """
             SELECT id, file_path, entry_id
@@ -787,8 +765,6 @@ def api_dedupe():
         return jsonify({
             'status': 'success',
             'duplicates_removed': dup_count,
-            'invalid_removed': invalid_count,
-            'total_removed': dup_count + invalid_count,
         })
 
     except Exception as e:
