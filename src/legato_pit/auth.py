@@ -770,6 +770,88 @@ def setup_api_key():
     return redirect(url_for('auth.setup'))
 
 
+@auth_bp.route('/setup/create-library', methods=['POST'])
+def setup_create_library():
+    """Auto-create a Legato.Library repository for the user.
+
+    Uses the user's first installation to create the Library repo.
+    """
+    if 'user' not in session:
+        return redirect(url_for('auth.login'))
+
+    user = session['user']
+    user_id = user.get('user_id')
+    github_login = user.get('username')
+
+    try:
+        from .chord_executor import ensure_library_exists
+
+        db = _get_db()
+
+        # Get user's first installation
+        installation = db.execute(
+            """
+            SELECT installation_id, account_login
+            FROM github_app_installations
+            WHERE user_id = ?
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (user_id,)
+        ).fetchone()
+
+        if not installation:
+            flash('Please install the GitHub App first.', 'error')
+            return redirect(url_for('auth.setup'))
+
+        # Get installation token
+        token = get_user_installation_token(user_id, 'library')
+        if not token:
+            # Fall back to getting token directly
+            from .github_app import get_installation_access_token
+            token_data = get_installation_access_token(installation['installation_id'])
+            token = token_data['token']
+
+        # Use the installation's account (could be user or org)
+        org = installation['account_login'] or github_login
+
+        # Create Library repo
+        result = ensure_library_exists(token, org)
+
+        if result.get('success'):
+            library_repo = f"{org}/Legato.Library"
+
+            # Auto-configure as Library repo
+            db.execute(
+                """
+                INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
+                VALUES (?, 'library', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, repo_type) DO UPDATE SET
+                    repo_full_name = excluded.repo_full_name,
+                    installation_id = excluded.installation_id,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, library_repo, installation['installation_id'])
+            )
+            db.commit()
+
+            _log_audit(user_id, 'create', 'library', library_repo,
+                       f'{{"created": {str(result.get("created", False)).lower()}}}')
+
+            if result.get('created'):
+                flash(f'Created {library_repo} as your Library.', 'success')
+            else:
+                flash(f'Configured existing {library_repo} as your Library.', 'success')
+        else:
+            flash('Failed to create Library repository.', 'error')
+
+    except Exception as e:
+        logger.error(f"Failed to create Library: {e}")
+        flash(f'Failed to create Library: {str(e)}', 'error')
+
+    return redirect(url_for('auth.setup'))
+
+
 def get_current_user() -> Optional[dict]:
     """Get the current authenticated user.
 

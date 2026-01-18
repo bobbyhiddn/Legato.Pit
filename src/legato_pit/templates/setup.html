@@ -44,11 +44,29 @@
 
     <!-- Repository Configuration -->
     <div class="setup-section">
-        <h2>Repository Setup</h2>
-        <p>Tell Legato which repositories to use for your Library and Conduct.</p>
+        <h2>Library Setup</h2>
 
         {% set library_repo = repos|selectattr('repo_type', 'equalto', 'library')|first %}
-        {% set conduct_repo = repos|selectattr('repo_type', 'equalto', 'conduct')|first %}
+
+        {% if library_repo %}
+        <p class="library-configured">
+            Your Library: <strong>{{ library_repo.repo_full_name }}</strong>
+        </p>
+        {% elif installations %}
+        <p>Create your personal knowledge store:</p>
+        <form method="post" action="{{ url_for('auth.setup_create_library') }}">
+            <button type="submit" class="btn btn-primary">Create Legato.Library</button>
+        </form>
+        <p class="help-text">This will create a <code>Legato.Library</code> repository in your GitHub account.</p>
+        {% else %}
+        <p class="help-text">Install the GitHub App first, then you can create your Library.</p>
+        {% endif %}
+    </div>
+
+    <!-- Advanced Repository Configuration (hidden by default) -->
+    <details class="setup-section">
+        <summary>Advanced: Manual Repository Configuration</summary>
+        <p>Manually specify repositories (for advanced users).</p>
 
         <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
             <div class="form-group">
@@ -70,26 +88,7 @@
             </div>
         </form>
 
-        <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
-            <div class="form-group">
-                <label for="conduct_repo">Conduct Repository</label>
-                <input type="hidden" name="repo_type" value="conduct">
-                <input type="text" name="repo_full_name" id="conduct_repo"
-                       placeholder="username/Legato.Conduct"
-                       value="{{ conduct_repo.repo_full_name if conduct_repo else '' }}">
-                <select name="installation_id" id="conduct_installation">
-                    <option value="">Select installation...</option>
-                    {% for inst in installations %}
-                    <option value="{{ inst.installation_id }}"
-                            {% if conduct_repo and conduct_repo.installation_id == inst.installation_id %}selected{% endif %}>
-                        {{ inst.account_login }}
-                    </option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="btn btn-secondary btn-sm">Set Conduct</button>
-            </div>
-        </form>
-    </div>
+    </details>
 
     <!-- API Keys (for BYK tier) -->
     {% if tier in ['free', 'byk'] %}
@@ -212,6 +211,43 @@
 .no-installations {
     color: var(--text-secondary);
     font-style: italic;
+}
+
+.library-configured {
+    color: var(--text-success, #10b981);
+    font-size: 1rem;
+}
+
+.library-configured strong {
+    font-family: monospace;
+}
+
+.help-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.help-text code {
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+
+details.setup-section {
+    cursor: pointer;
+}
+
+details.setup-section summary {
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+details.setup-section[open] summary {
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
 }
 
 .repo-form, .api-key-form {

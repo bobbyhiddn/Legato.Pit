@@ -2,7 +2,10 @@
 Agent Queue Blueprint
 
 Handles queuing, approval, and spawning of Lab project agents.
-Provides an approval gateway before Conduct spawns new repositories.
+Provides an approval gateway before spawning new repositories.
+
+Project spawning is now handled directly by Pit using the chord_executor
+module, replacing the previous Conduct workflow dispatch.
 """
 
 import os
@@ -688,8 +691,11 @@ def api_approve_agent(queue_id: str):
 *— {username}*
 """
 
-        # Trigger Conduct spawn workflow
-        dispatch_result = trigger_spawn_workflow(agent)
+        # Get user_id for multi-tenant mode
+        user_id = user.get('user_id') if user.get('auth_mode') == 'github_app' else None
+
+        # Spawn the project directly (replaces Conduct dispatch)
+        dispatch_result = trigger_spawn_workflow(agent, user_id=user_id)
 
         # Update agent queue status
         agents_db.execute(
@@ -1628,21 +1634,20 @@ def api_sync_from_library():
         return jsonify({'error': str(e)}), 500
 
 
-def trigger_spawn_workflow(agent: dict) -> dict:
-    """Trigger the Conduct spawn-project workflow via repository_dispatch.
+def trigger_spawn_workflow(agent: dict, user_id: str = None) -> dict:
+    """Spawn a project directly using the chord executor.
+
+    This replaces the old Conduct dispatch workflow. Projects are now
+    created directly by Pit using embedded templates.
 
     Args:
         agent: Agent dict from database
+        user_id: User ID for multi-tenant mode (optional)
 
     Returns:
         Dict with success status and details
     """
-    token = current_app.config.get('SYSTEM_PAT')
-    if not token:
-        return {'success': False, 'error': 'SYSTEM_PAT not configured'}
-
-    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
-    conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
+    from .chord_executor import spawn_chord
 
     # Parse signal_json if it's a string
     signal_json = agent.get('signal_json', '{}')
@@ -1652,37 +1657,32 @@ def trigger_spawn_workflow(agent: dict) -> dict:
         except json.JSONDecodeError:
             signal_json = {}
 
-    payload = {
-        'event_type': 'spawn-agent',
-        'client_payload': {
-            'queue_id': agent['queue_id'],
-            'project_name': agent['project_name'],
-            'project_type': agent['project_type'],
-            'signal_json': signal_json,
-            'tasker_body': agent['tasker_body'],
-        }
-    }
-
     try:
-        response = requests.post(
-            f'https://api.github.com/repos/{org}/{conduct_repo}/dispatches',
-            json=payload,
-            headers={
-                'Authorization': f'Bearer {token}',
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
-            },
-            timeout=15,
+        result = spawn_chord(
+            name=agent['project_name'],
+            project_type=agent.get('project_type', 'chord'),
+            title=agent.get('title', agent['project_name']),
+            description=agent.get('description', ''),
+            domain_tags=signal_json.get('domain_tags', []),
+            key_phrases=signal_json.get('key_phrases', []),
+            source_entry_id=agent.get('related_entry_id'),
+            tasker_body=agent.get('tasker_body'),
+            user_id=user_id,
+            assign_copilot=True,
         )
 
-        # 204 No Content = success
-        if response.status_code == 204:
-            logger.info(f"Triggered spawn workflow for {agent['queue_id']}")
-            return {'success': True}
+        if result.get('success'):
+            logger.info(f"Spawned project for {agent['queue_id']}: {result.get('repo_url')}")
+            return {
+                'success': True,
+                'repo_url': result.get('repo_url'),
+                'issue_url': result.get('issue_url'),
+                'assigned_copilot': result.get('assigned_copilot', False),
+            }
         else:
-            logger.error(f"Dispatch failed: {response.status_code} - {response.text}")
-            return {'success': False, 'error': f"HTTP {response.status_code}"}
+            logger.error(f"Spawn failed for {agent['queue_id']}: {result.get('error')}")
+            return {'success': False, 'error': result.get('error', 'Unknown error')}
 
-    except requests.RequestException as e:
-        logger.error(f"Dispatch request failed: {e}")
+    except Exception as e:
+        logger.error(f"Spawn failed for {agent['queue_id']}: {e}")
         return {'success': False, 'error': str(e)}
