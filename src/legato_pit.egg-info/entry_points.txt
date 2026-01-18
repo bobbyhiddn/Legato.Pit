@@ -1,0 +1,3 @@
+[console_scripts]
+legato-pit = legato_pit.main:main
+legato-recovery = legato_pit.recovery:main
