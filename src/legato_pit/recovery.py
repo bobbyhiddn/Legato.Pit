@@ -690,6 +690,91 @@ def rebuild_content_hashes(
     return result
 
 
+def sync_category_descriptions(
+    repo: str = "bobbyhiddn/Legato.Library",
+    token: Optional[str] = None,
+    dry_run: bool = True
+) -> RecoveryResult:
+    """Sync category descriptions from Pit database to Library.
+
+    Creates description.md files in each category folder that doesn't have one.
+    This ensures categories can be reconstructed from Library alone.
+    """
+    token = token or os.environ.get('SYSTEM_PAT')
+    result = RecoveryResult(operation="sync_category_descriptions", success=True)
+    result.details['categories_synced'] = []
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+    }
+
+    try:
+        from .rag.database import init_db, get_user_categories
+
+        db = init_db()
+        categories = get_user_categories(db, 'default')
+
+        # Get existing files in repo
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        response = requests.get(tree_url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        existing_files = {item['path'] for item in response.json().get('tree', [])}
+
+        for cat in categories:
+            folder_name = cat['folder_name']
+            desc_path = f"{folder_name}/description.md"
+
+            # Skip if description.md already exists
+            if desc_path in existing_files:
+                logger.debug(f"Category description exists: {desc_path}")
+                continue
+
+            # Check if folder exists (has any files)
+            folder_exists = any(f.startswith(f"{folder_name}/") for f in existing_files)
+            if not folder_exists:
+                logger.debug(f"Category folder doesn't exist in Library: {folder_name}")
+                continue
+
+            # Build description.md content
+            content = f"""---
+name: {cat['name']}
+display_name: {cat['display_name']}
+description: {cat['description']}
+color: "{cat['color']}"
+sort_order: {cat['sort_order']}
+---
+
+# {cat['display_name']}
+
+{cat['description']}
+"""
+            result.details['categories_synced'].append(cat['name'])
+
+            if not dry_run:
+                import base64
+                create_response = requests.put(
+                    f"https://api.github.com/repos/{repo}/contents/{desc_path}",
+                    headers=headers,
+                    json={
+                        'message': f'[recovery] Add category description: {cat["name"]}',
+                        'content': base64.b64encode(content.encode()).decode()
+                    },
+                    timeout=30
+                )
+                create_response.raise_for_status()
+
+            result.files_modified += 1
+            logger.info(f"{'[DRY RUN] Would create' if dry_run else 'Created'}: {desc_path}")
+
+    except Exception as e:
+        result.success = False
+        result.errors.append(str(e))
+
+    return result
+
+
 def rebuild_database_from_library(
     repo: str = "bobbyhiddn/Legato.Library",
     token: Optional[str] = None,
@@ -744,7 +829,8 @@ def full_recovery(
     2. Fix double frontmatter
     3. Normalize IDs
     4. Rebuild content hashes
-    5. Rebuild database (if not dry_run)
+    5. Sync category descriptions
+    6. Rebuild database (if not dry_run)
     """
     results = {}
 
@@ -775,13 +861,18 @@ def full_recovery(
     results['rebuild_hashes'] = rebuild_content_hashes(repo, token, dry_run)
     logger.info(f"Modified {results['rebuild_hashes'].files_modified} files")
 
-    # 5. Rebuild database (only if not dry_run)
+    # 5. Sync category descriptions to Library
+    logger.info("Step 5: Syncing category descriptions...")
+    results['sync_categories'] = sync_category_descriptions(repo, token, dry_run)
+    logger.info(f"Synced {results['sync_categories'].files_modified} category descriptions")
+
+    # 6. Rebuild database (only if not dry_run)
     if not dry_run:
-        logger.info("Step 5: Rebuilding database...")
+        logger.info("Step 6: Rebuilding database...")
         results['rebuild_database'] = rebuild_database_from_library(repo, token)
         logger.info(f"Synced {results['rebuild_database'].files_modified} entries")
     else:
-        logger.info("Step 5: Skipping database rebuild (dry run)")
+        logger.info("Step 6: Skipping database rebuild (dry run)")
 
     return results
 
@@ -792,7 +883,7 @@ def main():
     parser = argparse.ArgumentParser(description="Legato Library Recovery Tool")
     parser.add_argument('operation', choices=[
         'validate', 'fix_frontmatter', 'normalize_ids',
-        'rebuild_hashes', 'rebuild_database', 'full_recovery'
+        'rebuild_hashes', 'sync_categories', 'rebuild_database', 'full_recovery'
     ])
     parser.add_argument('--repo', default='bobbyhiddn/Legato.Library')
     parser.add_argument('--token', help='GitHub PAT (or set SYSTEM_PAT env var)')
@@ -844,6 +935,16 @@ def main():
             'success': result.success,
             'files_processed': result.files_processed,
             'files_modified': result.files_modified,
+            'errors': result.errors
+        }, indent=2))
+
+    elif args.operation == 'sync_categories':
+        result = sync_category_descriptions(args.repo, token, args.dry_run)
+        print(json.dumps({
+            'operation': result.operation,
+            'success': result.success,
+            'files_modified': result.files_modified,
+            'categories_synced': result.details.get('categories_synced', []),
             'errors': result.errors
         }, indent=2))
 
