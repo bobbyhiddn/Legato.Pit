@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Setup - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container">
+    <h1>Welcome to Legato</h1>
+    <p class="setup-subtitle">Let's set up your personal memory system.</p>
+
+    <!-- Tier Info -->
+    <div class="setup-section">
+        <h2>Your Plan</h2>
+        <div class="tier-badge tier-{{ tier }}">{{ tier|capitalize }}</div>
+        <p class="tier-description">
+            {% if tier == 'free' %}
+            Free tier: Use your own API keys for LLM access.
+            {% elif tier == 'byk' %}
+            Bring Your Key: Use your own API keys with full features.
+            {% elif tier == 'managed' %}
+            Managed: Full service with metered API usage.
+            {% endif %}
+        </p>
+    </div>
+
+    <!-- GitHub App Installations -->
+    <div class="setup-section">
+        <h2>GitHub Installations</h2>
+        {% if installations %}
+        <ul class="installation-list">
+            {% for inst in installations %}
+            <li class="installation-item">
+                <span class="installation-account">{{ inst.account_login or 'Unknown' }}</span>
+                <span class="installation-type">{{ inst.account_type or 'user' }}</span>
+                <span class="installation-date">Installed {{ inst.created_at }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="no-installations">No GitHub App installations yet.</p>
+        {% endif %}
+        <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-primary">
+            {% if installations %}Add Another Installation{% else %}Install GitHub App{% endif %}
+        </a>
+    </div>
+
+    <!-- Repository Configuration -->
+    <div class="setup-section">
+        <h2>Repository Setup</h2>
+        <p>Tell Legato which repositories to use for your Library and Conduct.</p>
+
+        {% set library_repo = repos|selectattr('repo_type', 'equalto', 'library')|first %}
+        {% set conduct_repo = repos|selectattr('repo_type', 'equalto', 'conduct')|first %}
+
+        <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
+            <div class="form-group">
+                <label for="library_repo">Library Repository</label>
+                <input type="hidden" name="repo_type" value="library">
+                <input type="text" name="repo_full_name" id="library_repo"
+                       placeholder="username/Legato.Library"
+                       value="{{ library_repo.repo_full_name if library_repo else '' }}">
+                <select name="installation_id" id="library_installation">
+                    <option value="">Select installation...</option>
+                    {% for inst in installations %}
+                    <option value="{{ inst.installation_id }}"
+                            {% if library_repo and library_repo.installation_id == inst.installation_id %}selected{% endif %}>
+                        {{ inst.account_login }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-secondary btn-sm">Set Library</button>
+            </div>
+        </form>
+
+        <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
+            <div class="form-group">
+                <label for="conduct_repo">Conduct Repository</label>
+                <input type="hidden" name="repo_type" value="conduct">
+                <input type="text" name="repo_full_name" id="conduct_repo"
+                       placeholder="username/Legato.Conduct"
+                       value="{{ conduct_repo.repo_full_name if conduct_repo else '' }}">
+                <select name="installation_id" id="conduct_installation">
+                    <option value="">Select installation...</option>
+                    {% for inst in installations %}
+                    <option value="{{ inst.installation_id }}"
+                            {% if conduct_repo and conduct_repo.installation_id == inst.installation_id %}selected{% endif %}>
+                        {{ inst.account_login }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-secondary btn-sm">Set Conduct</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- API Keys (for BYK tier) -->
+    {% if tier in ['free', 'byk'] %}
+    <div class="setup-section">
+        <h2>API Keys</h2>
+        <p>Provide your own API keys for LLM access.</p>
+
+        {% set anthropic_key = api_keys|selectattr('provider', 'equalto', 'anthropic')|first %}
+        {% set openai_key = api_keys|selectattr('provider', 'equalto', 'openai')|first %}
+
+        <form method="post" action="{{ url_for('auth.setup_api_key') }}" class="api-key-form">
+            <div class="form-group">
+                <label for="anthropic_key">Anthropic API Key</label>
+                <input type="hidden" name="provider" value="anthropic">
+                <input type="password" name="api_key" id="anthropic_key"
+                       placeholder="{% if anthropic_key %}****{{ anthropic_key.key_hint }}{% else %}sk-ant-...{% endif %}">
+                <button type="submit" class="btn btn-secondary btn-sm">
+                    {% if anthropic_key %}Update{% else %}Save{% endif %}
+                </button>
+            </div>
+        </form>
+
+        <form method="post" action="{{ url_for('auth.setup_api_key') }}" class="api-key-form">
+            <div class="form-group">
+                <label for="openai_key">OpenAI API Key</label>
+                <input type="hidden" name="provider" value="openai">
+                <input type="password" name="api_key" id="openai_key"
+                       placeholder="{% if openai_key %}****{{ openai_key.key_hint }}{% else %}sk-...{% endif %}">
+                <button type="submit" class="btn btn-secondary btn-sm">
+                    {% if openai_key %}Update{% else %}Save{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    <!-- Continue to Dashboard -->
+    <div class="setup-section setup-actions">
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary btn-lg">Continue to Dashboard</a>
+    </div>
+</div>
+
+<style>
+.setup-container {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.setup-subtitle {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+}
+
+.setup-section {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.setup-section h2 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.tier-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}
+
+.tier-free { background: #3d4852; color: #e2e8f0; }
+.tier-byk { background: #2563eb; color: white; }
+.tier-managed { background: #7c3aed; color: white; }
+
+.tier-description {
+    margin-top: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.installation-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem 0;
+}
+
+.installation-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+}
+
+.installation-account {
+    font-weight: 600;
+}
+
+.installation-type {
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+
+.installation-date {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-left: auto;
+}
+
+.no-installations {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.repo-form, .api-key-form {
+    margin-bottom: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.form-group label {
+    width: 100%;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.form-group select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.setup-actions {
+    text-align: center;
+    background: transparent;
+    padding: 0;
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+}
+</style>
+{% endblock %}
