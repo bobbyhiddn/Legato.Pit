@@ -81,43 +81,96 @@ def extract_title_from_content(content: str, filename: str) -> str:
 def categorize_from_path(path: str) -> str:
     """Determine category from file path.
 
+    Normalizes folder names to canonical singular category names.
+    Handles both old plural folders and new singular folders.
+
     Args:
-        path: File path (e.g., "concepts/file.md")
+        path: File path (e.g., "concept/file.md" or "concepts/file.md")
 
     Returns:
-        Category string
+        Canonical category string (singular form)
     """
     parts = Path(path).parts
     if len(parts) > 0:
-        category = parts[0].lower()
-        # Map folder names to categories
+        folder = parts[0].lower()
+        # Map folder names to canonical singular category names
+        # Handles typos, plurals, and legacy folder names
         category_map = {
-            'concepts': 'concepts',
-            'epiphanys': 'epiphanies',
-            'epiphanies': 'epiphanies',
-            'reflections': 'reflections',
-            'worklogs': 'worklogs',
-            'procedures': 'procedures',
-            'references': 'references',
+            # Singular (canonical)
+            'concept': 'concept',
+            'epiphany': 'epiphany',
+            'reflection': 'reflection',
+            'glimmer': 'glimmer',
+            'reminder': 'reminder',
+            'worklog': 'worklog',
+            'tech-thought': 'tech-thought',
+            'research-topic': 'research-topic',
+            'theology': 'theology',
+            # Plural (legacy)
+            'concepts': 'concept',
+            'epiphanies': 'epiphany',
+            'reflections': 'reflection',
+            'glimmers': 'glimmer',
+            'reminders': 'reminder',
+            'worklogs': 'worklog',
+            'tech-thoughts': 'tech-thought',
+            'research-topics': 'research-topic',
+            'theologies': 'theology',
+            # Typos
+            'epiphanys': 'epiphany',
+            'theologys': 'theology',
+            'tech-thoughtss': 'tech-thought',
+            'research-topicss': 'research-topic',
+            # Other
+            'procedures': 'procedure',
+            'procedure': 'procedure',
+            'references': 'reference',
+            'reference': 'reference',
         }
-        return category_map.get(category, category)
+        return category_map.get(folder, folder)
     return 'general'
 
 
-def generate_entry_id(category: str, title: str) -> str:
-    """Generate a unique entry ID.
+def compute_content_hash(content: str) -> str:
+    """Compute a stable hash of content for deduplication and integrity.
 
     Args:
-        category: Entry category
+        content: The markdown body content (after frontmatter)
+
+    Returns:
+        First 16 characters of SHA256 hash
+    """
+    # Normalize: strip whitespace, lowercase for comparison stability
+    normalized = content.strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def generate_slug(title: str) -> str:
+    """Generate a URL-safe slug from a title.
+
+    Args:
+        title: The note title
+
+    Returns:
+        Slug like "my-note-title"
+    """
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
+    return slug or 'untitled'
+
+
+def generate_entry_id(category: str, title: str) -> str:
+    """Generate a canonical entry ID in the standard format.
+
+    Args:
+        category: Entry category (singular form like 'concept')
         title: Entry title
 
     Returns:
-        Entry ID like "kb-a1b2c3d4"
+        Entry ID like "library.concept.my-note-title"
     """
-    # Create a hash from category + title
-    content = f"{category}:{title}"
-    hash_val = hashlib.md5(content.encode()).hexdigest()[:8]
-    return f"kb-{hash_val}"
+    slug = generate_slug(title)
+    # Use singular category form for consistency
+    return f"library.{category}.{slug}"
 
 
 class LibrarySync:
@@ -240,8 +293,18 @@ class LibrarySync:
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, path)
         category = frontmatter.get('category') or categorize_from_path(path)
-        # Always generate entry_id from hash to ensure URL-safe format
-        entry_id = generate_entry_id(category, title)
+
+        # Compute content hash for integrity/deduplication
+        content_hash = compute_content_hash(body)
+
+        # Prefer frontmatter ID if present, otherwise generate canonical ID
+        # This ensures IDs remain stable once set
+        frontmatter_id = frontmatter.get('id')
+        if frontmatter_id and isinstance(frontmatter_id, str) and frontmatter_id.strip():
+            entry_id = frontmatter_id.strip()
+        else:
+            # Generate new canonical format ID
+            entry_id = generate_entry_id(category, title)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -340,7 +403,7 @@ class LibrarySync:
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
-                    task_status = ?, due_date = ?,
+                    task_status = ?, due_date = ?, content_hash = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
@@ -348,7 +411,7 @@ class LibrarySync:
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, path)
+                 task_status, due_date, content_hash, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
@@ -361,13 +424,13 @@ class LibrarySync:
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 task_status, due_date, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date)
+                 task_status, due_date, content_hash)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
@@ -438,8 +501,16 @@ class LibrarySync:
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, file_path.name)
         category = frontmatter.get('category') or categorize_from_path(relative_path)
-        # Always generate entry_id from hash to ensure URL-safe format
-        entry_id = generate_entry_id(category, title)
+
+        # Compute content hash for integrity/deduplication
+        content_hash = compute_content_hash(body)
+
+        # Prefer frontmatter ID if present, otherwise generate canonical ID
+        frontmatter_id = frontmatter.get('id')
+        if frontmatter_id and isinstance(frontmatter_id, str) and frontmatter_id.strip():
+            entry_id = frontmatter_id.strip()
+        else:
+            entry_id = generate_entry_id(category, title)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -526,7 +597,7 @@ class LibrarySync:
                     needs_chord = ?, chord_name = ?, chord_scope = ?,
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
-                    task_status = ?, due_date = ?,
+                    task_status = ?, due_date = ?, content_hash = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
@@ -534,7 +605,7 @@ class LibrarySync:
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, relative_path)
+                 task_status, due_date, content_hash, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
@@ -546,13 +617,13 @@ class LibrarySync:
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 task_status, due_date, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (entry_id, title, category, body, relative_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date)
+                 task_status, due_date, content_hash)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))

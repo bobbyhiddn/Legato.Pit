@@ -690,6 +690,18 @@ def tool_search_library(args: dict) -> dict:
         }
 
 
+def compute_content_hash(content: str) -> str:
+    """Compute a stable hash of content for deduplication and integrity."""
+    normalized = content.strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def generate_slug(title: str) -> str:
+    """Generate a URL-safe slug from a title."""
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
+    return slug or 'untitled'
+
+
 def tool_create_note(args: dict) -> dict:
     """Create a new note in the library."""
     from .rag.database import get_user_categories
@@ -722,14 +734,15 @@ def tool_create_note(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    # Generate entry_id
-    hash_input = f"{title}-{datetime.utcnow().isoformat()}"
-    entry_id = f"kb-{hashlib.sha256(hash_input.encode()).hexdigest()[:8]}"
+    # Generate slug and canonical entry_id
+    slug = generate_slug(title)
 
-    # Generate slug from title
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
-    if not slug:
-        slug = entry_id
+    # Canonical ID format: library.{category}.{slug}
+    # This matches what library_sync expects from frontmatter
+    entry_id = f"library.{category}.{slug}"
+
+    # Compute content hash for integrity/deduplication
+    content_hash = compute_content_hash(content)
 
     # Build file path
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
@@ -740,10 +753,11 @@ def tool_create_note(args: dict) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     frontmatter_lines = [
         '---',
-        f'id: library.{category}.{slug}',
+        f'id: {entry_id}',
         f'title: "{title}"',
         f'category: {category}',
         f'created: {timestamp}',
+        f'content_hash: {content_hash}',
         'source: mcp-claude',
         'domain_tags: []',
         'key_phrases: []',
@@ -773,24 +787,24 @@ def tool_create_note(args: dict) -> dict:
         token=token
     )
 
-    # Insert into local database with task fields
+    # Insert into local database with task fields and content_hash
     if task_status:
         db.execute(
             """
             INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (entry_id, title, category, content, file_path, task_status, due_date)
+            (entry_id, title, category, content, file_path, task_status, due_date, content_hash)
         )
     else:
         db.execute(
             """
             INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (entry_id, title, category, content, file_path, source_transcript, content_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (entry_id, title, category, content, file_path)
+            (entry_id, title, category, content, file_path, content_hash)
         )
     db.commit()
 
@@ -1242,6 +1256,9 @@ def tool_update_note(args: dict) -> dict:
     category = new_category or entry['category']
     file_path = entry['file_path']
 
+    # Recompute content_hash if content changed
+    new_content_hash = compute_content_hash(content) if new_content is not None else None
+
     # Get current file from GitHub to preserve frontmatter structure
     token = current_app.config.get('SYSTEM_PAT')
     repo = 'bobbyhiddn/Legato.Library'
@@ -1256,13 +1273,20 @@ def tool_update_note(args: dict) -> dict:
                     frontmatter_lines = parts[1].strip().split('\n')
                     # Update frontmatter fields
                     new_frontmatter_lines = []
+                    has_content_hash = False
                     for line in frontmatter_lines:
                         if line.startswith('title:') and new_title:
                             new_frontmatter_lines.append(f'title: "{title}"')
                         elif line.startswith('category:') and new_category:
                             new_frontmatter_lines.append(f'category: {category}')
+                        elif line.startswith('content_hash:') and new_content_hash:
+                            new_frontmatter_lines.append(f'content_hash: {new_content_hash}')
+                            has_content_hash = True
                         else:
                             new_frontmatter_lines.append(line)
+                    # Add content_hash if it wasn't in frontmatter but content changed
+                    if new_content_hash and not has_content_hash:
+                        new_frontmatter_lines.append(f'content_hash: {new_content_hash}')
                     full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---\n\n{content}"
                 else:
                     full_content = content
@@ -1271,12 +1295,14 @@ def tool_update_note(args: dict) -> dict:
         else:
             # File doesn't exist in GitHub, build new frontmatter
             timestamp = datetime.utcnow().isoformat() + 'Z'
-            slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
+            slug = generate_slug(title)
+            content_hash = compute_content_hash(content)
             full_content = f"""---
 id: library.{category}.{slug}
 title: "{title}"
 category: {category}
 created: {timestamp}
+content_hash: {content_hash}
 source: mcp-claude
 domain_tags: []
 key_phrases: []
@@ -1293,15 +1319,25 @@ key_phrases: []
             token=token
         )
 
-        # Update local database
-        db.execute(
-            """
-            UPDATE knowledge_entries
-            SET title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE entry_id = ?
-            """,
-            (title, category, content, entry_id)
-        )
+        # Update local database (include content_hash if content changed)
+        if new_content_hash:
+            db.execute(
+                """
+                UPDATE knowledge_entries
+                SET title = ?, category = ?, content = ?, content_hash = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE entry_id = ?
+                """,
+                (title, category, content, new_content_hash, entry_id)
+            )
+        else:
+            db.execute(
+                """
+                UPDATE knowledge_entries
+                SET title = ?, category = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE entry_id = ?
+                """,
+                (title, category, content, entry_id)
+            )
         db.commit()
 
         logger.info(f"MCP updated note: {entry_id} - {title}")

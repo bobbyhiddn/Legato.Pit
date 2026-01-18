@@ -335,6 +335,12 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Migration: Add content_hash column for deduplication and integrity verification
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN content_hash TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
@@ -346,6 +352,7 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_links_source ON note_links(source_entry_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_entry_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_content_hash ON knowledge_entries(content_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_clients ON oauth_clients(client_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
@@ -359,13 +366,14 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
 # ============ Category Helpers ============
 
 # (name, display_name, description, folder_name, sort_order, color)
+# Using singular folder names for consistency with category names
 DEFAULT_CATEGORIES = [
-    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphanys', 1, '#f59e0b'),      # Amber
-    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concepts', 2, '#6366f1'),     # Indigo
-    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflections', 3, '#8b5cf6'),             # Violet
-    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmers', 4, '#ec4899'),  # Pink
-    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminders', 5, '#14b8a6'),                   # Teal
-    ('worklog', 'Worklog', 'Summary of work already completed', 'worklogs', 6, '#64748b'),                             # Slate
+    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphany', 1, '#f59e0b'),      # Amber
+    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concept', 2, '#6366f1'),     # Indigo
+    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflection', 3, '#8b5cf6'),             # Violet
+    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmer', 4, '#ec4899'),  # Pink
+    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminder', 5, '#14b8a6'),                   # Teal
+    ('worklog', 'Worklog', 'Summary of work already completed', 'worklog', 6, '#64748b'),                             # Slate
 ]
 
 
