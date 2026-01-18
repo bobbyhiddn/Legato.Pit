@@ -1900,7 +1900,7 @@ def api_graph():
         user_cats = get_user_categories(db, 'default')
         category_colors = {c['name']: c.get('color', '#6366f1') for c in user_cats}
 
-        # Get entries with embeddings
+        # Get entries with embeddings (pick latest embedding per entry to avoid duplicates)
         rows = db.execute(
             """
             SELECT
@@ -1910,6 +1910,12 @@ def api_graph():
                 e.embedding
             FROM knowledge_entries ke
             INNER JOIN embeddings e ON e.entry_id = ke.id AND e.entry_type = 'knowledge'
+            WHERE e.id = (
+                SELECT e2.id FROM embeddings e2
+                WHERE e2.entry_id = ke.id AND e2.entry_type = 'knowledge'
+                ORDER BY e2.created_at DESC
+                LIMIT 1
+            )
             ORDER BY ke.created_at DESC
             LIMIT ?
             """,

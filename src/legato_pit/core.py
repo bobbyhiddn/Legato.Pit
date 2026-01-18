@@ -168,7 +168,8 @@ def create_app():
             Syncs knowledge entries from Legato.Library GitHub repo to local DB.
             Continues as long as there's been user activity within the last 15 minutes.
             """
-            time.sleep(5)  # Wait for app to fully initialize
+            import random
+            time.sleep(5 + random.uniform(0, 3))  # Stagger worker startup
 
             while True:
                 # Check if there's been activity in the last 15 minutes
@@ -190,6 +191,19 @@ def create_app():
                             continue
 
                         db = init_db()
+
+                        # Check if another worker synced recently (within last 30 seconds)
+                        last_sync = db.execute(
+                            "SELECT synced_at FROM sync_log ORDER BY synced_at DESC LIMIT 1"
+                        ).fetchone()
+                        if last_sync:
+                            from datetime import datetime
+                            last_sync_time = datetime.fromisoformat(last_sync['synced_at'].replace('Z', '+00:00'))
+                            seconds_since_sync = (datetime.now(last_sync_time.tzinfo) - last_sync_time).total_seconds()
+                            if seconds_since_sync < 30:
+                                logger.debug(f"Skipping sync - another worker synced {seconds_since_sync:.0f}s ago")
+                                time.sleep(LIBRARY_SYNC_INTERVAL)
+                                continue
 
                         # Clean up invalid/duplicate entries first (only on first run)
                         cleanup_count = 0
