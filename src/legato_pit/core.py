@@ -167,9 +167,16 @@ def create_app():
 
             Syncs knowledge entries from Legato.Library GitHub repo to local DB.
             Continues as long as there's been user activity within the last 15 minutes.
+
+            NOTE: Only runs in single-tenant mode. Multi-tenant uses per-user sync on login.
             """
             import random
             time.sleep(5 + random.uniform(0, 3))  # Stagger worker startup
+
+            # Skip background sync in multi-tenant mode
+            if app.config.get('LEGATO_MODE') == 'multi-tenant':
+                logger.info("Multi-tenant mode: skipping background library sync (per-user sync on login)")
+                return
 
             while True:
                 # Check if there's been activity in the last 15 minutes

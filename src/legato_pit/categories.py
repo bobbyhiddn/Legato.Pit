@@ -52,16 +52,17 @@ categories_bp = Blueprint('categories', __name__, url_prefix='/categories')
 
 
 def get_db():
-    """Get legato database connection."""
-    if 'legato_db_conn' not in g:
-        from .rag.database import init_db
-        g.legato_db_conn = init_db()
-    return g.legato_db_conn
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def get_user_id():
     """Get current user ID (or 'default' for single-user mode)."""
-    # For now, use 'default' - can be extended for multi-user
+    from flask import session
+    user = session.get('user')
+    if user and user.get('user_id'):
+        return user['user_id']
     return 'default'
 
 

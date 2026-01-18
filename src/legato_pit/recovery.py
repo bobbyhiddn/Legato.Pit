@@ -710,9 +710,9 @@ def sync_category_descriptions(
     }
 
     try:
-        from .rag.database import init_db, get_user_categories
+        from .rag.database import get_user_legato_db, get_user_categories
 
-        db = init_db()
+        db = get_user_legato_db()
         categories = get_user_categories(db, 'default')
 
         # Get existing files in repo
@@ -787,10 +787,10 @@ def rebuild_database_from_library(
     result = RecoveryResult(operation="rebuild_database", success=True)
 
     try:
-        from .rag.database import init_db
+        from .rag.database import get_user_legato_db
         from .rag.library_sync import LibrarySync
 
-        db = init_db()
+        db = get_user_legato_db()
 
         # Clear existing entries
         db.execute("DELETE FROM knowledge_entries")

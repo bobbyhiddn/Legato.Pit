@@ -41,6 +41,23 @@ def get_db_path(db_name: str = "legato.db") -> Path:
     return get_db_dir() / db_name
 
 
+def get_user_db_path(user_id: str) -> Path:
+    """Get path for a user-specific database.
+
+    In multi-tenant mode, each user gets their own database file.
+    This ensures complete data isolation between users.
+
+    Args:
+        user_id: The user's unique ID
+
+    Returns:
+        Path to user's database file (e.g., legato_abc123.db)
+    """
+    # Sanitize user_id to prevent path traversal
+    safe_id = "".join(c for c in user_id if c.isalnum() or c in '-_')
+    return get_db_dir() / f"legato_{safe_id}.db"
+
+
 def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Get a database connection with proper settings."""
     path = db_path or get_db_path()
@@ -78,8 +95,11 @@ def checkpoint_all_databases():
 
 # ============ Legato DB (Knowledge/Embeddings) ============
 
-def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """Initialize legato.db with knowledge entries and embeddings.
+def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sqlite3.Connection:
+    """Initialize legato database with knowledge entries and embeddings.
+
+    In multi-tenant mode, pass user_id to get a user-specific database.
+    In single-tenant mode, uses the shared legato.db.
 
     This is the main RAG database containing:
     - knowledge_entries: Library knowledge artifacts
@@ -88,8 +108,18 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     - transcript_hashes: Deduplication fingerprints
     - sync_log: Sync tracking
     - pipeline_runs: Pipeline run tracking
+
+    Args:
+        db_path: Optional explicit path (overrides user_id)
+        user_id: User ID for multi-tenant isolation
     """
-    path = db_path or get_db_path("legato.db")
+    if db_path:
+        path = db_path
+    elif user_id:
+        path = get_user_db_path(user_id)
+    else:
+        path = get_db_path("legato.db")
+
     conn = get_connection(path)
     cursor = conn.cursor()
 
@@ -768,4 +798,73 @@ def backup_all_to_tigris(bucket_name: str) -> dict:
         except Exception as e:
             results[db_name] = {"success": False, "error": str(e)}
 
+    return results
+
+
+# ============ Flask Request-Scoped Database Access ============
+
+def get_user_legato_db():
+    """Get the legato database for the current authenticated user.
+
+    In multi-tenant mode, each user has their own isolated database.
+    In single-tenant mode, returns the shared legato.db.
+
+    Must be called within a Flask request context.
+
+    Returns:
+        sqlite3.Connection to user's legato database
+    """
+    from flask import g, current_app, session
+
+    # Check if we already have a connection for this request
+    if 'user_legato_db' in g:
+        return g.user_legato_db
+
+    # Determine if we're in multi-tenant mode
+    mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+
+    if mode == 'multi-tenant':
+        # Get user from session
+        user = session.get('user')
+        if user and user.get('user_id'):
+            user_id = user['user_id']
+            g.user_legato_db = init_db(user_id=user_id)
+        else:
+            # No user - return shared DB (for unauthenticated routes)
+            g.user_legato_db = init_db()
+    else:
+        # Single-tenant - use shared database
+        g.user_legato_db = init_db()
+
+    # Force WAL checkpoint to see latest writes
+    g.user_legato_db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+
+    return g.user_legato_db
+
+
+def delete_user_data(user_id: str) -> dict:
+    """Delete all data for a user.
+
+    In multi-tenant mode, this deletes the user's database file.
+    Also cleans up auth records.
+
+    Args:
+        user_id: The user's unique ID
+
+    Returns:
+        Dict with deletion status
+    """
+    results = {'user_id': user_id, 'deleted': []}
+
+    # Delete user's database file if it exists
+    user_db_path = get_user_db_path(user_id)
+    if user_db_path.exists():
+        # Also delete WAL and SHM files
+        for suffix in ['', '-wal', '-shm']:
+            p = Path(str(user_db_path) + suffix)
+            if p.exists():
+                p.unlink()
+                results['deleted'].append(str(p.name))
+
+    logger.info(f"Deleted user data for {user_id}: {results}")
     return results

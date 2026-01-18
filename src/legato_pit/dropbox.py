@@ -58,13 +58,16 @@ def sanitize_source_id(source_id):
 
 def get_category_definitions():
     """Get user category definitions for classifier."""
-    from flask import g
-    from .rag.database import init_db, get_user_categories
+    from flask import g, session
+    from .rag.database import get_user_legato_db, get_user_categories
 
-    if 'legato_db_conn' not in g:
-        g.legato_db_conn = init_db()
+    db = get_user_legato_db()
 
-    categories = get_user_categories(g.legato_db_conn, 'default')
+    # Get user_id from session or default
+    user = session.get('user', {})
+    user_id = user.get('user_id', 'default')
+
+    categories = get_user_categories(db, user_id)
 
     # Format for classifier: list of {name, display_name, description, folder_name}
     return [

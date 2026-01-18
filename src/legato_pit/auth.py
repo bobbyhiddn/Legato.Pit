@@ -476,6 +476,9 @@ def github_app_callback():
 
         logger.info(f"GitHub App user logged in: {github_login}")
 
+        # Trigger user-specific Library sync in background
+        trigger_user_library_sync(user['user_id'], github_login)
+
         # Check if user has any installations
         db = _get_db()
         installations = db.execute(
@@ -861,6 +864,69 @@ def get_current_user() -> Optional[dict]:
     return session.get('user')
 
 
+def trigger_user_library_sync(user_id: str, username: str) -> dict:
+    """Trigger a Library sync for a specific user.
+
+    This syncs the user's Legato.Library to their personal database.
+    Called after login in multi-tenant mode.
+
+    Args:
+        user_id: The user's unique ID
+        username: The user's GitHub login (for Library repo name)
+
+    Returns:
+        Dict with sync status
+    """
+    import threading
+    import os
+
+    def _sync_in_background():
+        from flask import current_app
+        from .rag.database import init_db
+        from .rag.library_sync import LibrarySync
+        from .rag.embedding_service import EmbeddingService
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+
+        try:
+            # Get token for user's Library
+            token = get_user_installation_token(user_id, 'library')
+            if not token:
+                # Fall back to SYSTEM_PAT for testing
+                token = os.environ.get('SYSTEM_PAT')
+
+            if not token:
+                logger.warning(f"No token available for user {username} Library sync")
+                return
+
+            # Initialize user's database
+            db = init_db(user_id=user_id)
+
+            # Set up embedding service
+            embedding_service = None
+            if os.environ.get('OPENAI_API_KEY'):
+                try:
+                    provider = OpenAIEmbeddingProvider()
+                    embedding_service = EmbeddingService(provider, db)
+                except Exception as e:
+                    logger.warning(f"Could not create embedding service: {e}")
+
+            # Sync from user's Library
+            library_repo = f"{username}/Legato.Library"
+            sync = LibrarySync(db, embedding_service)
+            stats = sync.sync_from_github(library_repo, token=token)
+
+            logger.info(f"User {username} Library sync complete: {stats}")
+
+        except Exception as e:
+            logger.error(f"User {username} Library sync failed: {e}")
+
+    # Run sync in background thread
+    thread = threading.Thread(target=_sync_in_background, daemon=True)
+    thread.start()
+
+    return {'status': 'started', 'user_id': user_id}
+
+
 def get_user_installation_token(user_id: str, repo_type: str = 'library') -> Optional[str]:
     """Get an installation access token for a user's designated repo.
 
@@ -929,3 +995,62 @@ def get_user_api_key(user_id: str, provider: str) -> Optional[str]:
         return None
 
     return decrypt_api_key(user_id, row['key_encrypted'])
+
+
+@auth_bp.route('/admin/reset-user/<username>', methods=['POST'])
+def admin_reset_user(username: str):
+    """Admin route to reset a user's account (clear their data).
+
+    This is used when a user needs to start fresh.
+    Only accessible by admin users (bobbyhiddn).
+
+    Args:
+        username: The GitHub username to reset
+    """
+    if 'user' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    # Only allow admin users
+    current_user = session['user'].get('username')
+    if current_user not in ['bobbyhiddn']:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    try:
+        db = _get_db()
+
+        # Find the user by GitHub login
+        user_row = db.execute(
+            "SELECT user_id FROM users WHERE github_login = ?",
+            (username,)
+        ).fetchone()
+
+        if not user_row:
+            return jsonify({'error': f'User {username} not found'}), 404
+
+        user_id = user_row['user_id']
+
+        # Delete user's personal database
+        from .rag.database import delete_user_data
+        db_result = delete_user_data(user_id)
+
+        # Clear user's auth data (installations, repos, api_keys)
+        db.execute("DELETE FROM user_repos WHERE user_id = ?", (user_id,))
+        db.execute("DELETE FROM user_api_keys WHERE user_id = ?", (user_id,))
+        db.execute("DELETE FROM github_app_installations WHERE user_id = ?", (user_id,))
+        db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        db.commit()
+
+        _log_audit(session['user']['user_id'], 'admin_reset', 'user', user_id, f'{{"target": "{username}"}}')
+
+        logger.info(f"Admin {current_user} reset user {username} (user_id: {user_id})")
+
+        return jsonify({
+            'success': True,
+            'message': f'User {username} has been reset',
+            'user_id': user_id,
+            'database_deleted': db_result
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to reset user {username}: {e}")
+        return jsonify({'error': str(e)}), 500

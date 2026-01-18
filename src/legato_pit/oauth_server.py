@@ -38,10 +38,8 @@ GITHUB_USER_URL = 'https://api.github.com/user'
 
 def get_db():
     """Get legato database connection for OAuth tables."""
-    if 'oauth_db_conn' not in g:
-        from .rag.database import init_db
-        g.oauth_db_conn = init_db()
-    return g.oauth_db_conn
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def get_jwt_secret() -> str:

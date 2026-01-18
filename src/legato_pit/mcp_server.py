@@ -31,11 +31,9 @@ MCP_PROTOCOL_VERSION = "2025-06-18"
 
 
 def get_db():
-    """Get legato database connection."""
-    if 'mcp_db_conn' not in g:
-        from .rag.database import init_db
-        g.mcp_db_conn = init_db()
-    return g.mcp_db_conn
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def get_embedding_service():

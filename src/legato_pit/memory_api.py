@@ -37,16 +37,20 @@ def require_api_token(f):
     return decorated
 
 
+def get_db():
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
+
+
 def get_embedding_service():
     """Get or create the embedding service."""
     if 'embedding_service' not in g:
-        from .rag.database import init_db
         from .rag.embedding_service import EmbeddingService
         from .rag.openai_provider import OpenAIEmbeddingProvider
 
-        # Initialize database if needed
-        if 'db_conn' not in g:
-            g.db_conn = init_db()
+        # Initialize database for current user
+        db_conn = get_db()
 
         # Create provider (prefer OpenAI for API consistency)
         try:
@@ -56,7 +60,7 @@ def get_embedding_service():
             from .rag.ollama_provider import OllamaEmbeddingProvider
             provider = OllamaEmbeddingProvider()
 
-        g.embedding_service = EmbeddingService(provider, g.db_conn)
+        g.embedding_service = EmbeddingService(provider, db_conn)
 
     return g.embedding_service
 
@@ -108,8 +112,6 @@ def correlate():
     - QUEUE: Similar entry exists with active chord, queue agent task instead of new chord
     - SKIP: Exact/near-exact duplicate, skip processing
     """
-    from .rag.database import init_db
-
     data = request.get_json()
 
     if not data:
@@ -130,7 +132,7 @@ def correlate():
 
     try:
         service = get_embedding_service()
-        db = init_db()
+        db = get_db()
 
         # Find similar entries
         similar = service.find_similar(
@@ -245,8 +247,7 @@ def append_to_entry():
         "action": "appended"
     }
     """
-    from .rag.database import init_db
-    from .rag.github_service import commit_file
+        from .rag.github_service import commit_file
     import os
 
     data = request.get_json()
@@ -265,7 +266,7 @@ def append_to_entry():
         return jsonify({'error': 'content required'}), 400
 
     try:
-        db = init_db()
+        db = get_db()
 
         # Get existing entry
         entry = db.execute(
@@ -596,8 +597,7 @@ def trigger_sync():
         "clear": true  // Clear all entries before sync (fixes duplicates)
     }
     """
-    from .rag.database import init_db
-    from .rag.library_sync import LibrarySync
+        from .rag.library_sync import LibrarySync
     from .rag.embedding_service import EmbeddingService
     from .rag.openai_provider import OpenAIEmbeddingProvider
 
@@ -605,7 +605,7 @@ def trigger_sync():
     clear_first = data.get('clear', False)
 
     try:
-        db = init_db()
+        db = get_db()
 
         # Clear existing entries if requested
         if clear_first:
@@ -678,10 +678,9 @@ def pipeline_status():
         return jsonify({'error': f'Missing required fields: {missing}'}), 400
 
     try:
-        from .rag.database import init_db
-        import json
+                import json
 
-        db = init_db()
+        db = get_db()
 
         # Store pipeline status
         db.execute(
@@ -747,10 +746,9 @@ def get_pre_classify_details(run_id: str):
     }
     """
     try:
-        from .rag.database import init_db
-        import json
+                import json
 
-        db = init_db()
+        db = get_db()
 
         row = db.execute(
             """
@@ -798,10 +796,9 @@ def get_pipeline_status(run_id: str):
     }
     """
     try:
-        from .rag.database import init_db
-        import json
+                import json
 
-        db = init_db()
+        db = get_db()
 
         rows = db.execute(
             """

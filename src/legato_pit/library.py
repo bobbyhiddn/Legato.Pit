@@ -28,13 +28,9 @@ _sync_in_progress = False
 
 
 def get_db():
-    """Get legato database connection (knowledge entries)."""
-    if 'legato_db_conn' not in g:
-        from .rag.database import init_db
-        g.legato_db_conn = init_db()
-        # Force WAL checkpoint to ensure we see latest writes
-        g.legato_db_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-    return g.legato_db_conn
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def get_agents_db():
@@ -202,7 +198,7 @@ def trigger_background_sync():
     def do_sync():
         global _sync_in_progress
         try:
-            from flask import current_app
+            from flask import current_app, session
             from .rag.database import init_db
             from .rag.library_sync import LibrarySync
             from .rag.embedding_service import EmbeddingService
@@ -214,7 +210,14 @@ def trigger_background_sync():
                 logger.warning("SYSTEM_PAT not set, skipping on-load sync")
                 return
 
-            db = init_db()
+            # Get user-specific database in multi-tenant mode
+            mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+            if mode == 'multi-tenant':
+                user = session.get('user', {})
+                user_id = user.get('user_id')
+                db = init_db(user_id=user_id) if user_id else init_db()
+            else:
+                db = init_db()
 
             embedding_service = None
             if os.environ.get('OPENAI_API_KEY'):

@@ -33,11 +33,9 @@ def get_db():
 
 
 def get_legato_db():
-    """Get legato database connection (for knowledge entries)."""
-    if 'legato_db_conn' not in g:
-        from .rag.database import init_db
-        g.legato_db_conn = init_db()
-    return g.legato_db_conn
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def generate_queue_id() -> str:

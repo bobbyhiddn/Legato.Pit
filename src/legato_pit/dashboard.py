@@ -27,11 +27,9 @@ def trigger_library_sync_if_new_artifacts(artifacts):
 
     try:
         from flask import g
-        from .rag.database import init_db
+        from .rag.database import get_user_legato_db
 
-        if 'legato_db_conn' not in g:
-            g.legato_db_conn = init_db()
-        db = g.legato_db_conn
+        db = get_user_legato_db()
 
         # Get known file paths from local DB
         rows = db.execute("SELECT file_path FROM knowledge_entries WHERE file_path IS NOT NULL").fetchall()
@@ -245,7 +243,7 @@ def get_stats():
         Dict with transcripts (unique), notes (total), chords (from GitHub)
     """
     from flask import g
-    from .rag.database import init_db
+    from .rag.database import get_user_legato_db
 
     stats = {
         'motifs': 0,
@@ -254,9 +252,7 @@ def get_stats():
     }
 
     try:
-        if 'legato_db_conn' not in g:
-            g.legato_db_conn = init_db()
-        db = g.legato_db_conn
+        db = get_user_legato_db()
 
         # Count unique transcripts (deduplicated by source_transcript)
         result = db.execute("""

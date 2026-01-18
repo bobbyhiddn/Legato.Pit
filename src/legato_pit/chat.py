@@ -27,18 +27,17 @@ chat_bp = Blueprint('chat', __name__, url_prefix='/chat')
 def get_services():
     """Get or create RAG services."""
     if 'chat_services' not in g:
-        from .rag.database import init_db, init_chat_db
+        from .rag.database import get_user_legato_db, init_chat_db
         from .rag.embedding_service import EmbeddingService
         from .rag.openai_provider import OpenAIEmbeddingProvider
         from .rag.context_builder import ContextBuilder
         from .rag.chat_service import ChatService, ChatProvider
 
         # Initialize databases
-        # legato.db for embeddings/knowledge
-        if 'legato_db_conn' not in g:
-            g.legato_db_conn = init_db()
+        # User-scoped legato db for embeddings/knowledge
+        legato_db = get_user_legato_db()
 
-        # chat.db for sessions/messages
+        # chat.db for sessions/messages (shared for now)
         if 'chat_db_conn' not in g:
             g.chat_db_conn = init_chat_db()
 
@@ -49,8 +48,8 @@ def get_services():
             from .rag.ollama_provider import OllamaEmbeddingProvider
             provider = OllamaEmbeddingProvider()
 
-        # Embedding service uses legato.db
-        embedding_service = EmbeddingService(provider, g.legato_db_conn)
+        # Embedding service uses user's legato db
+        embedding_service = EmbeddingService(provider, legato_db)
         context_builder = ContextBuilder(embedding_service)
 
         # Create chat service

@@ -18,11 +18,9 @@ chords_bp = Blueprint('chords', __name__, url_prefix='/chords')
 
 
 def get_legato_db():
-    """Get legato database connection."""
-    if 'legato_db_conn' not in g:
-        from .rag.database import init_db
-        g.legato_db_conn = init_db()
-    return g.legato_db_conn
+    """Get legato database connection for current user."""
+    from .rag.database import get_user_legato_db
+    return get_user_legato_db()
 
 
 def fetch_chord_repos(token: str, org: str) -> list[dict]:
