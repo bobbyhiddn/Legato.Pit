@@ -247,7 +247,7 @@ def append_to_entry():
         "action": "appended"
     }
     """
-        from .rag.github_service import commit_file
+    from .rag.github_service import commit_file
     import os
 
     data = request.get_json()
