@@ -41,153 +41,43 @@ GITHUB_APP_INSTALL_URL = 'https://github.com/apps/{app_slug}/installations/new'
 
 @auth_bp.route('/login')
 def login():
-    """Display login page or initiate OAuth flow."""
+    """Display login page - GitHub App authentication only."""
     if 'user' in session:
         return redirect(url_for('dashboard.index'))
 
-    # Check deployment mode and auth configuration
-    is_multi_tenant = current_app.config.get('LEGATO_MODE') == 'multi-tenant'
-    github_app_configured = is_multi_tenant and bool(current_app.config.get('GITHUB_APP_CLIENT_ID'))
-    oauth_configured = bool(current_app.config.get('GITHUB_CLIENT_ID'))
+    # Only GitHub App authentication is supported for security
+    github_app_configured = bool(current_app.config.get('GITHUB_APP_CLIENT_ID'))
 
-    if not github_app_configured and not oauth_configured:
-        flash('GitHub authentication not configured. Contact administrator.', 'error')
+    if not github_app_configured:
+        flash('GitHub App authentication not configured. Contact administrator.', 'error')
 
     return render_template('login.html',
                            github_app_configured=github_app_configured,
-                           oauth_configured=oauth_configured)
+                           oauth_configured=False)  # Legacy OAuth disabled
 
 
 @auth_bp.route('/github')
 def github_login():
-    """Initiate GitHub OAuth flow."""
-    client_id = current_app.config.get('GITHUB_CLIENT_ID')
-
-    if not client_id:
-        flash('GitHub OAuth not configured.', 'error')
-        return redirect(url_for('auth.login'))
-
-    # Generate and store state for CSRF protection
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-
-    # Build authorization URL
-    params = {
-        'client_id': client_id,
-        'redirect_uri': url_for('auth.github_callback', _external=True),
-        'scope': 'read:user',
-        'state': state
-    }
-
-    auth_url = f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}"
-    logger.info(f"Redirecting to GitHub OAuth: {auth_url}")
-
-    return redirect(auth_url)
+    """Legacy OAuth disabled - redirect to GitHub App login."""
+    flash('Please use GitHub App authentication.', 'info')
+    return redirect(url_for('auth.github_app_login'))
 
 
 @auth_bp.route('/github/callback')
 def github_callback():
-    """Handle GitHub OAuth callback."""
-    # Check if this is an MCP OAuth flow (shares callback URL with web login)
+    """Handle GitHub OAuth callback - only for MCP OAuth flow.
+
+    Legacy web OAuth is disabled. This callback only handles MCP OAuth.
+    """
+    # Check if this is an MCP OAuth flow
     if 'mcp_github_state' in session:
         from .oauth_server import handle_mcp_github_callback
         return handle_mcp_github_callback()
 
-    # Verify state to prevent CSRF
-    state = request.args.get('state')
-    stored_state = session.pop('oauth_state', None)
-
-    if not state or state != stored_state:
-        logger.warning(f"OAuth state mismatch: received={state}, expected={stored_state}")
-        flash('Authentication failed: Invalid state. Please try again.', 'error')
-        return redirect(url_for('auth.login'))
-
-    # Check for errors from GitHub
-    error = request.args.get('error')
-    if error:
-        error_desc = request.args.get('error_description', 'Unknown error')
-        logger.warning(f"GitHub OAuth error: {error} - {error_desc}")
-        flash(f'GitHub authentication failed: {error_desc}', 'error')
-        return redirect(url_for('auth.login'))
-
-    # Get authorization code
-    code = request.args.get('code')
-    if not code:
-        flash('Authentication failed: No authorization code received.', 'error')
-        return redirect(url_for('auth.login'))
-
-    # Exchange code for access token
-    token_data = {
-        'client_id': current_app.config['GITHUB_CLIENT_ID'],
-        'client_secret': current_app.config['GITHUB_CLIENT_SECRET'],
-        'code': code,
-        'redirect_uri': url_for('auth.github_callback', _external=True)
-    }
-
-    try:
-        token_response = requests.post(
-            GITHUB_TOKEN_URL,
-            data=token_data,
-            headers={'Accept': 'application/json'},
-            timeout=10
-        )
-        token_response.raise_for_status()
-        token_json = token_response.json()
-    except requests.RequestException as e:
-        logger.error(f"Failed to exchange OAuth code: {e}")
-        flash('Authentication failed: Could not verify with GitHub.', 'error')
-        return redirect(url_for('auth.login'))
-
-    access_token = token_json.get('access_token')
-    if not access_token:
-        error = token_json.get('error_description', 'No access token received')
-        logger.warning(f"No access token in response: {token_json}")
-        flash(f'Authentication failed: {error}', 'error')
-        return redirect(url_for('auth.login'))
-
-    # Fetch user info
-    try:
-        user_response = requests.get(
-            GITHUB_USER_URL,
-            headers={
-                'Authorization': f'Bearer {access_token}',
-                'Accept': 'application/vnd.github+json'
-            },
-            timeout=10
-        )
-        user_response.raise_for_status()
-        user_data = user_response.json()
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch user info: {e}")
-        flash('Authentication failed: Could not fetch user info.', 'error')
-        return redirect(url_for('auth.login'))
-
-    username = user_data.get('login')
-    github_id = user_data.get('id')
-    name = user_data.get('name') or username
-    avatar_url = user_data.get('avatar_url')
-
-    # Create or get user record for multi-tenant isolation
-    user = _get_or_create_user(github_id, username, name=name, avatar_url=avatar_url)
-
-    # Session fixation protection: regenerate session
-    session.clear()
-
-    # Store user info in session (including user_id for database isolation)
-    session['user'] = {
-        'user_id': user['user_id'],
-        'username': username,
-        'name': name,
-        'avatar_url': avatar_url,
-        'github_id': github_id
-    }
-    session['github_token'] = access_token
-    session.permanent = True
-
-    logger.info(f"User logged in: {username} (user_id: {user['user_id']})")
-    flash(f'Welcome, {name}!', 'success')
-
-    return redirect(url_for('dashboard.index'))
+    # Legacy OAuth disabled - redirect to GitHub App login
+    logger.warning("Legacy OAuth callback hit - redirecting to GitHub App login")
+    flash('Please use GitHub App authentication.', 'info')
+    return redirect(url_for('auth.github_app_login'))
 
 
 @auth_bp.route('/logout')
