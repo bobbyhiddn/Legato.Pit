@@ -43,8 +43,11 @@
             </div>
 
             <div class="setup-step-done">
-                <p>Already completed setup?</p>
+                <p>Already created your Library?</p>
                 <button onclick="location.reload()" class="btn btn-outline btn-sm">Refresh to detect Library</button>
+                <p class="help-text" style="margin-top: 0.5rem;">
+                    If detection fails, try <a href="{{ url_for('auth.logout') }}">logging out</a> and back in.
+                </p>
             </div>
         </div>
     </div>

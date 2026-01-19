@@ -430,11 +430,14 @@ def github_app_login():
     state = secrets.token_urlsafe(32)
     session['app_oauth_state'] = state
 
-    # Build authorization URL with email scope for user identification
+    # Build authorization URL
+    # Scopes:
+    # - read:user, user:email: User identification
+    # - repo: Access to repos for Library detection and installation management
     params = {
         'client_id': client_id,
         'redirect_uri': url_for('auth.github_app_callback', _external=True),
-        'scope': 'read:user user:email',
+        'scope': 'read:user user:email repo',
         'state': state
     }
 
