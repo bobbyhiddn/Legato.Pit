@@ -78,6 +78,61 @@ def extract_title_from_content(content: str, filename: str) -> str:
     return name.replace('-', ' ').title()
 
 
+# Category normalization map - shared between functions
+CATEGORY_MAP = {
+    # Singular (canonical)
+    'concept': 'concept',
+    'epiphany': 'epiphany',
+    'reflection': 'reflection',
+    'glimmer': 'glimmer',
+    'reminder': 'reminder',
+    'worklog': 'worklog',
+    'tech-thought': 'tech-thought',
+    'research-topic': 'research-topic',
+    'theology': 'theology',
+    'agent-thought': 'agent-thought',
+    'article-idea': 'article-idea',
+    'writing': 'writing',
+    # Plural (legacy)
+    'concepts': 'concept',
+    'epiphanies': 'epiphany',
+    'reflections': 'reflection',
+    'glimmers': 'glimmer',
+    'reminders': 'reminder',
+    'worklogs': 'worklog',
+    'tech-thoughts': 'tech-thought',
+    'research-topics': 'research-topic',
+    'theologies': 'theology',
+    'agent-thoughts': 'agent-thought',
+    'article-ideas': 'article-idea',
+    'writings': 'writing',
+    # Typos
+    'epiphanys': 'epiphany',
+    'theologys': 'theology',
+    'tech-thoughtss': 'tech-thought',
+    'research-topicss': 'research-topic',
+    # Other
+    'procedures': 'procedure',
+    'procedure': 'procedure',
+    'references': 'reference',
+    'reference': 'reference',
+}
+
+
+def normalize_category(category: str) -> str:
+    """Normalize a category name to its canonical singular form.
+
+    Args:
+        category: Category string (may be plural, have typos, etc.)
+
+    Returns:
+        Canonical category string (singular form)
+    """
+    if not category:
+        return 'general'
+    return CATEGORY_MAP.get(category.lower(), category.lower())
+
+
 def categorize_from_path(path: str) -> str:
     """Determine category from file path.
 
@@ -93,41 +148,7 @@ def categorize_from_path(path: str) -> str:
     parts = Path(path).parts
     if len(parts) > 0:
         folder = parts[0].lower()
-        # Map folder names to canonical singular category names
-        # Handles typos, plurals, and legacy folder names
-        category_map = {
-            # Singular (canonical)
-            'concept': 'concept',
-            'epiphany': 'epiphany',
-            'reflection': 'reflection',
-            'glimmer': 'glimmer',
-            'reminder': 'reminder',
-            'worklog': 'worklog',
-            'tech-thought': 'tech-thought',
-            'research-topic': 'research-topic',
-            'theology': 'theology',
-            # Plural (legacy)
-            'concepts': 'concept',
-            'epiphanies': 'epiphany',
-            'reflections': 'reflection',
-            'glimmers': 'glimmer',
-            'reminders': 'reminder',
-            'worklogs': 'worklog',
-            'tech-thoughts': 'tech-thought',
-            'research-topics': 'research-topic',
-            'theologies': 'theology',
-            # Typos
-            'epiphanys': 'epiphany',
-            'theologys': 'theology',
-            'tech-thoughtss': 'tech-thought',
-            'research-topicss': 'research-topic',
-            # Other
-            'procedures': 'procedure',
-            'procedure': 'procedure',
-            'references': 'reference',
-            'reference': 'reference',
-        }
-        return category_map.get(folder, folder)
+        return CATEGORY_MAP.get(folder, folder)
     return 'general'
 
 
@@ -239,12 +260,13 @@ class LibrarySync:
             response.raise_for_status()
             tree_data = response.json()
 
-            # Filter for markdown files
+            # Filter for markdown files (exclude README.md and description.md)
             md_files = [
                 item for item in tree_data.get('tree', [])
                 if item['type'] == 'blob' and item['path'].endswith('.md')
                 and not item['path'].startswith('.')
                 and item['path'] != 'README.md'
+                and not item['path'].endswith('/description.md')
             ]
 
             stats['files_found'] = len(md_files)
@@ -305,19 +327,16 @@ class LibrarySync:
 
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, path)
-        category = frontmatter.get('category') or categorize_from_path(path)
+        raw_category = frontmatter.get('category') or categorize_from_path(path)
+        # Always normalize category to handle plurals, typos, etc.
+        category = normalize_category(raw_category)
 
         # Compute content hash for integrity/deduplication
         content_hash = compute_content_hash(body)
 
-        # Prefer frontmatter ID if present, otherwise generate canonical ID
-        # This ensures IDs remain stable once set
-        frontmatter_id = frontmatter.get('id')
-        if frontmatter_id and isinstance(frontmatter_id, str) and frontmatter_id.strip():
-            entry_id = frontmatter_id.strip()
-        else:
-            # Generate new canonical format ID
-            entry_id = generate_entry_id(category, title)
+        # Always generate canonical entry_id from normalized category
+        # Don't trust frontmatter ID as it may have bad category (e.g., research-topicss)
+        entry_id = generate_entry_id(category, title)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -470,9 +489,9 @@ class LibrarySync:
             'embeddings_generated': 0,
         }
 
-        # Find all markdown files
+        # Find all markdown files (exclude README.md and description.md)
         md_files = list(library_path.glob('**/*.md'))
-        md_files = [f for f in md_files if f.name != 'README.md' and not f.name.startswith('.')]
+        md_files = [f for f in md_files if f.name != 'README.md' and f.name != 'description.md' and not f.name.startswith('.')]
 
         stats['files_found'] = len(md_files)
         logger.info(f"Found {len(md_files)} markdown files in {library_path}")
@@ -513,17 +532,16 @@ class LibrarySync:
 
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, file_path.name)
-        category = frontmatter.get('category') or categorize_from_path(relative_path)
+        raw_category = frontmatter.get('category') or categorize_from_path(relative_path)
+        # Always normalize category to handle plurals, typos, etc.
+        category = normalize_category(raw_category)
 
         # Compute content hash for integrity/deduplication
         content_hash = compute_content_hash(body)
 
-        # Prefer frontmatter ID if present, otherwise generate canonical ID
-        frontmatter_id = frontmatter.get('id')
-        if frontmatter_id and isinstance(frontmatter_id, str) and frontmatter_id.strip():
-            entry_id = frontmatter_id.strip()
-        else:
-            entry_id = generate_entry_id(category, title)
+        # Always generate canonical entry_id from normalized category
+        # Don't trust frontmatter ID as it may have bad category (e.g., research-topicss)
+        entry_id = generate_entry_id(category, title)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
