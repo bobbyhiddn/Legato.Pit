@@ -689,14 +689,14 @@ def spawn_chord(
                 result["repo_id"],
                 result["repo_name"]
             )
-            result["added_to_installation"] = added
-            if not added:
-                logger.warning(
-                    f"Could not auto-add {result['repo_name']} to installation. "
-                    f"User may need to manually add it."
-                )
+            result["added_to_installation"] = True
+        except RuntimeError as e:
+            # Queued for later - chord spawn still succeeded
+            logger.info(f"Repo queued for installation addition: {e}")
+            result["added_to_installation"] = False
+            result["installation_queued"] = True
         except Exception as e:
-            logger.warning(f"Failed to add repo to installation: {e}")
+            logger.error(f"Unexpected error adding repo to installation: {e}")
             result["added_to_installation"] = False
 
     return result

@@ -3,7 +3,8 @@
 
 {% block content %}
 <div class="setup-container">
-    {% set library_repo = repos|selectattr('repo_type', 'equalto', 'library')|first %}
+    {% set library_repos = repos|selectattr('repo_type', 'equalto', 'library')|list %}
+    {% set library_repo = library_repos[0] if library_repos else none %}
     {% set is_configured = library_repo is not none %}
 
     {% if is_configured %}

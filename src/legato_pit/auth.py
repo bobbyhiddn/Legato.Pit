@@ -505,6 +505,14 @@ def github_app_callback():
         # Trigger user-specific Library sync in background
         trigger_user_library_sync(user['user_id'], github_login)
 
+        # Process any pending repo additions (from failed adds due to expired token)
+        try:
+            added = process_pending_repo_additions(user['user_id'])
+            if added > 0:
+                logger.info(f"Processed {added} pending repo additions for {github_login}")
+        except Exception as e:
+            logger.warning(f"Error processing pending repo additions: {e}")
+
         # Check if user has any installations
         db = _get_db()
         installations = db.execute(
@@ -1020,52 +1028,152 @@ def get_user_installation_token(user_id: str, repo_type: str = 'library') -> Opt
         return None
 
 
-def add_repo_to_installation(user_id: str, repo_id: int, repo_full_name: str = None) -> bool:
+def _get_user_oauth_token(user_id: str) -> Optional[str]:
+    """Get user's OAuth token, refreshing if needed.
+
+    Tries in order:
+    1. Session token
+    2. Stored token (if not expired)
+    3. Refresh the token using refresh_token
+
+    Returns:
+        OAuth token string or None
+    """
+    from datetime import datetime
+
+    # Try session first
+    oauth_token = session.get('github_token')
+    if oauth_token:
+        return oauth_token
+
+    # Try database
+    from .crypto import decrypt_for_user, encrypt_for_user
+    db = _get_db()
+    row = db.execute(
+        """SELECT oauth_token_encrypted, oauth_token_expires_at, refresh_token_encrypted
+           FROM users WHERE user_id = ?""",
+        (user_id,)
+    ).fetchone()
+
+    if not row:
+        return None
+
+    # Check if stored token is still valid
+    if row['oauth_token_encrypted']:
+        expires_at = row['oauth_token_expires_at']
+        is_expired = False
+
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                now = datetime.now(expiry.tzinfo) if expiry.tzinfo else datetime.now()
+                is_expired = expiry < now
+            except (ValueError, TypeError):
+                is_expired = False  # Can't determine, try anyway
+
+        if not is_expired:
+            token = decrypt_for_user(user_id, row['oauth_token_encrypted'])
+            if token:
+                return token
+
+    # Try to refresh using refresh_token
+    if row['refresh_token_encrypted']:
+        refresh_token = decrypt_for_user(user_id, row['refresh_token_encrypted'])
+        if refresh_token:
+            new_token = _refresh_oauth_token(user_id, refresh_token)
+            if new_token:
+                return new_token
+
+    # Last resort: return possibly-expired token (might still work)
+    if row['oauth_token_encrypted']:
+        return decrypt_for_user(user_id, row['oauth_token_encrypted'])
+
+    return None
+
+
+def _refresh_oauth_token(user_id: str, refresh_token: str) -> Optional[str]:
+    """Refresh an OAuth token using the refresh token.
+
+    GitHub App OAuth supports refresh tokens when configured.
+
+    Returns:
+        New access token or None if refresh failed
+    """
+    from flask import current_app
+    from .crypto import encrypt_for_user
+
+    client_id = current_app.config.get('GITHUB_CLIENT_ID')
+    client_secret = current_app.config.get('GITHUB_CLIENT_SECRET')
+
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        resp = requests.post(
+            'https://github.com/login/oauth/access_token',
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'grant_type': 'refresh_token',
+                'refresh_token': refresh_token,
+            },
+            headers={'Accept': 'application/json'},
+            timeout=15,
+        )
+
+        if resp.ok:
+            data = resp.json()
+            new_token = data.get('access_token')
+            new_refresh = data.get('refresh_token')
+
+            if new_token:
+                # Store the new tokens
+                db = _get_db()
+                encrypted_token = encrypt_for_user(user_id, new_token)
+                db.execute(
+                    """UPDATE users SET oauth_token_encrypted = ?,
+                       oauth_token_expires_at = datetime('now', '+8 hours'),
+                       updated_at = CURRENT_TIMESTAMP WHERE user_id = ?""",
+                    (encrypted_token, user_id)
+                )
+
+                if new_refresh:
+                    encrypted_refresh = encrypt_for_user(user_id, new_refresh)
+                    db.execute(
+                        "UPDATE users SET refresh_token_encrypted = ? WHERE user_id = ?",
+                        (encrypted_refresh, user_id)
+                    )
+
+                db.commit()
+                logger.info(f"Refreshed OAuth token for user {user_id}")
+                return new_token
+
+    except Exception as e:
+        logger.warning(f"Failed to refresh OAuth token: {e}")
+
+    return None
+
+
+def add_repo_to_installation(user_id: str, repo_id: int, repo_full_name: str = None,
+                              max_retries: int = 3) -> bool:
     """Add a repository to the user's GitHub App installation.
 
-    This uses the user's OAuth token (from session or database) to add a repo
-    to their installation. Call this after creating a Chord repo so Legato
-    maintains access to it.
+    This is the primary method for ensuring Legato has access to spawned Chords.
+    Uses retry logic with exponential backoff and token refresh.
 
     Args:
         user_id: The user's ID
         repo_id: The GitHub repository ID
         repo_full_name: Optional full name for logging (org/repo)
+        max_retries: Maximum retry attempts (default 3)
 
     Returns:
         True if successful, False otherwise
+
+    Raises:
+        RuntimeError: If all retries fail (caller should handle)
     """
-    # Get user's OAuth token - try session first, then database
-    oauth_token = session.get('github_token')
-
-    if not oauth_token:
-        # Try to get from database
-        from .crypto import decrypt_for_user
-        db = _get_db()
-        row = db.execute(
-            """SELECT oauth_token_encrypted, oauth_token_expires_at FROM users
-               WHERE user_id = ? AND oauth_token_encrypted IS NOT NULL""",
-            (user_id,)
-        ).fetchone()
-
-        if row and row['oauth_token_encrypted']:
-            # Check if token is expired
-            expires_at = row['oauth_token_expires_at']
-            if expires_at:
-                from datetime import datetime
-                try:
-                    expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                    if expiry < datetime.now(expiry.tzinfo if expiry.tzinfo else None):
-                        logger.warning(f"OAuth token for user {user_id} is expired")
-                        # Token expired, but try anyway - might still work
-                except (ValueError, TypeError):
-                    pass  # Can't parse, try anyway
-
-            oauth_token = decrypt_for_user(user_id, row['oauth_token_encrypted'])
-
-    if not oauth_token:
-        logger.warning(f"No OAuth token available for user {user_id}, cannot add repo to installation")
-        return False
+    import time
 
     db = _get_db()
 
@@ -1076,36 +1184,125 @@ def add_repo_to_installation(user_id: str, repo_id: int, repo_full_name: str = N
     ).fetchone()
 
     if not row:
-        logger.warning(f"No installation found for user {user_id}")
-        return False
+        logger.error(f"No installation found for user {user_id}")
+        _queue_repo_addition(user_id, repo_id, repo_full_name)
+        raise RuntimeError(f"No GitHub App installation for user {user_id}")
 
     installation_id = row['installation_id']
+    last_error = None
 
+    for attempt in range(max_retries):
+        # Get fresh token (may refresh if needed)
+        oauth_token = _get_user_oauth_token(user_id)
+
+        if not oauth_token:
+            logger.error(f"No OAuth token available for user {user_id}")
+            _queue_repo_addition(user_id, repo_id, repo_full_name)
+            raise RuntimeError(f"No OAuth token for user {user_id} - user must re-authenticate")
+
+        try:
+            resp = requests.put(
+                f'https://api.github.com/user/installations/{installation_id}/repositories/{repo_id}',
+                headers={
+                    'Authorization': f'Bearer {oauth_token}',
+                    'Accept': 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                },
+                timeout=15,
+            )
+
+            if resp.status_code == 204:
+                logger.info(f"Added repo {repo_full_name or repo_id} to installation {installation_id}")
+                return True
+            elif resp.status_code == 304:
+                logger.info(f"Repo {repo_full_name or repo_id} already in installation")
+                return True
+            elif resp.status_code == 401:
+                # Token invalid - clear it and retry
+                logger.warning(f"OAuth token invalid for user {user_id}, clearing and retrying")
+                db.execute(
+                    "UPDATE users SET oauth_token_encrypted = NULL WHERE user_id = ?",
+                    (user_id,)
+                )
+                db.commit()
+                last_error = "OAuth token invalid"
+            elif resp.status_code == 403:
+                # Permission denied - may need different scope
+                last_error = f"Permission denied: {resp.text}"
+                logger.error(f"Permission denied adding repo to installation: {resp.text}")
+                break  # Don't retry permission errors
+            else:
+                last_error = f"HTTP {resp.status_code}: {resp.text}"
+                logger.warning(f"Attempt {attempt + 1} failed: {last_error}")
+
+        except requests.RequestException as e:
+            last_error = str(e)
+            logger.warning(f"Attempt {attempt + 1} network error: {e}")
+
+        # Exponential backoff before retry
+        if attempt < max_retries - 1:
+            wait_time = (2 ** attempt) * 0.5  # 0.5s, 1s, 2s
+            time.sleep(wait_time)
+
+    # All retries failed - queue for later
+    _queue_repo_addition(user_id, repo_id, repo_full_name)
+    raise RuntimeError(f"Failed to add repo after {max_retries} attempts: {last_error}")
+
+
+def _queue_repo_addition(user_id: str, repo_id: int, repo_full_name: str = None):
+    """Queue a failed repo addition for later retry.
+
+    Stores in database so it can be retried when user re-authenticates.
+    """
     try:
-        # Add repo to installation using user's OAuth token
-        resp = requests.put(
-            f'https://api.github.com/user/installations/{installation_id}/repositories/{repo_id}',
-            headers={
-                'Authorization': f'Bearer {oauth_token}',
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
-            },
-            timeout=15,
+        db = _get_db()
+        db.execute(
+            """INSERT OR REPLACE INTO pending_repo_additions
+               (user_id, repo_id, repo_full_name, created_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+            (user_id, repo_id, repo_full_name)
         )
+        db.commit()
+        logger.info(f"Queued repo {repo_full_name or repo_id} for later addition to installation")
+    except Exception as e:
+        logger.warning(f"Could not queue repo addition: {e}")
 
-        if resp.status_code == 204:
-            logger.info(f"Added repo {repo_full_name or repo_id} to installation {installation_id}")
-            return True
-        elif resp.status_code == 304:
-            logger.info(f"Repo {repo_full_name or repo_id} already in installation")
-            return True
-        else:
-            logger.warning(f"Failed to add repo to installation: {resp.status_code} - {resp.text}")
-            return False
 
-    except requests.RequestException as e:
-        logger.error(f"Error adding repo to installation: {e}")
-        return False
+def process_pending_repo_additions(user_id: str) -> int:
+    """Process any pending repo additions for a user.
+
+    Call this after user re-authenticates to catch up on any failed additions.
+
+    Returns:
+        Number of repos successfully added
+    """
+    db = _get_db()
+    pending = db.execute(
+        "SELECT repo_id, repo_full_name FROM pending_repo_additions WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+
+    if not pending:
+        return 0
+
+    added = 0
+    for row in pending:
+        try:
+            if add_repo_to_installation(user_id, row['repo_id'], row['repo_full_name']):
+                # Remove from queue
+                db.execute(
+                    "DELETE FROM pending_repo_additions WHERE user_id = ? AND repo_id = ?",
+                    (user_id, row['repo_id'])
+                )
+                db.commit()
+                added += 1
+        except RuntimeError:
+            pass  # Still failed, leave in queue
+
+    if added:
+        logger.info(f"Processed {added} pending repo additions for user {user_id}")
+
+    return added
 
 
 def get_user_api_key(user_id: str, provider: str) -> Optional[str]:

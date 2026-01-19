@@ -542,6 +542,18 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         )
     """)
 
+    # Pending repo additions (for retry when token expired)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_repo_additions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            repo_id INTEGER NOT NULL,
+            repo_full_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, repo_id)
+        )
+    """)
+
     # Multi-tenant indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_github ON users(github_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_login ON users(github_login)")
