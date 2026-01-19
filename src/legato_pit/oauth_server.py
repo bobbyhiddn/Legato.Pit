@@ -37,9 +37,45 @@ GITHUB_USER_URL = 'https://api.github.com/user'
 
 
 def get_db():
-    """Get legato database connection for OAuth tables."""
-    from .rag.database import get_user_legato_db
-    return get_user_legato_db()
+    """Get shared database for OAuth tables.
+
+    OAuth tables (clients, auth codes, sessions, users) are shared
+    across all users and must be accessible without a user session.
+    """
+    from .rag.database import init_db
+    return init_db()
+
+
+def _get_or_create_user_id(github_id: int, github_login: str) -> str:
+    """Get or create a user record and return the user_id.
+
+    This is used to ensure every OAuth token has a valid user_id
+    for database isolation.
+    """
+    import uuid
+    db = get_db()
+
+    # Check for existing user
+    row = db.execute(
+        "SELECT user_id FROM users WHERE github_id = ?",
+        (github_id,)
+    ).fetchone()
+
+    if row:
+        return row['user_id']
+
+    # Create new user
+    user_id = str(uuid.uuid4())
+    db.execute(
+        """
+        INSERT INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
+        VALUES (?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (user_id, github_id, github_login)
+    )
+    db.commit()
+    logger.info(f"Created new user via MCP OAuth: {github_login} ({user_id})")
+    return user_id
 
 
 def get_jwt_secret() -> str:
@@ -634,12 +670,16 @@ def _handle_authorization_code_grant():
             logger.warning(f"MCP OAuth: PKCE verification failed for client {auth_code['client_id']}")
             return jsonify({"error": "invalid_grant", "error_description": "PKCE verification failed"}), 400
 
-    # Generate access token (JWT)
+    # Get or create user for database isolation
+    user_id = _get_or_create_user_id(auth_code['github_user_id'], auth_code['github_login'])
+
+    # Generate access token (JWT) with user_id for security
     access_token = _create_access_token(
         github_login=auth_code['github_login'],
         github_user_id=auth_code['github_user_id'],
         client_id=auth_code['client_id'],
-        scope=auth_code['scope']
+        scope=auth_code['scope'],
+        user_id=user_id
     )
 
     # Generate refresh token
@@ -694,12 +734,16 @@ def _handle_refresh_token_grant():
         db.commit()
         return jsonify({"error": "invalid_grant", "error_description": "Refresh token expired"}), 400
 
-    # Generate new access token
+    # Get user_id for database isolation
+    user_id = _get_or_create_user_id(session_row['github_user_id'], session_row['github_login'])
+
+    # Generate new access token with user_id
     access_token = _create_access_token(
         github_login=session_row['github_login'],
         github_user_id=session_row['github_user_id'],
         client_id=session_row['client_id'],
-        scope='mcp:read mcp:write'
+        scope='mcp:read mcp:write',
+        user_id=user_id
     )
 
     # Rotate refresh token
@@ -725,12 +769,21 @@ def _handle_refresh_token_grant():
 
 # ============ Token Utilities ============
 
-def _create_access_token(github_login: str, github_user_id: int, client_id: str, scope: str) -> str:
-    """Create a signed JWT access token."""
+def _create_access_token(github_login: str, github_user_id: int, client_id: str, scope: str, user_id: str) -> str:
+    """Create a signed JWT access token.
+
+    Args:
+        github_login: GitHub username
+        github_user_id: GitHub user ID
+        client_id: OAuth client ID
+        scope: Token scope
+        user_id: Legato user ID for database isolation (REQUIRED for security)
+    """
     now = datetime.utcnow()
     payload = {
         "sub": github_login,
         "github_id": github_user_id,
+        "user_id": user_id,  # SECURITY: Required for database isolation
         "client_id": client_id,
         "scope": scope,
         "iat": now,

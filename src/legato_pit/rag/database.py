@@ -807,7 +807,9 @@ def get_user_legato_db():
     """Get the legato database for the current authenticated user.
 
     SECURITY: Each user MUST have their own isolated database.
-    This function requires a valid user_id in the session.
+    This function requires a valid user_id from:
+    - Flask session (web routes)
+    - g.mcp_user (MCP routes)
 
     Must be called within a Flask request context.
 
@@ -817,22 +819,28 @@ def get_user_legato_db():
     Raises:
         ValueError: If no user_id is present (security violation)
     """
-    from flask import g, current_app, session
+    from flask import g, session
 
     # Check if we already have a connection for this request
     if 'user_legato_db' in g:
         return g.user_legato_db
 
-    # SECURITY: Always require user_id for database access
+    user_id = None
+
+    # Try session first (web routes)
     user = session.get('user')
-    if not user or not user.get('user_id'):
-        # Log security event
-        import logging
-        logger = logging.getLogger(__name__)
+    if user and user.get('user_id'):
+        user_id = user['user_id']
+
+    # Try MCP context (API routes)
+    if not user_id and hasattr(g, 'mcp_user') and g.mcp_user:
+        user_id = g.mcp_user.get('user_id')
+
+    # SECURITY: Always require user_id for database access
+    if not user_id:
         logger.error("SECURITY: Attempted database access without user_id")
         raise ValueError("Database access requires authenticated user with user_id")
 
-    user_id = user['user_id']
     g.user_legato_db = init_db(user_id=user_id)
 
     # Force WAL checkpoint to see latest writes
