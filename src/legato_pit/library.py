@@ -726,6 +726,72 @@ def api_sync():
         }), 500
 
 
+@library_bp.route('/api/reset', methods=['POST'])
+@login_required
+def api_reset():
+    """Clear all entries and re-sync from configured Library.
+
+    Use this when you've connected a new Library repo and need to
+    clear old data.
+
+    Response:
+    {
+        "status": "success",
+        "entries_deleted": 110,
+        "sync_stats": {...}
+    }
+    """
+    from flask import session
+    from .rag.database import get_user_legato_db
+    from .rag.library_sync import LibrarySync
+    from .core import get_user_library_repo
+
+    try:
+        db = get_user_legato_db()
+
+        # Count and delete all entries
+        count = db.execute("SELECT COUNT(*) as cnt FROM knowledge_entries").fetchone()
+        entries_deleted = count['cnt'] if count else 0
+
+        db.execute("DELETE FROM knowledge_entries")
+        db.execute("DELETE FROM embeddings")
+        db.execute("DELETE FROM sync_state")
+        db.commit()
+
+        logger.info(f"Cleared {entries_deleted} entries for reset")
+
+        # Re-sync from configured Library
+        library_repo = get_user_library_repo()
+        token = current_app.config.get('SYSTEM_PAT')
+
+        embedding_service = None
+        if os.environ.get('OPENAI_API_KEY'):
+            try:
+                from .rag.openai_provider import OpenAIEmbeddingProvider
+                from .rag.embedding_service import EmbeddingService
+                provider = OpenAIEmbeddingProvider()
+                embedding_service = EmbeddingService(provider, db)
+            except Exception as e:
+                logger.warning(f"Could not create embedding service: {e}")
+
+        sync = LibrarySync(db, embedding_service)
+        stats = sync.sync_from_github(library_repo, token=token)
+
+        return jsonify({
+            'status': 'success',
+            'entries_deleted': entries_deleted,
+            'library_repo': library_repo,
+            'sync_stats': stats,
+        })
+
+    except Exception as e:
+        logger.error(f"Reset failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+        }), 500
+
+
 @library_bp.route('/api/dedupe', methods=['POST'])
 @login_required
 def api_dedupe():

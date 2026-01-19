@@ -283,7 +283,8 @@ def api_delete_repo(repo_name: str):
         db.commit()
 
         # Update GitHub frontmatter for each linked entry
-        library_repo = 'bobbyhiddn/Legato.Library'
+        from .core import get_user_library_repo
+        library_repo = get_user_library_repo()
         frontmatter_updated = 0
 
         for entry in linked_entries:

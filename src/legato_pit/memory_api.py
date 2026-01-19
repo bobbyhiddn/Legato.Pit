@@ -303,8 +303,9 @@ def append_to_entry():
             token = os.environ.get('SYSTEM_PAT')
             if token:
                 try:
+                    from .core import get_user_library_repo
                     commit_file(
-                        repo='bobbyhiddn/Legato.Library',
+                        repo=get_user_library_repo(),
                         path=file_path,
                         content=new_full_content,
                         message=f'Append content from {source_transcript}',
@@ -625,7 +626,8 @@ def trigger_sync():
 
         sync = LibrarySync(db, embedding_service)
         token = os.environ.get('SYSTEM_PAT')
-        stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+        from .core import get_user_library_repo
+        stats = sync.sync_from_github(get_user_library_repo(), token=token)
 
         return jsonify({
             'status': 'success',

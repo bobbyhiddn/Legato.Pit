@@ -748,7 +748,8 @@ def api_approve_agent(queue_id: str):
 
                         if entry and entry['file_path']:
                             file_path = entry['file_path']
-                            library_repo = 'bobbyhiddn/Legato.Library'
+                            from .core import get_user_library_repo
+                            library_repo = get_user_library_repo()
                             token = current_app.config.get('SYSTEM_PAT')
 
                             content = get_file_content(library_repo, file_path, token)
@@ -818,7 +819,8 @@ def api_reject_all():
         user = session.get('user', {})
         username = user.get('login', 'unknown')
         token = current_app.config.get('SYSTEM_PAT')
-        library_repo = 'bobbyhiddn/Legato.Library'
+        from .core import get_user_library_repo
+        library_repo = get_user_library_repo()
 
         # Get all pending agents with their linked entries
         pending = db.execute(
@@ -1041,10 +1043,11 @@ def api_reject_agent(queue_id: str):
         if related_entry_id:
             import re
             from .rag.github_service import get_file_content, commit_file
+            from .core import get_user_library_repo
 
             legato_db = get_legato_db()
             token = current_app.config.get('SYSTEM_PAT')
-            library_repo = 'bobbyhiddn/Legato.Library'
+            library_repo = get_user_library_repo()
             entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
 
             for entry_id in entry_ids:

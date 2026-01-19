@@ -775,7 +775,8 @@ def tool_create_note(args: dict) -> dict:
 
     # Create file in GitHub
     token = current_app.config.get('SYSTEM_PAT')
-    repo = 'bobbyhiddn/Legato.Library'
+    from .core import get_user_library_repo
+    repo = get_user_library_repo()
 
     create_file(
         repo=repo,
@@ -1259,7 +1260,8 @@ def tool_update_note(args: dict) -> dict:
 
     # Get current file from GitHub to preserve frontmatter structure
     token = current_app.config.get('SYSTEM_PAT')
-    repo = 'bobbyhiddn/Legato.Library'
+    from .core import get_user_library_repo
+    repo = get_user_library_repo()
 
     try:
         current_content = get_file_content(repo, file_path, token)
@@ -1390,7 +1392,8 @@ def tool_delete_note(args: dict) -> dict:
         return {"error": f"Note not found: {entry_id}"}
 
     token = current_app.config.get('SYSTEM_PAT')
-    repo = 'bobbyhiddn/Legato.Library'
+    from .core import get_user_library_repo
+    repo = get_user_library_repo()
     file_path = entry['file_path']
     title = entry['title']
 
