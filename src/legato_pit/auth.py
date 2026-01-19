@@ -176,6 +176,32 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
     db = _get_db()
     account = installation_data.get('account', {})
 
+    # Verify user exists (FK constraint requires it)
+    user_exists = db.execute(
+        "SELECT 1 FROM users WHERE user_id = ?", (user_id,)
+    ).fetchone()
+
+    if not user_exists:
+        # User record missing - try to recreate from session
+        from flask import session
+        user_session = session.get('user', {})
+        github_id = user_session.get('github_id')
+        github_login = user_session.get('username')
+
+        if github_id and github_login:
+            logger.warning(f"User {user_id} missing from database, recreating from session")
+            db.execute(
+                """
+                INSERT OR IGNORE INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
+                VALUES (?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (user_id, github_id, github_login)
+            )
+            db.commit()
+        else:
+            logger.error(f"Cannot store installation: user {user_id} not found and no session data to recreate")
+            raise ValueError(f"User {user_id} not found in database")
+
     # Check if installation exists
     existing = db.execute(
         "SELECT id FROM github_app_installations WHERE installation_id = ?",

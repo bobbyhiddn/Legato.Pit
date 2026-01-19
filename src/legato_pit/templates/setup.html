@@ -1,10 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Setup - {{ app_name }}{% endblock %}
+{% block title %}Settings - {{ app_name }}{% endblock %}
 
 {% block content %}
 <div class="setup-container">
+    {% set is_configured = installations|length > 0 and repos|selectattr('repo_type', 'equalto', 'library')|list|length > 0 %}
+    {% if is_configured %}
+    <h1>Settings</h1>
+    <p class="setup-subtitle">Manage your Legato configuration.</p>
+    {% else %}
     <h1>Welcome to Legato</h1>
     <p class="setup-subtitle">Let's set up your personal memory system.</p>
+    {% endif %}
 
     <!-- Tier Info -->
     <div class="setup-section">
@@ -127,7 +133,9 @@
 
     <!-- Continue to Dashboard -->
     <div class="setup-section setup-actions">
-        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary btn-lg">Continue to Dashboard</a>
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary btn-lg">
+            {% if is_configured %}Back to Dashboard{% else %}Continue to Dashboard{% endif %}
+        </a>
     </div>
 </div>
 
