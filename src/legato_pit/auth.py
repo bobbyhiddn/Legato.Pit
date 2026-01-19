@@ -769,6 +769,83 @@ def setup():
                            api_keys=[dict(k) for k in api_keys])
 
 
+@auth_bp.route('/setup/debug')
+def setup_debug():
+    """Debug endpoint for Library detection issues."""
+    if 'user' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    user = session['user']
+    user_id = user.get('user_id')
+    username = user.get('username')
+
+    db = _get_db()
+    debug_info = {
+        'user_id': user_id,
+        'username': username,
+        'session_has_token': 'github_token' in session,
+    }
+
+    # Check OAuth token in database
+    row = db.execute(
+        """SELECT oauth_token_encrypted, oauth_token_expires_at, refresh_token_encrypted
+           FROM users WHERE user_id = ?""",
+        (user_id,)
+    ).fetchone()
+
+    debug_info['db_has_oauth_token'] = bool(row and row['oauth_token_encrypted'])
+    debug_info['db_has_refresh_token'] = bool(row and row['refresh_token_encrypted'])
+    debug_info['oauth_expires_at'] = row['oauth_token_expires_at'] if row else None
+
+    # Try to get OAuth token
+    oauth_token = _get_user_oauth_token(user_id)
+    debug_info['oauth_token_retrieved'] = bool(oauth_token)
+
+    # Check installations
+    installations = db.execute(
+        "SELECT installation_id, account_login FROM github_app_installations WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+    debug_info['installations'] = [dict(i) for i in installations]
+
+    # Try to find Library repo via OAuth
+    if oauth_token:
+        import requests
+        headers = {
+            'Authorization': f'Bearer {oauth_token}',
+            'Accept': 'application/vnd.github+json'
+        }
+
+        # Check what repos we can see
+        for repo_name in [f'Legato.Library.{username}', 'Legato.Library']:
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{username}/{repo_name}',
+                    headers=headers,
+                    timeout=10
+                )
+                debug_info[f'repo_check_{repo_name}'] = {
+                    'status': resp.status_code,
+                    'found': resp.ok,
+                    'repo_id': resp.json().get('id') if resp.ok else None,
+                }
+            except Exception as e:
+                debug_info[f'repo_check_{repo_name}'] = {'error': str(e)}
+
+        # Check OAuth scopes
+        try:
+            resp = requests.get(
+                'https://api.github.com/user',
+                headers=headers,
+                timeout=10
+            )
+            debug_info['oauth_scopes'] = resp.headers.get('X-OAuth-Scopes', 'unknown')
+        except Exception as e:
+            debug_info['oauth_scopes_error'] = str(e)
+
+    return jsonify(debug_info)
+
+
 @auth_bp.route('/setup/repo', methods=['POST'])
 def setup_repo():
     """Designate a repository for Library or Conduct.
