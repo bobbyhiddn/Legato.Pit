@@ -1072,12 +1072,16 @@ def setup_api_key():
 
 
 @auth_bp.route('/setup/check-copilot', methods=['POST'])
-@login_required
 def setup_check_copilot():
     """Check/refresh the user's Copilot status.
 
     Updates the database and session with the current Copilot availability.
     """
+    # Inline login check (can't import from core.py due to circular imports)
+    if 'user' not in session:
+        flash('Please log in to access this page.', 'warning')
+        return redirect(url_for('auth.login'))
+
     user = session['user']
     user_id = user.get('user_id')
 
