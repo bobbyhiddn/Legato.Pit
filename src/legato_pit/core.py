@@ -303,6 +303,28 @@ def create_app():
 
     start_background_sync()
 
+    # Start the motif processing worker as a background thread
+    # This ensures worker shares the same database as the web app
+    # Only start if we're not already running as a separate worker process
+    fly_process = os.environ.get('FLY_PROCESS_GROUP', '')
+    if fly_process != 'worker':
+        try:
+            from .worker import MotifWorker
+            worker = MotifWorker(app)
+            worker.start()
+            logger.info("Started motif processing worker thread")
+
+            # Register cleanup on shutdown
+            def stop_worker():
+                try:
+                    worker.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping worker: {e}")
+
+            atexit.register(stop_worker)
+        except Exception as e:
+            logger.error(f"Failed to start worker thread: {e}")
+
     # Track user activity to keep sync running
     @app.before_request
     def track_activity():

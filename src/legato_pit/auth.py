@@ -202,15 +202,31 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
         github_login = user_session.get('username')
 
         if github_id and github_login:
-            logger.warning(f"User {user_id} missing from database, recreating from session")
-            db.execute(
-                """
-                INSERT OR IGNORE INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
-                VALUES (?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                (user_id, github_id, github_login)
-            )
-            db.commit()
+            # Check if a user with this github_id already exists (different user_id)
+            existing_user = db.execute(
+                "SELECT user_id FROM users WHERE github_id = ?",
+                (github_id,)
+            ).fetchone()
+
+            if existing_user:
+                # User exists with a different user_id - update session to use the correct one
+                correct_user_id = existing_user['user_id']
+                logger.warning(f"User {user_id} not found but github_id {github_id} exists as {correct_user_id}, fixing session")
+                session['user']['user_id'] = correct_user_id
+                session.modified = True
+                # Use the correct user_id for the rest of this function
+                user_id = correct_user_id
+            else:
+                # Create new user record
+                logger.warning(f"User {user_id} missing from database, creating from session")
+                db.execute(
+                    """
+                    INSERT INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
+                    VALUES (?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, github_id, github_login)
+                )
+                db.commit()
         else:
             logger.error(f"Cannot store installation: user {user_id} not found and no session data to recreate")
             raise ValueError(f"User {user_id} not found in database")

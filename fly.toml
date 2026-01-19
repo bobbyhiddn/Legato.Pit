@@ -13,8 +13,8 @@ primary_region = 'dfw'
   strategy = 'immediate'
 
 [processes]
+  # Worker runs as a background thread in the app process (shares database)
   app = "gunicorn --workers=2 --bind=0.0.0.0:8000 main:app"
-  worker = "python -m legato_pit.worker_main"
 
 [env]
   FLASK_ENV = 'production'
@@ -42,14 +42,8 @@ primary_region = 'dfw'
     protocol = 'http'
     tls_skip_verify = false
 
+# Worker now runs as background thread in app process (shares database)
 [[vm]]
   memory = '512mb'
   cpus = 1
   memory_mb = 512
-  processes = ['app']
-
-[[vm]]
-  memory = '256mb'
-  cpus = 1
-  memory_mb = 256
-  processes = ['worker']
