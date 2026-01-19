@@ -205,19 +205,28 @@ def trigger_background_sync():
             from .rag.openai_provider import OpenAIEmbeddingProvider
             from .chords import fetch_chord_repos
 
-            token = os.environ.get('SYSTEM_PAT')
-            if not token:
-                logger.warning("SYSTEM_PAT not set, skipping on-load sync")
-                return
-
             # Get user-specific database in multi-tenant mode
             mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+            user = session.get('user', {})
+            user_id = user.get('user_id')
+
             if mode == 'multi-tenant':
-                user = session.get('user', {})
-                user_id = user.get('user_id')
                 db = init_db(user_id=user_id) if user_id else init_db()
             else:
                 db = init_db()
+
+            # Get token - prefer user installation token in multi-tenant mode
+            token = None
+            if user_id:
+                from .auth import get_user_installation_token
+                token = get_user_installation_token(user_id, 'library')
+
+            if not token:
+                token = os.environ.get('SYSTEM_PAT')
+
+            if not token:
+                logger.warning("No token available, skipping on-load sync")
+                return
 
             embedding_service = None
             if os.environ.get('OPENAI_API_KEY'):
@@ -1027,7 +1036,11 @@ def api_update_task_status(entry_id: str):
         if file_path:
             try:
                 from .core import get_user_library_repo
-                token = current_app.config.get('SYSTEM_PAT')
+                from .auth import get_user_installation_token
+                from flask import session
+
+                user_id = session.get('user', {}).get('user_id')
+                token = get_user_installation_token(user_id, 'library') if user_id else None
                 repo = get_user_library_repo()
 
                 if token:
@@ -1498,12 +1511,16 @@ def api_save_entry(entry_id: str):
 
         # Get token and repo config
         from .core import get_user_library_repo
-        token = current_app.config.get('SYSTEM_PAT')
+        from .auth import get_user_installation_token
+        from flask import session
+
+        user_id = session.get('user', {}).get('user_id')
+        token = get_user_installation_token(user_id, 'library') if user_id else None
         if not token:
             return jsonify({
                 'status': 'error',
-                'error': 'SYSTEM_PAT not configured'
-            }), 500
+                'error': 'GitHub authorization required. Please re-authenticate.'
+            }), 401
 
         repo = get_user_library_repo()
 
@@ -1625,7 +1642,14 @@ key_phrases: []
 
         # Create file in GitHub
         from .core import get_user_library_repo
-        token = current_app.config.get('SYSTEM_PAT')
+        from .auth import get_user_installation_token
+        from flask import session
+
+        user_id = session.get('user', {}).get('user_id')
+        token = get_user_installation_token(user_id, 'library') if user_id else None
+        if not token:
+            return jsonify({'error': 'GitHub authorization required. Please re-authenticate.'}), 401
+
         repo = get_user_library_repo()
 
         create_file(
@@ -1732,8 +1756,10 @@ def api_update_category(entry_id: str):
             try:
                 from .rag.github_service import get_file_content, delete_file, create_file
                 from .core import get_user_library_repo
+                from .auth import get_user_installation_token
 
-                token = current_app.config.get('SYSTEM_PAT')
+                user_id = session.get('user', {}).get('user_id')
+                token = get_user_installation_token(user_id, 'library') if user_id else None
                 repo = get_user_library_repo()
 
                 # Get current content
@@ -1848,8 +1874,10 @@ def api_delete_entry(entry_id: str):
             try:
                 from .rag.github_service import delete_file
                 from .core import get_user_library_repo
+                from .auth import get_user_installation_token
 
-                token = current_app.config.get('SYSTEM_PAT')
+                user_id = session.get('user', {}).get('user_id')
+                token = get_user_installation_token(user_id, 'library') if user_id else None
                 repo = get_user_library_repo()
 
                 delete_file(
@@ -2093,11 +2121,15 @@ def api_cleanup_orphans():
 
     try:
         db = get_db()
-        token = current_app.config.get('SYSTEM_PAT')
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+        from .auth import get_user_installation_token
+        from flask import session
+
+        user_id = session.get('user', {}).get('user_id')
+        token = get_user_installation_token(user_id, 'library') if user_id else None
+        org = session.get('user', {}).get('username', 'bobbyhiddn')
 
         if not token:
-            return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+            return jsonify({'error': 'GitHub authorization required. Please re-authenticate.'}), 401
 
         # Get all notes with active chord status
         notes_with_chords = db.execute(
