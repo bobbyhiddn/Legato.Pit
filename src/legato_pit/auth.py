@@ -619,17 +619,7 @@ def github_app_callback():
         ).fetchone()
 
         if installations and installations['count'] > 0:
-            # Refresh Copilot status on login (in background to not slow down login)
-            def _check_copilot_bg():
-                try:
-                    has_copilot = get_user_copilot_status(user['user_id'], check_if_stale=True)
-                    logger.info(f"User {github_login} Copilot status: {has_copilot}")
-                except Exception as e:
-                    logger.warning(f"Failed to check Copilot for {github_login}: {e}")
-
-            import threading
-            threading.Thread(target=_check_copilot_bg, daemon=True).start()
-
+            # User has installations - go to dashboard
             flash(f'Welcome back, {name or github_login}!', 'success')
             return redirect(url_for('dashboard.index'))
         else:
@@ -1227,6 +1217,57 @@ def setup_check_copilot():
     return redirect(url_for('auth.setup'))
 
 
+@auth_bp.route('/setup/enable-copilot', methods=['POST'])
+def setup_enable_copilot():
+    """Manually enable Copilot features for the user.
+
+    For users who have Copilot but automatic detection doesn't work.
+    """
+    if 'user' not in session:
+        flash('Please log in to access this page.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    user = session['user']
+    user_id = user.get('user_id')
+
+    try:
+        update_user_copilot_status(user_id, True)
+        session['user']['has_copilot'] = True
+        session.modified = True
+        flash('Chords & Agents features enabled.', 'success')
+        logger.info(f"User {user_id} manually enabled Copilot features")
+
+    except Exception as e:
+        logger.error(f"Failed to enable Copilot: {e}")
+        flash(f'Failed to enable: {str(e)}', 'error')
+
+    return redirect(url_for('auth.setup'))
+
+
+@auth_bp.route('/setup/disable-copilot', methods=['POST'])
+def setup_disable_copilot():
+    """Manually disable Copilot features for the user."""
+    if 'user' not in session:
+        flash('Please log in to access this page.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    user = session['user']
+    user_id = user.get('user_id')
+
+    try:
+        update_user_copilot_status(user_id, False)
+        session['user']['has_copilot'] = False
+        session.modified = True
+        flash('Chords & Agents features disabled.', 'info')
+        logger.info(f"User {user_id} manually disabled Copilot features")
+
+    except Exception as e:
+        logger.error(f"Failed to disable Copilot: {e}")
+        flash(f'Failed to disable: {str(e)}', 'error')
+
+    return redirect(url_for('auth.setup'))
+
+
 @auth_bp.route('/setup/create-library', methods=['POST'])
 def setup_create_library():
     """Auto-create a Legato.Library repository for the user.
@@ -1300,14 +1341,8 @@ def setup_create_library():
             else:
                 flash(f'Configured existing {library_repo} as your Library.', 'success')
 
-            # Check Copilot availability for this user
-            # This determines if they can use Chords/Agents features
-            has_copilot = check_user_copilot_access(user_id, token, library_repo)
-            update_user_copilot_status(user_id, has_copilot)
-            if has_copilot:
-                flash('Copilot detected - Chords & Agents features enabled.', 'info')
-            else:
-                flash('Copilot not detected - Chords & Agents features disabled.', 'info')
+            # Note: Chords & Agents can be enabled manually in Settings
+            # (requires GitHub Copilot subscription to function)
 
         else:
             flash('Failed to create Library repository.', 'error')
