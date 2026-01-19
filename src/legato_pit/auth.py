@@ -281,10 +281,24 @@ def github_app_callback():
     3. Create/update user in database
     4. Check for existing installations
     5. Redirect to setup or dashboard
+
+    Also handles installation callbacks (when user installs the app on repos).
     """
     from .github_app import exchange_code_for_user_token, get_user_info, get_user_emails
 
-    # Verify state to prevent CSRF
+    # Check if this is an installation callback (not OAuth login)
+    # GitHub sends installation_id and setup_action for app installations
+    installation_id = request.args.get('installation_id')
+    setup_action = request.args.get('setup_action')
+
+    if installation_id and setup_action:
+        # This is a post-installation callback, redirect to the installed handler
+        logger.info(f"Received installation callback, redirecting to installed handler")
+        return redirect(url_for('auth.github_app_installed',
+                                installation_id=installation_id,
+                                setup_action=setup_action))
+
+    # Verify state to prevent CSRF (only for OAuth login flow)
     state = request.args.get('state')
     stored_state = session.pop('app_oauth_state', None)
 
