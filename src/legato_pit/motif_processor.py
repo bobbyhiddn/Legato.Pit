@@ -26,7 +26,7 @@ from typing import List, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Model for classification and extraction
-CLAUDE_MODEL = "claude-haiku-4-5-20250514"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 # Prompts embedded from Conduct
 CLASSIFIER_PROMPT = '''You are classifying segments of a voice transcript for the LEGATO system.
