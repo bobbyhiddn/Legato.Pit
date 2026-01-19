@@ -39,6 +39,11 @@
                     <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-secondary">
                         Install GitHub App
                     </a>
+                    <p class="help-text" style="margin-top: 0.75rem;">
+                        Already installed? <form method="post" action="{{ url_for('auth.setup_sync_installations') }}" style="display: inline;">
+                            <button type="submit" class="btn btn-outline btn-sm">Sync Installations</button>
+                        </form>
+                    </p>
                 </div>
             </div>
 
@@ -87,10 +92,17 @@
             </li>
             {% endfor %}
         </ul>
+        {% else %}
+        <p class="help-text">No installations found.</p>
         {% endif %}
-        <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-outline btn-sm">
-            Manage App Access
-        </a>
+        <div class="button-group" style="margin-top: 0.5rem;">
+            <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-outline btn-sm">
+                Manage App Access
+            </a>
+            <form method="post" action="{{ url_for('auth.setup_sync_installations') }}" style="display: inline;">
+                <button type="submit" class="btn btn-outline btn-sm">Sync Installations</button>
+            </form>
+        </div>
     </div>
 
     <!-- Tier Info -->

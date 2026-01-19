@@ -844,6 +844,45 @@ def setup_debug():
     ).fetchall()
     debug_info['installations'] = [dict(i) for i in installations]
 
+    # Check user_repos
+    user_repos = db.execute(
+        "SELECT repo_type, repo_full_name, installation_id FROM user_repos WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+    debug_info['user_repos'] = [dict(r) for r in user_repos]
+
+    # Check for any users with this username (in case of duplicate user_ids)
+    all_users_with_username = db.execute(
+        "SELECT user_id, github_login, created_at FROM users WHERE github_login = ?",
+        (username,)
+    ).fetchall()
+    debug_info['users_with_same_username'] = [dict(u) for u in all_users_with_username]
+
+    # Check if there are repos for other user_ids with same username
+    for other_user in all_users_with_username:
+        other_id = other_user['user_id']
+        if other_id != user_id:
+            other_repos = db.execute(
+                "SELECT repo_type, repo_full_name FROM user_repos WHERE user_id = ?",
+                (other_id,)
+            ).fetchall()
+            if other_repos:
+                debug_info[f'repos_for_other_user_{other_id}'] = [dict(r) for r in other_repos]
+
+            other_installations = db.execute(
+                "SELECT installation_id, account_login FROM github_app_installations WHERE user_id = ?",
+                (other_id,)
+            ).fetchall()
+            if other_installations:
+                debug_info[f'installations_for_other_user_{other_id}'] = [dict(i) for i in other_installations]
+
+    # Also show all installations in the system matching this username's account
+    all_matching_installations = db.execute(
+        "SELECT installation_id, user_id, account_login FROM github_app_installations WHERE account_login = ?",
+        (username,)
+    ).fetchall()
+    debug_info['all_installations_for_account'] = [dict(i) for i in all_matching_installations]
+
     # Try to find Library repo via OAuth
     if oauth_token:
         import requests
@@ -1067,6 +1106,70 @@ def setup_api_key():
     except Exception as e:
         logger.error(f"Failed to store API key: {e}")
         flash('Failed to store API key.', 'error')
+
+    return redirect(url_for('auth.setup'))
+
+
+@auth_bp.route('/setup/sync-installations', methods=['POST'])
+def setup_sync_installations():
+    """Re-sync GitHub App installations from GitHub.
+
+    Fetches all installations for the current user and updates the database.
+    Useful when installation records are missing.
+    """
+    if 'user' not in session:
+        flash('Please log in to access this page.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    user = session['user']
+    user_id = user.get('user_id')
+    username = user.get('username')
+
+    try:
+        from .github_app import get_app_installations
+
+        # Get all installations from GitHub
+        all_installations = get_app_installations()
+
+        if not all_installations:
+            flash('No GitHub App installations found. Please install the app first.', 'warning')
+            return redirect(url_for('auth.setup'))
+
+        db = _get_db()
+        synced_count = 0
+
+        for installation in all_installations:
+            account_login = installation.get('account', {}).get('login', '')
+
+            # Check if this installation belongs to the current user
+            if account_login.lower() == username.lower():
+                installation_id = installation.get('id')
+
+                # Store/update the installation
+                _store_installation(user_id, installation_id, installation)
+                synced_count += 1
+                logger.info(f"Synced installation {installation_id} for user {user_id}")
+
+        if synced_count > 0:
+            flash(f'Successfully synced {synced_count} installation(s).', 'success')
+
+            # Try to auto-detect Library repo
+            installations = db.execute(
+                "SELECT installation_id FROM github_app_installations WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+
+            detected = _auto_detect_library(user_id, installations)
+            if detected:
+                flash(f'Library detected: {detected.get("repo_full_name")}', 'success')
+                # Trigger sync
+                trigger_user_library_sync(user_id, username)
+        else:
+            flash(f'No installations found for account {username}. Make sure you installed the app on your account.', 'warning')
+
+    except Exception as e:
+        logger.error(f"Failed to sync installations: {e}")
+        flash(f'Failed to sync installations: {str(e)}', 'error')
 
     return redirect(url_for('auth.setup'))
 
@@ -1427,22 +1530,87 @@ def check_user_copilot_access(user_id: str, token: str = None, repo_name: str = 
         )
 
         if resp.status_code != 200:
-            logger.warning(f"GraphQL query failed for Copilot check: {resp.status_code}")
+            logger.warning(f"GraphQL query failed for Copilot check: {resp.status_code} - {resp.text}")
             return False
 
         data = resp.json()
+        logger.info(f"Copilot check GraphQL response for {repo_name}: {data}")
+
+        # Check for errors in the GraphQL response
+        if 'errors' in data:
+            logger.warning(f"GraphQL errors in Copilot check: {data['errors']}")
+            # Fall back to REST API check
+            return _check_copilot_via_rest(owner, repo, token)
+
         nodes = data.get('data', {}).get('repository', {}).get('suggestedActors', {}).get('nodes', [])
+        logins = [node.get('login') for node in nodes]
+        logger.info(f"Suggested actors for {repo_name}: {logins}")
 
         for node in nodes:
             if node.get('login') == 'copilot-swe-agent':
-                logger.info(f"User {user_id} has Copilot enabled")
+                logger.info(f"User {user_id} has Copilot enabled (found copilot-swe-agent)")
                 return True
 
-        logger.info(f"User {user_id} does not have Copilot enabled")
-        return False
+        # GraphQL didn't find it, try REST API as fallback
+        logger.info(f"copilot-swe-agent not in suggestedActors, trying REST API fallback")
+        return _check_copilot_via_rest(owner, repo, token)
 
     except Exception as e:
         logger.error(f"Failed to check Copilot for user {user_id}: {e}")
+        return False
+
+
+def _check_copilot_via_rest(owner: str, repo: str, token: str) -> bool:
+    """Fallback: Check Copilot via REST API by looking at repo collaborators.
+
+    Copilot coding agent appears as a collaborator if enabled.
+    """
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+
+    try:
+        # Check collaborators for copilot-swe-agent
+        resp = requests.get(
+            f'https://api.github.com/repos/{owner}/{repo}/collaborators',
+            headers=headers,
+            timeout=30
+        )
+
+        if resp.status_code == 200:
+            collaborators = resp.json()
+            logins = [c.get('login') for c in collaborators]
+            logger.info(f"REST API collaborators for {owner}/{repo}: {logins}")
+
+            for collab in collaborators:
+                if collab.get('login') == 'copilot-swe-agent':
+                    logger.info(f"Found copilot-swe-agent as collaborator on {owner}/{repo}")
+                    return True
+
+        # Try checking assignees as well
+        resp = requests.get(
+            f'https://api.github.com/repos/{owner}/{repo}/assignees',
+            headers=headers,
+            timeout=30
+        )
+
+        if resp.status_code == 200:
+            assignees = resp.json()
+            logins = [a.get('login') for a in assignees]
+            logger.info(f"REST API assignees for {owner}/{repo}: {logins}")
+
+            for assignee in assignees:
+                if assignee.get('login') == 'copilot-swe-agent':
+                    logger.info(f"Found copilot-swe-agent as assignee on {owner}/{repo}")
+                    return True
+
+        logger.info(f"copilot-swe-agent not found via REST API for {owner}/{repo}")
+        return False
+
+    except Exception as e:
+        logger.error(f"REST API Copilot check failed: {e}")
         return False
 
 
