@@ -34,7 +34,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # Keys to skip (not needed on Fly or handled differently)
-SKIP_KEYS="FLASK_ENV FLASK_DEBUG DEBUG PORT HOST LOG_LEVEL"
+SKIP_KEYS="FLASK_ENV FLASK_DEBUG DEBUG PORT HOST LOG_LEVEL GITHUB_APP_PRIVATE_KEY GITHUB_APP_PRIVATE_KEY_PATH"
+
+# Keys that are multiline and need special handling
+MULTILINE_FILE_KEYS="GITHUB_APP_PRIVATE_KEY"
 
 # Build the secrets command
 SECRETS=""
@@ -42,6 +45,9 @@ SECRETS=""
 while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines and comments
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+    # Skip lines that are part of a multiline value (inside quotes)
+    [[ "$line" =~ ^[A-Za-z_] ]] || continue
 
     # Parse KEY=VALUE
     if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
@@ -56,7 +62,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 
         # Skip certain keys
         if [[ " $SKIP_KEYS " =~ " $KEY " ]]; then
-            echo "  SKIP $KEY (non-secret)"
+            echo "  SKIP $KEY (handled separately or non-secret)"
             continue
         fi
 
@@ -73,12 +79,34 @@ done < "$ENV_FILE"
 
 echo ""
 
+# Handle GitHub App private key from .pem file
+PEM_FILE=$(ls *.pem 2>/dev/null | head -1)
+if [ -n "$PEM_FILE" ] && [ -f "$PEM_FILE" ]; then
+    echo "  ADD  GITHUB_APP_PRIVATE_KEY (from $PEM_FILE)"
+    HAS_PEM=true
+else
+    echo "  WARN No .pem file found for GITHUB_APP_PRIVATE_KEY"
+    HAS_PEM=false
+fi
+
+echo ""
+
 if [ "$DRY_RUN" = true ]; then
     echo "Would run: flyctl secrets set [secrets...]"
+    if [ "$HAS_PEM" = true ]; then
+        echo "Would run: flyctl secrets set GITHUB_APP_PRIVATE_KEY from $PEM_FILE"
+    fi
     echo "Run without --dry-run to apply"
 else
     echo "Setting secrets on Fly.io..."
     eval "flyctl secrets set $SECRETS"
+
+    # Push the private key separately to handle multiline properly
+    if [ "$HAS_PEM" = true ]; then
+        echo "Setting GITHUB_APP_PRIVATE_KEY from $PEM_FILE..."
+        flyctl secrets set GITHUB_APP_PRIVATE_KEY="$(cat "$PEM_FILE")"
+    fi
+
     echo ""
     echo "Done! Secrets are set. The app will restart automatically."
 fi
