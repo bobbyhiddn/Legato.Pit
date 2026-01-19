@@ -261,8 +261,15 @@ def create_app():
 
             Continues as long as there's been user activity within the last 15 minutes.
             Any request (page load, button click, API call) resets the activity timer.
+
+            NOTE: Only runs in single-tenant mode. Multi-tenant uses per-user sync via API.
             """
             time.sleep(10)  # Wait for app to initialize
+
+            # Skip background sync in multi-tenant mode - no user context available
+            if app.config.get('LEGATO_MODE') == 'multi-tenant':
+                logger.info("Multi-tenant mode: skipping background agent sync (per-user sync via API)")
+                return
 
             while True:
                 # Check if there's been activity in the last 15 minutes

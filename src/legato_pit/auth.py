@@ -1616,17 +1616,22 @@ def admin_reset_user(username: str):
     """Admin route to reset a user's account (clear their data).
 
     This is used when a user needs to start fresh.
-    Only accessible by admin users (bobbyhiddn).
+    Only accessible by admin users (configured via LEGATO_ADMINS env var).
 
     Args:
         username: The GitHub username to reset
     """
+    import os
+
     if 'user' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    # Only allow admin users
+    # Only allow admin users (configured via LEGATO_ADMINS env var, comma-separated)
     current_user = session['user'].get('username')
-    if current_user not in ['bobbyhiddn']:
+    admin_users = os.environ.get('LEGATO_ADMINS', '').split(',')
+    admin_users = [u.strip() for u in admin_users if u.strip()]
+
+    if not admin_users or current_user not in admin_users:
         return jsonify({'error': 'Admin access required'}), 403
 
     try:

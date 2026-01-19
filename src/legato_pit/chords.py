@@ -172,10 +172,9 @@ def index():
     org = user.get('username')  # User's GitHub username
 
     token = get_user_installation_token(user_id, 'library') if user_id else None
-    if not token:
-        token = current_app.config.get('SYSTEM_PAT')
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
+    # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
+    # which would show the wrong user's chords
     repos = []
     if token and org:
         repos = fetch_chord_repos(token, org)
@@ -195,10 +194,8 @@ def api_list_repos():
     org = user.get('username')
 
     token = get_user_installation_token(user_id, 'library') if user_id else None
-    if not token:
-        token = current_app.config.get('SYSTEM_PAT')
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
+    # Don't fall back to SYSTEM_PAT - would show wrong user's chords
     if not token:
         return jsonify({'error': 'GitHub authorization required'}), 401
 
@@ -425,7 +422,6 @@ def api_create_incident(repo_name: str):
     """
     from flask import request, session
     from .auth import get_user_installation_token
-    import os
     import secrets
 
     user = session.get('user', {})
@@ -433,10 +429,8 @@ def api_create_incident(repo_name: str):
     org = user.get('username')
 
     token = get_user_installation_token(user_id, 'library') if user_id else None
-    if not token:
-        token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
+    # Don't fall back to SYSTEM_PAT - would use wrong org for incident dispatch
     if not token:
         return jsonify({'error': 'GitHub authorization required'}), 401
 

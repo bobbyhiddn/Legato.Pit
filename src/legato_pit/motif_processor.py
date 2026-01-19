@@ -817,7 +817,7 @@ Generate the complete markdown artifact with frontmatter."""
         """
         from .rag.database import get_user_db_path
         from .rag.embedding_service import EmbeddingService
-        from .rag.embedding_provider import OpenAIProvider
+        from .rag.openai_provider import OpenAIEmbeddingProvider
         from .auth import get_user_api_key
 
         # Get user's OpenAI API key
@@ -835,7 +835,7 @@ Generate the complete markdown artifact with frontmatter."""
             user_db = sqlite3.connect(str(user_db_path))
             user_db.row_factory = sqlite3.Row
 
-            provider = OpenAIProvider(api_key=openai_key)
+            provider = OpenAIEmbeddingProvider(api_key=openai_key)
             embedding_service = EmbeddingService(provider, user_db)
 
             count = embedding_service.generate_missing_embeddings('knowledge', delay=0.1)
@@ -867,7 +867,7 @@ Generate the complete markdown artifact with frontmatter."""
         agents_db = init_agents_db()
 
         try:
-            stats = import_chords_from_library(user_db, agents_db)
+            stats = import_chords_from_library(user_db, agents_db, self.user_id)
 
             if stats['queued'] > 0:
                 logger.info(f"Job {self.job_id}: Queued {stats['queued']} chord(s) for approval")

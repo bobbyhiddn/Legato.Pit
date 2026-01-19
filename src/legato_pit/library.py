@@ -54,17 +54,19 @@ def get_categories_with_counts():
     Returns:
         List of dicts with: category (name), display_name, count, folder_name, color, orphaned, inactive
     """
+    from flask import session
     from .rag.database import get_user_categories
 
     db = get_db()
-    user_categories = get_user_categories(db, 'default')  # Only active categories
+    user_id = session.get('user', {}).get('user_id') or 'default'
+    user_categories = get_user_categories(db, user_id)  # Only active categories
 
     # Also get inactive categories
     inactive_categories = db.execute("""
         SELECT id, name, display_name, folder_name, color
         FROM user_categories
-        WHERE user_id = 'default' AND is_active = 0
-    """).fetchall()
+        WHERE user_id = ? AND is_active = 0
+    """, (user_id,)).fetchall()
 
     # Get entry counts per category
     counts = db.execute(
@@ -143,13 +145,14 @@ def get_categories_with_counts():
 
             try:
                 max_order = db.execute(
-                    "SELECT MAX(sort_order) FROM user_categories WHERE user_id = 'default'"
+                    "SELECT MAX(sort_order) FROM user_categories WHERE user_id = ?",
+                    (user_id,)
                 ).fetchone()[0] or 0
 
                 db.execute("""
                     INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
-                    VALUES ('default', ?, ?, 'Auto-created from existing entries', ?, ?, '#9ca3af')
-                """, (category_name, display_name, folder_name, max_order + 1))
+                    VALUES (?, ?, ?, 'Auto-created from existing entries', ?, ?, '#9ca3af')
+                """, (user_id, category_name, display_name, folder_name, max_order + 1))
                 db.commit()
 
                 logger.info(f"Auto-adopted orphaned category: '{category_name}' ({count} entries)")
@@ -1602,7 +1605,8 @@ def api_create_note():
 
     # Validate category
     db = get_db()
-    categories = get_user_categories(db, 'default')
+    user_id = session.get('user', {}).get('user_id') or 'default'
+    categories = get_user_categories(db, user_id)
     valid_categories = {c['name'] for c in categories}
     category_folders = {c['name']: c['folder_name'] for c in categories}
 
@@ -1711,7 +1715,8 @@ def api_update_category(entry_id: str):
 
     # Get categories dynamically from database
     db = get_db()
-    categories = get_user_categories(db, 'default')
+    user_id = session.get('user', {}).get('user_id') or 'default'
+    categories = get_user_categories(db, user_id)
     valid_categories = {c['name'] for c in categories}
     category_folders = {c['name']: c['folder_name'] for c in categories}
 
@@ -2000,9 +2005,10 @@ def api_graph():
 
     try:
         db = get_db()
+        user_id = session.get('user', {}).get('user_id') or 'default'
 
         # Get user categories for colors
-        user_cats = get_user_categories(db, 'default')
+        user_cats = get_user_categories(db, user_id)
         category_colors = {c['name']: c.get('color', '#6366f1') for c in user_cats}
 
         # Get entries with embeddings (pick latest embedding per entry to avoid duplicates)

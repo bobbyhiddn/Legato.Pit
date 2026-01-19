@@ -59,17 +59,21 @@ def verify_system_token(req) -> bool:
 @library_required
 def index():
     """Agents queue management page."""
-    db = get_db()
+    from flask import session
 
-    # Get pending agents
+    db = get_db()
+    user_id = session.get('user', {}).get('user_id')
+
+    # Get pending agents for THIS USER only
     pending_rows = db.execute(
         """
         SELECT queue_id, project_name, project_type, title, description,
                source_transcript, related_entry_id, comments, created_at
         FROM agent_queue
-        WHERE status = 'pending'
+        WHERE status = 'pending' AND user_id = ?
         ORDER BY created_at DESC
-        """
+        """,
+        (user_id,)
     ).fetchall()
     pending_agents = [dict(row) for row in pending_rows]
 
@@ -557,16 +561,21 @@ def api_list_pending():
         "count": 1
     }
     """
+    from flask import session
+
     try:
         db = get_db()
+        user_id = session.get('user', {}).get('user_id')
+
         rows = db.execute(
             """
             SELECT queue_id, project_name, project_type, title, description,
                    source_transcript, created_at
             FROM agent_queue
-            WHERE status = 'pending'
+            WHERE status = 'pending' AND user_id = ?
             ORDER BY created_at DESC
-            """
+            """,
+            (user_id,)
         ).fetchall()
 
         agents = [dict(row) for row in rows]
@@ -591,10 +600,15 @@ def api_pending_count():
         "count": 3
     }
     """
+    from flask import session
+
     try:
         db = get_db()
+        user_id = session.get('user', {}).get('user_id')
+
         result = db.execute(
-            "SELECT COUNT(*) FROM agent_queue WHERE status = 'pending'"
+            "SELECT COUNT(*) FROM agent_queue WHERE status = 'pending' AND user_id = ?",
+            (user_id,)
         ).fetchone()
         count = result[0] if result else 0
         return jsonify({'count': count})
@@ -608,29 +622,34 @@ def api_pending_count():
 def api_debug_agents():
     """Debug endpoint to check agent queue database state.
 
-    Returns database path and queue summary.
+    Returns database path and queue summary for the current user.
     """
+    from flask import session
     from .rag.database import get_db_path
 
     agents_db = get_db()
+    user_id = session.get('user', {}).get('user_id')
 
-    # Get status counts
+    # Get status counts for THIS USER only
     status_counts = agents_db.execute("""
         SELECT status, COUNT(*) as count
         FROM agent_queue
+        WHERE user_id = ?
         GROUP BY status
-    """).fetchall()
+    """, (user_id,)).fetchall()
 
-    # Get recent queue IDs
+    # Get recent queue IDs for THIS USER only
     recent = agents_db.execute("""
         SELECT queue_id, status, project_name, created_at
         FROM agent_queue
+        WHERE user_id = ?
         ORDER BY created_at DESC
         LIMIT 10
-    """).fetchall()
+    """, (user_id,)).fetchall()
 
     return jsonify({
         'db_path': str(get_db_path('agents.db')),
+        'user_id': user_id,
         'status_counts': {row['status']: row['count'] for row in status_counts},
         'total_agents': sum(row['count'] for row in status_counts),
         'recent_agents': [dict(row) for row in recent]
@@ -662,19 +681,21 @@ def api_approve_agent(queue_id: str):
         data = request.get_json() or {}
         additional_comments = data.get('additional_comments', '').strip()
 
-        # Get the queued agent
+        user = session.get('user', {})
+        user_id = user.get('user_id')
+        username = user.get('login', 'unknown')
+        org = user.get('username')  # Use user's org, not hardcoded
+
+        # Get the queued agent - MUST belong to current user
         row = agents_db.execute(
-            "SELECT * FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
-            (queue_id,)
+            "SELECT * FROM agent_queue WHERE queue_id = ? AND status = 'pending' AND user_id = ?",
+            (queue_id, user_id)
         ).fetchone()
 
         if not row:
             return jsonify({'error': 'Agent not found or already processed'}), 404
 
         agent = dict(row)
-        user = session.get('user', {})
-        username = user.get('login', 'unknown')
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
         # Append additional comments to tasker_body if provided
         if additional_comments:
@@ -813,18 +834,26 @@ def api_reject_all():
     """
     import re
     from .rag.github_service import get_file_content, commit_file
+    from .auth import get_user_installation_token
 
     try:
         db = get_db()
         user = session.get('user', {})
+        user_id = user.get('user_id')
         username = user.get('login', 'unknown')
-        token = current_app.config.get('SYSTEM_PAT')
+
+        # Get user token for GitHub operations
+        token = get_user_installation_token(user_id, 'library') if user_id else None
+        if not token:
+            return jsonify({'error': 'GitHub authorization required'}), 401
+
         from .core import get_user_library_repo
         library_repo = get_user_library_repo()
 
-        # Get all pending agents with their linked entries
+        # Get all pending agents for THIS USER with their linked entries
         pending = db.execute(
-            "SELECT queue_id, related_entry_id FROM agent_queue WHERE status = 'pending'"
+            "SELECT queue_id, related_entry_id FROM agent_queue WHERE status = 'pending' AND user_id = ?",
+            (user_id,)
         ).fetchall()
 
         count = len(pending)
@@ -836,7 +865,7 @@ def api_reject_all():
                 entry_ids = [eid.strip() for eid in agent['related_entry_id'].split(',') if eid.strip()]
                 all_entry_ids.extend(entry_ids)
 
-        # Mark all as rejected (NOT delete - keeps record to prevent re-queueing)
+        # Mark all as rejected for THIS USER (NOT delete - keeps record to prevent re-queueing)
         db.execute(
             """
             UPDATE agent_queue
@@ -845,9 +874,9 @@ def api_reject_all():
                 approved_at = CURRENT_TIMESTAMP,
                 spawn_result = '{"rejected": true, "reason": "bulk reject"}',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE status = 'pending'
+            WHERE status = 'pending' AND user_id = ?
             """,
-            (username,)
+            (username, user_id)
         )
         db.commit()
 
@@ -944,12 +973,13 @@ def api_add_comment(queue_id: str):
             return jsonify({'error': 'Comment text is required'}), 400
 
         user = session.get('user', {})
+        user_id = user.get('user_id')
         username = user.get('username', 'unknown')
 
-        # Get current comments
+        # Get current comments - MUST belong to current user
         agent = db.execute(
-            "SELECT comments FROM agent_queue WHERE queue_id = ? AND status = 'pending'",
-            (queue_id,)
+            "SELECT comments FROM agent_queue WHERE queue_id = ? AND status = 'pending' AND user_id = ?",
+            (queue_id, user_id)
         ).fetchone()
 
         if not agent:
@@ -972,10 +1002,10 @@ def api_add_comment(queue_id: str):
             "timestamp": datetime.now().isoformat() + "Z"
         })
 
-        # Save
+        # Save - include user_id check for safety
         db.execute(
-            "UPDATE agent_queue SET comments = ?, updated_at = CURRENT_TIMESTAMP WHERE queue_id = ?",
-            (json.dumps(comments), queue_id)
+            "UPDATE agent_queue SET comments = ?, updated_at = CURRENT_TIMESTAMP WHERE queue_id = ? AND user_id = ?",
+            (json.dumps(comments), queue_id, user_id)
         )
         db.commit()
 
@@ -1005,23 +1035,29 @@ def api_reject_agent(queue_id: str):
         "queue_id": "aq-abc123"
     }
     """
+    from .auth import get_user_installation_token
+
     try:
         db = get_db()
         data = request.get_json() or {}
         reason = data.get('reason', '')
 
         user = session.get('user', {})
+        user_id = user.get('user_id')
         username = user.get('username', 'unknown')
 
-        # Get the agent's related_entry_id before rejecting
+        # Get the agent's related_entry_id before rejecting - MUST belong to current user
         agent = db.execute(
-            "SELECT related_entry_id FROM agent_queue WHERE queue_id = ?",
-            (queue_id,)
+            "SELECT related_entry_id FROM agent_queue WHERE queue_id = ? AND user_id = ?",
+            (queue_id, user_id)
         ).fetchone()
 
-        related_entry_id = agent['related_entry_id'] if agent else None
+        if not agent:
+            return jsonify({'error': 'Agent not found or not authorized'}), 404
 
-        # Update status to rejected - check rowcount to verify it worked
+        related_entry_id = agent['related_entry_id']
+
+        # Update status to rejected - include user_id check for safety
         cursor = db.execute(
             """
             UPDATE agent_queue
@@ -1030,9 +1066,9 @@ def api_reject_agent(queue_id: str):
                 approved_at = CURRENT_TIMESTAMP,
                 spawn_result = ?,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE queue_id = ? AND status = 'pending'
+            WHERE queue_id = ? AND status = 'pending' AND user_id = ?
             """,
-            (username, json.dumps({'rejected': True, 'reason': reason}), queue_id)
+            (username, json.dumps({'rejected': True, 'reason': reason}), queue_id, user_id)
         )
         db.commit()
 
@@ -1046,7 +1082,7 @@ def api_reject_agent(queue_id: str):
             from .core import get_user_library_repo
 
             legato_db = get_legato_db()
-            token = current_app.config.get('SYSTEM_PAT')
+            token = get_user_installation_token(user_id, 'library') if user_id else None
             library_repo = get_user_library_repo()
             entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
 
@@ -1120,9 +1156,12 @@ def api_get_agent(queue_id: str):
     """Get details of a specific queued agent."""
     try:
         db = get_db()
+        user_id = session.get('user', {}).get('user_id')
+
+        # Get agent - MUST belong to current user
         row = db.execute(
-            "SELECT * FROM agent_queue WHERE queue_id = ?",
-            (queue_id,)
+            "SELECT * FROM agent_queue WHERE queue_id = ? AND user_id = ?",
+            (queue_id, user_id)
         ).fetchone()
 
         if not row:
@@ -1375,7 +1414,7 @@ From voice transcript:
     return stats
 
 
-def import_chords_from_library(legato_db, agents_db) -> dict:
+def import_chords_from_library(legato_db, agents_db, user_id: str = None) -> dict:
     """Import chord escalations from Library entries into agent_queue.
 
     Finds Library entries with needs_chord=1 and chord_status IS NULL,
@@ -1385,10 +1424,14 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
     Args:
         legato_db: Legato database connection (knowledge entries)
         agents_db: Agents database connection (agent queue)
+        user_id: The user's ID (required for multi-tenant isolation)
 
     Returns:
         Dict with import stats
     """
+    if not user_id:
+        logger.error("import_chords_from_library called without user_id - skipping")
+        return {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0, 'multi_note_chords': 0}
     stats = {'found': 0, 'queued': 0, 'already_queued': 0, 'errors': 0, 'multi_note_chords': 0}
 
     # Find entries that need chord escalation
@@ -1440,12 +1483,12 @@ def import_chords_from_library(legato_db, agents_db) -> dict:
         entry_ids = [e['entry_id'] for e in group_entries]
         related_entry_id = ','.join(entry_ids)  # Comma-separated for multi-note
 
-        # Check if any entry is already queued
+        # Check if any entry is already queued FOR THIS USER
         already_queued = False
         for entry_id in entry_ids:
             existing = agents_db.execute(
-                "SELECT queue_id, status FROM agent_queue WHERE related_entry_id LIKE ?",
-                (f'%{entry_id}%',)
+                "SELECT queue_id, status FROM agent_queue WHERE related_entry_id LIKE ? AND user_id = ?",
+                (f'%{entry_id}%', user_id)
             ).fetchone()
             if existing:
                 already_queued = True
@@ -1568,8 +1611,8 @@ Implement a unified solution addressing all related notes above.
                 """
                 INSERT INTO agent_queue
                 (queue_id, project_name, project_type, title, description,
-                 signal_json, tasker_body, source_transcript, related_entry_id, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 signal_json, tasker_body, source_transcript, related_entry_id, status, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
                 (
                     queue_id,
@@ -1581,6 +1624,7 @@ Implement a unified solution addressing all related notes above.
                     tasker_body,
                     f"library:{primary_entry['entry_id']}",
                     related_entry_id,  # Comma-separated for multi-note
+                    user_id,  # Multi-tenant: isolate by user
                 )
             )
             agents_db.commit()
@@ -1615,10 +1659,11 @@ def api_sync_from_library():
     }
     """
     try:
+        user_id = session.get('user', {}).get('user_id')
         legato_db = get_legato_db()
         agents_db = get_db()
 
-        stats = import_chords_from_library(legato_db, agents_db)
+        stats = import_chords_from_library(legato_db, agents_db, user_id)
 
         logger.info(f"Library chord sync complete: {stats}")
 
