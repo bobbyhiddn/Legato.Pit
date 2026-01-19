@@ -19,7 +19,7 @@ from datetime import datetime
 import requests
 from flask import (
     Blueprint, render_template, request, current_app,
-    flash, redirect, url_for, jsonify
+    flash, redirect, url_for, jsonify, session
 )
 
 from .core import login_required, library_required
@@ -166,19 +166,23 @@ def dispatch_transcript(transcript_text, source_id, user_id=None):
 @library_required
 def index():
     """Transcript upload form."""
-    # Check if multi-tenant mode - motif processing disabled until Pit-native implementation
-    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
-        return render_template('dropbox_disabled.html', title='Motif Processing')
-    return render_template('dropbox.html', title='Transcript Dropbox')
+    return render_template('dropbox.html', title='Motif Processing')
 
 
 @dropbox_bp.route('/upload', methods=['POST'])
 @login_required
 def upload():
-    """Handle transcript upload."""
-    # Disabled in multi-tenant mode until Pit-native processing is implemented
-    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
-        flash('Motif processing is temporarily disabled while we build secure multi-tenant support.', 'warning')
+    """Handle transcript upload using Pit-native motif processing."""
+    from .motif_processor import MotifProcessor
+    from .auth import get_user_api_key
+
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+
+    # Check if user has API key configured (required for motif processing)
+    api_key = get_user_api_key(user_id, 'anthropic') if user_id else None
+    if not api_key:
+        flash('Motif processing requires an Anthropic API key. Please add your API key in Settings.', 'warning')
         return redirect(url_for('dropbox.index'))
 
     # Get source identifier
@@ -227,13 +231,20 @@ def upload():
         flash('Please enter transcript text or upload a file.', 'error')
         return redirect(url_for('dropbox.index'))
 
-    # Dispatch to LEGATO
-    success, message = dispatch_transcript(transcript_text, source_id)
+    # Process using Pit-native motif processor
+    try:
+        processor = MotifProcessor(user_id=user_id)
+        result = processor.process_transcript(transcript_text, source_id)
 
-    if success:
-        flash(f'{message} (Source: {source_id})', 'success')
-    else:
-        flash(message, 'error')
+        if result.get('success'):
+            entry_count = len(result.get('entry_ids', []))
+            flash(f'Processed {entry_count} note(s) from transcript. (Source: {source_id})', 'success')
+        else:
+            flash(f"Processing failed: {result.get('error', 'Unknown error')}", 'error')
+
+    except Exception as e:
+        logger.error(f"Motif processing failed: {e}")
+        flash(f'Processing failed: {str(e)}', 'error')
 
     return redirect(url_for('dropbox.index'))
 

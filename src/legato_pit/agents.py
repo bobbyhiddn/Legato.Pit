@@ -104,16 +104,17 @@ def index():
         else:
             agent['comments_list'] = []
 
-    # Get recent processed agents (last 20)
+    # Get recent processed agents (last 20) for THIS USER only
     recent_rows = db.execute(
         """
         SELECT queue_id, project_name, project_type, title, status,
                approved_by, approved_at
         FROM agent_queue
-        WHERE status != 'pending'
+        WHERE status != 'pending' AND user_id = ?
         ORDER BY updated_at DESC
         LIMIT 20
-        """
+        """,
+        (user_id,)
     ).fetchall()
     recent_agents = [dict(row) for row in recent_rows]
 

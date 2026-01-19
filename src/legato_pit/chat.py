@@ -66,8 +66,8 @@ def get_services():
             'embedding': embedding_service,
             'context': context_builder,
             'chat': chat_service,
-            'legato_db': g.legato_db_conn,  # For RAG/embeddings
-            'chat_db': g.chat_db_conn,       # For sessions/messages
+            'legato_db': legato_db,           # For RAG/embeddings (from get_user_legato_db)
+            'chat_db': g.chat_db_conn,        # For sessions/messages
         }
 
     return g.chat_services
