@@ -112,6 +112,7 @@ def create_app():
     from .categories import categories_bp
     from .oauth_server import oauth_bp
     from .mcp_server import mcp_bp
+    from .motif_api import motif_api_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -124,6 +125,7 @@ def create_app():
     app.register_blueprint(categories_bp)
     app.register_blueprint(oauth_bp)  # OAuth 2.1 AS with DCR for MCP
     app.register_blueprint(mcp_bp)    # MCP protocol handler
+    app.register_blueprint(motif_api_bp)  # Motif processing with job queue
 
     # Initialize all databases on startup
     with app.app_context():

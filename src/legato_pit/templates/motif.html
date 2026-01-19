@@ -1,0 +1,1335 @@
+{% extends "base.html" %}
+
+{% block title %}Motif - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+/* Voice Recording Styles */
+.record-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+    gap: 1.5rem;
+}
+
+.record-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 4px solid var(--border-color);
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.record-btn:hover {
+    border-color: var(--accent-red);
+    background: rgba(248, 81, 73, 0.1);
+}
+
+.record-btn.recording {
+    border-color: var(--accent-red);
+    background: rgba(248, 81, 73, 0.15);
+    animation: pulse-record 1.5s ease-in-out infinite;
+}
+
+.record-btn.recording:hover {
+    background: rgba(248, 81, 73, 0.25);
+}
+
+.record-btn.paused {
+    border-color: var(--accent-yellow);
+    background: rgba(210, 153, 34, 0.15);
+    animation: none;
+}
+
+.record-btn.paused:hover {
+    background: rgba(210, 153, 34, 0.25);
+}
+
+@keyframes pulse-record {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
+    50% { box-shadow: 0 0 0 20px rgba(248, 81, 73, 0); }
+}
+
+.record-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent-red);
+    transition: all 0.2s ease;
+}
+
+.record-btn.recording .record-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+}
+
+.record-btn.paused .record-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+}
+
+.record-status {
+    text-align: center;
+}
+
+.record-time {
+    font-size: 2rem;
+    font-weight: 600;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    color: var(--text-primary);
+}
+
+.record-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.record-hint.recording {
+    color: var(--accent-red);
+}
+
+.record-hint.paused {
+    color: var(--accent-yellow);
+}
+
+/* Segment indicator */
+.segment-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.segment-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+}
+
+.segment-dot.pending {
+    background: var(--accent-yellow);
+}
+
+.segment-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+}
+
+/* Audio Visualizer */
+.audio-visualizer {
+    width: 100%;
+    max-width: 400px;
+    height: 60px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 1rem;
+}
+
+.visualizer-bar {
+    width: 4px;
+    height: 100%;
+    background: var(--accent-blue);
+    border-radius: 2px;
+    transition: height 0.05s ease;
+}
+
+.audio-visualizer.recording .visualizer-bar {
+    background: var(--accent-red);
+}
+
+.audio-visualizer.paused .visualizer-bar {
+    background: var(--accent-yellow);
+}
+
+/* Transcription Preview */
+.transcription-preview {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: none;
+}
+
+.transcription-preview.visible {
+    display: block;
+}
+
+.transcription-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.transcription-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.transcription-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.transcription-text {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.transcription-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Segment divider in transcript */
+.segment-divider {
+    display: block;
+    margin: 0.75rem 0;
+    padding: 0.25rem 0;
+    border-top: 1px dashed var(--border-color);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* Recording Controls */
+.recording-controls {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.recording-controls .btn {
+    min-width: 100px;
+}
+
+.btn-transcribe {
+    position: relative;
+}
+
+.btn-transcribe .pending-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-yellow);
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Voice unavailable state */
+.voice-unavailable {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-secondary);
+}
+
+.voice-unavailable .icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Tab disabled state */
+.tab-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* API Key Warning */
+.api-key-warning {
+    background: rgba(210, 153, 34, 0.1);
+    border: 1px solid var(--accent-yellow);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.api-key-warning .icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.api-key-warning .content {
+    flex: 1;
+}
+
+.api-key-warning .title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.api-key-warning .message {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+/* Job Progress */
+.job-progress {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+    display: none;
+}
+
+.job-progress.visible {
+    display: block;
+}
+
+.job-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.job-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.job-status {
+    font-size: 0.875rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    background: var(--bg-tertiary);
+}
+
+.job-status.pending {
+    background: rgba(210, 153, 34, 0.2);
+    color: var(--accent-yellow);
+}
+
+.job-status.processing {
+    background: rgba(88, 166, 255, 0.2);
+    color: var(--accent-blue);
+}
+
+.job-status.completed {
+    background: rgba(63, 185, 80, 0.2);
+    color: var(--accent-green);
+}
+
+.job-status.failed {
+    background: rgba(248, 81, 73, 0.2);
+    color: var(--accent-red);
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent-blue);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progress-fill.completed {
+    background: var(--accent-green);
+}
+
+.progress-fill.failed {
+    background: var(--accent-red);
+}
+
+.job-stage {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.thread-list {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.875rem;
+}
+
+.thread-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.thread-item:last-child {
+    border-bottom: none;
+}
+
+.thread-title {
+    color: var(--text-primary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-status {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    margin-left: 0.5rem;
+}
+
+.thread-status.pending { background: var(--bg-tertiary); color: var(--text-secondary); }
+.thread-status.classified { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
+.thread-status.correlated { background: rgba(161, 98, 255, 0.2); color: var(--accent-purple); }
+.thread-status.extracted { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+.thread-status.written { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+.thread-status.skipped { background: var(--bg-tertiary); color: var(--text-muted); }
+.thread-status.failed { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+.job-results {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.job-results .title {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.result-entry {
+    display: block;
+    padding: 0.25rem 0;
+    color: var(--accent-blue);
+    text-decoration: none;
+    font-size: 0.875rem;
+}
+
+.result-entry:hover {
+    text-decoration: underline;
+}
+
+.job-error {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(248, 81, 73, 0.1);
+    border-radius: 6px;
+    color: var(--accent-red);
+    font-size: 0.875rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dropbox">
+    <header class="page-header">
+        <h1>Motif</h1>
+        <p class="subtitle">Drop an idea into your Library</p>
+    </header>
+
+    {% if not has_api_key %}
+    <div class="api-key-warning">
+        <div class="icon">&#9888;</div>
+        <div class="content">
+            <div class="title">API Key Required</div>
+            <div class="message">
+                Add your Anthropic API key in <a href="{{ url_for('auth.setup') }}">Settings</a> to process motifs.
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <form id="motifForm" class="upload-form">
+        <div class="form-section">
+            <label class="form-label">Input Method</label>
+
+            <div class="upload-tabs">
+                <button type="button" class="tab-btn active" onclick="showTab('text')">Paste Text</button>
+                <button type="button" class="tab-btn" onclick="showTab('file')">Upload File</button>
+                <button type="button" class="tab-btn" id="voiceTabBtn" onclick="showTab('voice')">Record Voice</button>
+            </div>
+
+            <div id="tab-text" class="tab-content active">
+                <textarea id="transcript" name="transcript"
+                          class="form-textarea"
+                          placeholder="Paste your motif here - a voice transcript, idea, thought, or any text to process..."
+                          rows="10"></textarea>
+                <span class="form-hint">Max 500KB</span>
+            </div>
+
+            <div id="tab-file" class="tab-content">
+                <div class="file-upload-area" onclick="document.getElementById('file').click()">
+                    <input type="file" id="file" name="file" accept=".txt,.md,.text" class="file-input">
+                    <div class="file-upload-content">
+                        <svg class="upload-icon" viewBox="0 0 24 24" width="48" height="48">
+                            <path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
+                        </svg>
+                        <p class="upload-text">Tap to select file</p>
+                        <p class="upload-hint">.txt or .md files only</p>
+                    </div>
+                </div>
+                <div id="file-name" class="file-name-display"></div>
+            </div>
+
+            <div id="tab-voice" class="tab-content">
+                <div id="voiceUnavailable" class="voice-unavailable" style="display: none;">
+                    <div class="icon">&#127908;</div>
+                    <p>Voice recording requires microphone access and a modern browser.</p>
+                    <p class="form-hint">Make sure to allow microphone permissions when prompted.</p>
+                </div>
+
+                <div id="voiceRecorder" class="record-container">
+                    <div class="audio-visualizer" id="audioVisualizer">
+                        <!-- Bars will be generated by JS -->
+                    </div>
+
+                    <button type="button" class="record-btn" id="recordBtn" onclick="toggleRecording()">
+                        <div class="record-icon"></div>
+                    </button>
+
+                    <div class="record-status">
+                        <div class="record-time" id="recordTime">00:00:00</div>
+                        <div class="record-hint" id="recordHint">Tap to start recording</div>
+                        <div class="segment-indicator" id="segmentIndicator" style="display: none;">
+                            <span class="segment-count" id="segmentCount">
+                                <span class="segment-dot"></span>
+                                <span id="segmentText">0 segments</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="recording-controls" id="recordingControls" style="display: none;">
+                        <button type="button" class="btn btn-secondary" onclick="discardRecording()">Discard All</button>
+                        <button type="button" class="btn btn-primary btn-transcribe" id="transcribeBtn" onclick="transcribeRecording()">
+                            Transcribe
+                            <span class="pending-badge" id="pendingBadge" style="display: none;">1</span>
+                        </button>
+                    </div>
+
+                    <div class="transcription-preview" id="transcriptionPreview">
+                        <div class="transcription-header">
+                            <span class="transcription-label">
+                                Transcription
+                                <span class="segment-count" id="transcribedCount" style="display: none;">
+                                    <span class="segment-dot"></span>
+                                    <span id="transcribedText">0 transcribed</span>
+                                </span>
+                            </span>
+                            <div class="transcription-actions">
+                                <button type="button" class="btn btn-small" onclick="editTranscription()">Edit</button>
+                                <button type="button" class="btn btn-small" onclick="copyTranscription()">Copy</button>
+                            </div>
+                        </div>
+                        <div class="transcription-text" id="transcriptionText"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-large btn-submit" id="submitBtn" {% if not has_api_key %}disabled{% endif %}>
+            Submit Motif
+        </button>
+    </form>
+
+    <!-- Job Progress Panel -->
+    <div class="job-progress" id="jobProgress">
+        <div class="job-header">
+            <span class="job-title">Processing Motif</span>
+            <span class="job-status" id="jobStatus">pending</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+        <div class="job-stage" id="jobStage">Queued for processing...</div>
+        <div class="thread-list" id="threadList"></div>
+        <div class="job-results" id="jobResults" style="display: none;">
+            <div class="title">Created Entries:</div>
+            <div id="resultEntries"></div>
+        </div>
+        <div class="job-error" id="jobError" style="display: none;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Recording state machine
+const RecordingState = {
+    IDLE: 'idle',
+    RECORDING: 'recording',
+    PAUSED: 'paused'
+};
+
+// Voice recording state
+let recordingState = RecordingState.IDLE;
+let mediaRecorder = null;
+let currentChunks = [];
+let audioSegments = [];
+let audioStream = null;
+let audioContext = null;
+let analyser = null;
+let recordingStartTime = null;
+let pausedTime = 0;
+let timerInterval = null;
+let voiceAvailable = false;
+let currentMimeType = 'audio/webm';
+
+// Accumulated transcript
+let fullTranscript = '';
+
+// Job polling
+let currentJobId = null;
+let pollInterval = null;
+
+// Check voice availability on load
+document.addEventListener('DOMContentLoaded', async function() {
+    await checkVoiceAvailability();
+    initVisualizer();
+});
+
+async function checkVoiceAvailability() {
+    const voiceTabBtn = document.getElementById('voiceTabBtn');
+
+    // Check browser support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        voiceTabBtn.classList.add('disabled');
+        voiceTabBtn.title = 'Voice recording not supported in this browser';
+        return;
+    }
+
+    // Check if Whisper API is available
+    try {
+        const response = await fetch('/dropbox/api/transcribe/status');
+        const data = await response.json();
+        if (!data.available) {
+            voiceTabBtn.classList.add('disabled');
+            voiceTabBtn.title = 'Voice transcription not configured on server';
+            return;
+        }
+    } catch (e) {
+        console.error('Failed to check transcription status:', e);
+    }
+
+    voiceAvailable = true;
+}
+
+function initVisualizer() {
+    const visualizer = document.getElementById('audioVisualizer');
+    visualizer.innerHTML = '';
+    for (let i = 0; i < 32; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'visualizer-bar';
+        bar.style.height = '4px';
+        visualizer.appendChild(bar);
+    }
+}
+
+function showTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+
+    if (tab === 'text') {
+        document.getElementById('file').value = '';
+        document.getElementById('file-name').textContent = '';
+    } else if (tab === 'file') {
+        document.getElementById('transcript').value = '';
+    } else if (tab === 'voice') {
+        document.getElementById('file').value = '';
+        document.getElementById('file-name').textContent = '';
+
+        if (!voiceAvailable) {
+            document.getElementById('voiceUnavailable').style.display = 'block';
+            document.getElementById('voiceRecorder').style.display = 'none';
+        } else {
+            document.getElementById('voiceUnavailable').style.display = 'none';
+            document.getElementById('voiceRecorder').style.display = 'flex';
+        }
+    }
+}
+
+async function toggleRecording() {
+    switch (recordingState) {
+        case RecordingState.IDLE:
+            await startRecording();
+            break;
+        case RecordingState.RECORDING:
+            pauseRecording();
+            break;
+        case RecordingState.PAUSED:
+            await resumeRecording();
+            break;
+    }
+}
+
+async function startRecording() {
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            }
+        });
+
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(audioStream);
+        source.connect(analyser);
+
+        currentMimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            currentMimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            currentMimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+            currentMimeType = 'audio/ogg';
+        }
+
+        mediaRecorder = new MediaRecorder(audioStream, { mimeType: currentMimeType });
+        currentChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                currentChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            if (currentChunks.length > 0) {
+                const segmentBlob = new Blob(currentChunks, { type: currentMimeType });
+                audioSegments.push({
+                    blob: segmentBlob,
+                    transcribed: false,
+                    transcript: ''
+                });
+                currentChunks = [];
+                updateSegmentUI();
+            }
+        };
+
+        mediaRecorder.start(10000);
+        recordingState = RecordingState.RECORDING;
+        recordingStartTime = Date.now();
+
+        updateRecordingUI();
+        timerInterval = setInterval(updateTimer, 100);
+        visualize();
+
+    } catch (error) {
+        console.error('Failed to start recording:', error);
+        if (error.name === 'NotAllowedError') {
+            showError('Microphone access denied. Please allow microphone permissions.');
+        } else if (error.name === 'NotFoundError') {
+            showError('No microphone found. Please connect a microphone.');
+        } else {
+            showError('Failed to start recording: ' + error.message);
+        }
+    }
+}
+
+function pauseRecording() {
+    if (!mediaRecorder || recordingState !== RecordingState.RECORDING) return;
+
+    mediaRecorder.stop();
+    recordingState = RecordingState.PAUSED;
+    pausedTime += Date.now() - recordingStartTime;
+
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    updateRecordingUI();
+    document.getElementById('recordingControls').style.display = 'flex';
+}
+
+async function resumeRecording() {
+    if (recordingState !== RecordingState.PAUSED) return;
+
+    try {
+        if (!audioStream || audioStream.getTracks().every(t => t.readyState === 'ended')) {
+            audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                }
+            });
+
+            if (audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 64;
+            }
+            const source = audioContext.createMediaStreamSource(audioStream);
+            source.connect(analyser);
+        }
+
+        mediaRecorder = new MediaRecorder(audioStream, { mimeType: currentMimeType });
+        currentChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                currentChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            if (currentChunks.length > 0) {
+                const segmentBlob = new Blob(currentChunks, { type: currentMimeType });
+                audioSegments.push({
+                    blob: segmentBlob,
+                    transcribed: false,
+                    transcript: ''
+                });
+                currentChunks = [];
+                updateSegmentUI();
+            }
+        };
+
+        mediaRecorder.start(10000);
+        recordingState = RecordingState.RECORDING;
+        recordingStartTime = Date.now();
+
+        updateRecordingUI();
+        timerInterval = setInterval(updateTimer, 100);
+        visualize();
+
+    } catch (error) {
+        console.error('Failed to resume recording:', error);
+        showError('Failed to resume recording: ' + error.message);
+    }
+}
+
+function updateRecordingUI() {
+    const btn = document.getElementById('recordBtn');
+    const visualizer = document.getElementById('audioVisualizer');
+    const hint = document.getElementById('recordHint');
+    const controls = document.getElementById('recordingControls');
+
+    btn.classList.remove('recording', 'paused');
+    visualizer.classList.remove('recording', 'paused');
+    hint.classList.remove('recording', 'paused');
+
+    switch (recordingState) {
+        case RecordingState.IDLE:
+            hint.textContent = 'Tap to start recording';
+            controls.style.display = 'none';
+            break;
+        case RecordingState.RECORDING:
+            btn.classList.add('recording');
+            visualizer.classList.add('recording');
+            hint.classList.add('recording');
+            hint.textContent = 'Tap to pause';
+            controls.style.display = 'none';
+            break;
+        case RecordingState.PAUSED:
+            btn.classList.add('paused');
+            visualizer.classList.add('paused');
+            hint.classList.add('paused');
+            hint.textContent = 'Tap to continue recording';
+            controls.style.display = 'flex';
+            break;
+    }
+
+    if (recordingState !== RecordingState.RECORDING) {
+        const bars = document.querySelectorAll('.visualizer-bar');
+        bars.forEach(bar => bar.style.height = '4px');
+    }
+}
+
+function updateSegmentUI() {
+    const indicator = document.getElementById('segmentIndicator');
+    const segmentText = document.getElementById('segmentText');
+    const pendingBadge = document.getElementById('pendingBadge');
+    const transcribedCount = document.getElementById('transcribedCount');
+    const transcribedText = document.getElementById('transcribedText');
+
+    const totalSegments = audioSegments.length;
+    const pendingSegments = audioSegments.filter(s => !s.transcribed).length;
+    const transcribedSegments = totalSegments - pendingSegments;
+
+    if (totalSegments > 0) {
+        indicator.style.display = 'flex';
+        segmentText.textContent = `${totalSegments} segment${totalSegments !== 1 ? 's' : ''}`;
+
+        if (pendingSegments > 0) {
+            pendingBadge.style.display = 'flex';
+            pendingBadge.textContent = pendingSegments;
+        } else {
+            pendingBadge.style.display = 'none';
+        }
+
+        if (transcribedSegments > 0) {
+            transcribedCount.style.display = 'inline-flex';
+            transcribedText.textContent = `${transcribedSegments} transcribed`;
+        } else {
+            transcribedCount.style.display = 'none';
+        }
+    } else {
+        indicator.style.display = 'none';
+        pendingBadge.style.display = 'none';
+        transcribedCount.style.display = 'none';
+    }
+}
+
+function updateTimer() {
+    const elapsed = pausedTime + (recordingStartTime ? Date.now() - recordingStartTime : 0);
+    const hours = Math.floor(elapsed / 3600000);
+    const minutes = Math.floor((elapsed % 3600000) / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+
+    document.getElementById('recordTime').textContent =
+        String(hours).padStart(2, '0') + ':' +
+        String(minutes).padStart(2, '0') + ':' +
+        String(seconds).padStart(2, '0');
+}
+
+function visualize() {
+    if (!analyser || recordingState !== RecordingState.RECORDING) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteFrequencyData(dataArray);
+
+    const bars = document.querySelectorAll('.visualizer-bar');
+    const barCount = bars.length;
+
+    for (let i = 0; i < barCount; i++) {
+        const index = Math.floor(i * bufferLength / barCount);
+        const value = dataArray[index];
+        const height = Math.max(4, (value / 255) * 56);
+        bars[i].style.height = height + 'px';
+    }
+
+    if (recordingState === RecordingState.RECORDING) {
+        requestAnimationFrame(visualize);
+    }
+}
+
+function discardRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
+
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close();
+        audioContext = null;
+    }
+
+    recordingState = RecordingState.IDLE;
+    currentChunks = [];
+    audioSegments = [];
+    recordingStartTime = null;
+    pausedTime = 0;
+    fullTranscript = '';
+
+    document.getElementById('recordTime').textContent = '00:00:00';
+    document.getElementById('transcriptionPreview').classList.remove('visible');
+    document.getElementById('transcriptionText').textContent = '';
+    document.getElementById('transcript').value = '';
+
+    updateRecordingUI();
+    updateSegmentUI();
+
+    showInfo('Recording discarded');
+}
+
+async function transcribeRecording() {
+    const pendingSegments = audioSegments.filter(s => !s.transcribed);
+
+    if (pendingSegments.length === 0) {
+        showInfo('All segments already transcribed');
+        return;
+    }
+
+    const totalSize = pendingSegments.reduce((sum, s) => sum + s.blob.size, 0);
+    const maxSize = 25 * 1024 * 1024;
+
+    if (totalSize > maxSize) {
+        showError('Pending audio too large. Please transcribe in smaller chunks.');
+        return;
+    }
+
+    const previewDiv = document.getElementById('transcriptionPreview');
+    const textDiv = document.getElementById('transcriptionText');
+    previewDiv.classList.add('visible');
+
+    const loadingHtml = '<div class="transcription-loading"><div class="loading-spinner"></div><span>Transcribing new segment...</span></div>';
+    if (fullTranscript) {
+        textDiv.innerHTML = fullTranscript + '<span class="segment-divider">New segment</span>' + loadingHtml;
+    } else {
+        textDiv.innerHTML = loadingHtml;
+    }
+
+    const transcribeBtn = document.getElementById('transcribeBtn');
+    transcribeBtn.disabled = true;
+    transcribeBtn.childNodes[0].textContent = 'Transcribing...';
+
+    try {
+        const pendingBlobs = pendingSegments.map(s => s.blob);
+        const combinedBlob = new Blob(pendingBlobs, { type: currentMimeType });
+
+        const formData = new FormData();
+        const ext = currentMimeType.includes('mp4') ? 'mp4' : currentMimeType.includes('ogg') ? 'ogg' : 'webm';
+        formData.append('audio', combinedBlob, 'recording.' + ext);
+
+        const response = await fetch('/dropbox/api/transcribe', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            const newTranscript = data.transcript.trim();
+
+            pendingSegments.forEach(s => {
+                s.transcribed = true;
+                s.transcript = newTranscript;
+            });
+
+            if (fullTranscript) {
+                fullTranscript += '\n\n' + newTranscript;
+            } else {
+                fullTranscript = newTranscript;
+            }
+
+            textDiv.textContent = fullTranscript;
+            document.getElementById('transcript').value = fullTranscript;
+
+            updateSegmentUI();
+            showSuccess('Transcription complete!');
+        } else {
+            textDiv.textContent = fullTranscript || '';
+            if (!fullTranscript) {
+                previewDiv.classList.remove('visible');
+            }
+            showError(data.error || 'Transcription failed');
+        }
+    } catch (error) {
+        console.error('Transcription error:', error);
+        textDiv.textContent = fullTranscript || '';
+        if (!fullTranscript) {
+            previewDiv.classList.remove('visible');
+        }
+        showError('Network error during transcription');
+    } finally {
+        transcribeBtn.disabled = false;
+        transcribeBtn.childNodes[0].textContent = 'Transcribe';
+    }
+}
+
+function editTranscription() {
+    document.getElementById('transcript').value = fullTranscript;
+    const textTabBtn = document.querySelector('.tab-btn');
+    textTabBtn.click();
+    setTimeout(() => {
+        document.getElementById('transcript').focus();
+    }, 100);
+}
+
+function copyTranscription() {
+    if (!fullTranscript) return;
+
+    navigator.clipboard.writeText(fullTranscript).then(() => {
+        showSuccess('Copied to clipboard');
+    }).catch(err => {
+        showError('Failed to copy');
+    });
+}
+
+// File input handling
+document.getElementById('file').addEventListener('change', function(e) {
+    const fileName = e.target.files[0]?.name || '';
+    document.getElementById('file-name').textContent = fileName;
+
+    if (fileName) {
+        document.querySelector('.file-upload-content').innerHTML = `
+            <svg class="upload-icon success" viewBox="0 0 24 24" width="48" height="48">
+                <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+            </svg>
+            <p class="upload-text">${fileName}</p>
+            <p class="upload-hint">Tap to change</p>
+        `;
+    }
+});
+
+// Form submission - use the new job-based API
+document.getElementById('motifForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    let transcript = '';
+    const activeTab = document.querySelector('.tab-content.active').id;
+
+    // Get transcript from the appropriate source
+    if (activeTab === 'tab-voice' && fullTranscript) {
+        transcript = fullTranscript;
+    } else if (activeTab === 'tab-file') {
+        const file = document.getElementById('file').files[0];
+        if (file) {
+            transcript = await file.text();
+        }
+    } else {
+        transcript = document.getElementById('transcript').value.trim();
+    }
+
+    if (!transcript) {
+        showWarning('Please enter text, select a file, or record a voice note.');
+        return;
+    }
+
+    // Disable submit button
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+        const response = await fetch('/motif/api/submit', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                transcript: transcript
+            }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            currentJobId = data.job_id;
+
+            // Check if sync processing completed
+            if (data.status === 'completed') {
+                showJobComplete(data);
+            } else if (data.status === 'failed') {
+                showJobFailed(data);
+            } else {
+                // Start polling for async job
+                showJobProgress(data);
+                startPolling(data.job_id);
+            }
+
+            showSuccess('Motif submitted successfully!');
+        } else {
+            if (data.missing_key) {
+                showError('Please add your Anthropic API key in Settings to process motifs.');
+            } else {
+                showError(data.error || 'Failed to submit motif');
+            }
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Motif';
+        }
+    } catch (error) {
+        console.error('Submit error:', error);
+        showError('Network error - please try again');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Motif';
+    }
+});
+
+function showJobProgress(data) {
+    const panel = document.getElementById('jobProgress');
+    panel.classList.add('visible');
+
+    updateJobUI(data);
+}
+
+function updateJobUI(data) {
+    const statusEl = document.getElementById('jobStatus');
+    const progressEl = document.getElementById('progressFill');
+    const stageEl = document.getElementById('jobStage');
+    const threadListEl = document.getElementById('threadList');
+    const resultsEl = document.getElementById('jobResults');
+    const errorEl = document.getElementById('jobError');
+
+    // Update status badge
+    statusEl.textContent = data.status;
+    statusEl.className = 'job-status ' + data.status;
+
+    // Update progress bar
+    const progress = data.progress_pct || 0;
+    progressEl.style.width = progress + '%';
+    progressEl.className = 'progress-fill' + (data.status === 'completed' ? ' completed' : '') + (data.status === 'failed' ? ' failed' : '');
+
+    // Update stage text
+    const stageText = {
+        'parsing': 'Parsing transcript into threads...',
+        'classifying': 'Classifying threads with Claude...',
+        'correlating': 'Checking for similar entries...',
+        'extracting': 'Extracting knowledge artifacts...',
+        'writing': 'Writing to Library...',
+    };
+    stageEl.textContent = stageText[data.current_stage] || data.current_stage || 'Processing...';
+
+    // Update thread list
+    if (data.threads && data.threads.length > 0) {
+        threadListEl.innerHTML = data.threads.map(t => `
+            <div class="thread-item">
+                <span class="thread-title">${t.title || t.thread_id || 'Thread'}</span>
+                <span class="thread-status ${t.status}">${t.status}</span>
+            </div>
+        `).join('');
+    }
+
+    // Show results if completed
+    if (data.status === 'completed' && data.result_entry_ids && data.result_entry_ids.length > 0) {
+        resultsEl.style.display = 'block';
+        document.getElementById('resultEntries').innerHTML = data.result_entry_ids.map(id =>
+            `<a class="result-entry" href="/library/entry/${encodeURIComponent(id)}">${id}</a>`
+        ).join('');
+    }
+
+    // Show error if failed
+    if (data.status === 'failed' && data.error_message) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = data.error_message;
+    }
+}
+
+function showJobComplete(data) {
+    const panel = document.getElementById('jobProgress');
+    panel.classList.add('visible');
+    updateJobUI({
+        ...data,
+        status: 'completed',
+        progress_pct: 100,
+        current_stage: 'Complete',
+        result_entry_ids: data.entry_ids || []
+    });
+
+    // Re-enable submit for new motifs
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit Another Motif';
+}
+
+function showJobFailed(data) {
+    const panel = document.getElementById('jobProgress');
+    panel.classList.add('visible');
+    updateJobUI({
+        ...data,
+        status: 'failed',
+        progress_pct: 0,
+        error_message: data.error
+    });
+
+    // Re-enable submit to retry
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit Motif';
+}
+
+function startPolling(jobId) {
+    // Poll every 2 seconds
+    pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/motif/api/jobs/${jobId}`);
+            const data = await response.json();
+
+            if (response.ok) {
+                updateJobUI(data);
+
+                // Stop polling if job is done
+                if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+
+                    // Re-enable submit button
+                    const submitBtn = document.getElementById('submitBtn');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Another Motif';
+                }
+            }
+        } catch (error) {
+            console.error('Polling error:', error);
+        }
+    }, 2000);
+}
+
+// Warn before leaving with unsaved recording or active job
+window.addEventListener('beforeunload', function(e) {
+    if (audioSegments.length > 0 || recordingState !== RecordingState.IDLE || pollInterval) {
+        e.preventDefault();
+        e.returnValue = 'You have an unsaved recording or job in progress. Are you sure you want to leave?';
+        return e.returnValue;
+    }
+});
+</script>
+{% endblock %}

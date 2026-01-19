@@ -1776,11 +1776,19 @@ def tool_get_note_context(args: dict) -> dict:
 
 
 def tool_process_motif(args: dict) -> dict:
-    """Push content into the transcript processing pipeline."""
-    import secrets
+    """Push content into the transcript processing pipeline.
+
+    Uses the Pit-native MotifProcessor which:
+    - Parses the transcript into threads
+    - Classifies each thread using Claude
+    - Correlates with existing entries
+    - Extracts markdown artifacts
+    - Writes to the user's Library
+    """
+    from flask import g
+    from .motif_processor import process_motif_sync
 
     content = args.get('content', '').strip()
-    content_format = args.get('format', 'markdown')
     source_label = args.get('source_label', 'mcp-direct')
 
     if not content:
@@ -1789,108 +1797,48 @@ def tool_process_motif(args: dict) -> dict:
     if len(content) < 10:
         return {"error": "Content too short. Minimum 10 characters required."}
 
-    # Generate job ID
-    job_id = f"pj-{secrets.token_hex(8)}"
+    # Get user_id from MCP context
+    if not hasattr(g, 'mcp_user') or not g.mcp_user:
+        return {"error": "Authentication required"}
 
-    db = get_db()
+    user_id = g.mcp_user.get('user_id')
+    if not user_id:
+        return {"error": "User ID not found in token"}
 
     try:
-        # Insert processing job
-        db.execute(
-            """
-            INSERT INTO processing_jobs
-            (job_id, job_type, status, input_content, input_format, created_at, updated_at)
-            VALUES (?, 'motif', 'pending', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (job_id, content, content_format)
-        )
-        db.commit()
+        # Use the new Pit-native motif processor
+        # This processes synchronously using the user's own Anthropic API key
+        result = process_motif_sync(content, user_id, source_label)
 
-        # For now, process synchronously for simple content
-        # TODO: Implement async processing for longer content
-        if len(content) < 5000:
-            try:
-                # Simple processing: create a note directly from the content
-                # Extract title from first line or generate one
-                lines = content.strip().split('\n')
-                if lines[0].startswith('#'):
-                    title = lines[0].lstrip('#').strip()
-                    body = '\n'.join(lines[1:]).strip()
-                else:
-                    title = lines[0][:100] if lines[0] else f"Motif {job_id}"
-                    body = content
-
-                # Create the note using existing tool
-                note_result = tool_create_note({
-                    'title': title,
-                    'content': body,
-                    'category': 'reflection'  # Default category for motifs
-                })
-
-                if note_result.get('success'):
-                    # Update job as completed
-                    db.execute(
-                        """
-                        UPDATE processing_jobs
-                        SET status = 'completed', result_entry_ids = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE job_id = ?
-                        """,
-                        (note_result.get('entry_id'), job_id)
-                    )
-                    db.commit()
-
-                    return {
-                        "success": True,
-                        "job_id": job_id,
-                        "status": "completed",
-                        "result": {
-                            "entry_ids": [note_result.get('entry_id')],
-                            "notes_created": 1
-                        }
-                    }
-                else:
-                    # Update job as failed
-                    db.execute(
-                        """
-                        UPDATE processing_jobs
-                        SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE job_id = ?
-                        """,
-                        (note_result.get('error', 'Unknown error'), job_id)
-                    )
-                    db.commit()
-
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "status": "failed",
-                        "error": note_result.get('error')
-                    }
-
-            except Exception as e:
-                db.execute(
-                    """
-                    UPDATE processing_jobs
-                    SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE job_id = ?
-                    """,
-                    (str(e), job_id)
-                )
-                db.commit()
-                return {"error": f"Processing failed: {str(e)}", "job_id": job_id}
-        else:
-            # For longer content, mark as pending for async processing
+        if result.get('status') == 'completed':
             return {
                 "success": True,
-                "job_id": job_id,
-                "status": "pending",
-                "message": "Job queued for async processing. Use get_processing_status to check progress.",
-                "content_length": len(content)
+                "job_id": result.get('job_id'),
+                "status": "completed",
+                "result": {
+                    "entry_ids": result.get('entry_ids', []),
+                    "notes_created": len(result.get('entry_ids', []))
+                }
+            }
+        elif result.get('status') == 'failed':
+            return {
+                "success": False,
+                "job_id": result.get('job_id'),
+                "status": "failed",
+                "error": result.get('error', 'Processing failed')
+            }
+        else:
+            # Pending/processing - should not happen in sync mode
+            return {
+                "success": True,
+                "job_id": result.get('job_id'),
+                "status": result.get('status', 'pending'),
+                "message": "Processing in progress"
             }
 
     except Exception as e:
         logger.error(f"Failed to process motif: {e}")
-        return {"error": f"Failed to queue processing job: {str(e)}"}
+        return {"error": f"Failed to process motif: {str(e)}"}
 
 
 def tool_get_processing_status(args: dict) -> dict:

@@ -12,6 +12,10 @@ primary_region = 'dfw'
 [deploy]
   strategy = 'immediate'
 
+[processes]
+  app = "gunicorn --workers=2 --bind=0.0.0.0:8000 main:app"
+  worker = "python -m legato_pit.worker_main"
+
 [env]
   FLASK_ENV = 'production'
   PORT = '8000'
@@ -42,3 +46,10 @@ primary_region = 'dfw'
   memory = '512mb'
   cpus = 1
   memory_mb = 512
+  processes = ['app']
+
+[[vm]]
+  memory = '256mb'
+  cpus = 1
+  memory_mb = 256
+  processes = ['worker']

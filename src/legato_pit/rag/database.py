@@ -389,6 +389,72 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
 
+    # ============ Job Queue Enhancements for Motif Processing ============
+
+    # Migration: Add user_id to processing_jobs for multi-tenant support
+    for column, col_type in [
+        ('user_id', 'TEXT'),
+        ('current_stage', 'TEXT'),
+        ('progress_pct', 'INTEGER DEFAULT 0'),
+        ('threads_total', 'INTEGER DEFAULT 0'),
+        ('threads_completed', 'INTEGER DEFAULT 0'),
+        ('threads_failed', 'INTEGER DEFAULT 0'),
+        ('worker_id', 'TEXT'),
+        ('locked_until', 'DATETIME'),
+        ('started_at', 'DATETIME'),
+        ('retry_count', 'INTEGER DEFAULT 0'),
+        ('source_id', 'TEXT'),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE processing_jobs ADD COLUMN {column} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    # Processing threads table - tracks individual threads within a job
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processing_threads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            thread_index INTEGER NOT NULL,
+            raw_content TEXT NOT NULL,
+
+            -- Classification results
+            category TEXT,
+            title TEXT,
+            description TEXT,
+            domain_tags TEXT,
+            key_phrases TEXT,
+            needs_chord INTEGER DEFAULT 0,
+            chord_name TEXT,
+            chord_scope TEXT,
+
+            -- Correlation results
+            correlation_action TEXT,
+            correlation_entry_id TEXT,
+            correlation_score REAL,
+
+            -- Extraction results
+            extracted_markdown TEXT,
+            entry_id TEXT,
+            file_path TEXT,
+
+            -- Status tracking
+            status TEXT DEFAULT 'pending',
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+            UNIQUE(job_id, thread_id),
+            FOREIGN KEY (job_id) REFERENCES processing_jobs(job_id)
+        )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_threads_job ON processing_threads(job_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_threads_status ON processing_threads(job_id, status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_locked ON processing_jobs(status, locked_until)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_user ON processing_jobs(user_id)")
+
     # ============ Multi-Tenant Tables ============
 
     # Core user record (authenticated via GitHub)
