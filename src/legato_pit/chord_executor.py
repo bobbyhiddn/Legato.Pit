@@ -454,8 +454,9 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
     mode = current_app.config.get("LEGATO_MODE", "single-tenant")
 
     if mode == "multi-tenant" and user_id:
-        # Multi-tenant: Get user's installation token
-        from .auth import get_user_installation_token
+        # Multi-tenant: Get user's OAuth token for repo creation
+        # OAuth tokens have public_repo scope; installation tokens can't create repos
+        from .auth import _get_user_oauth_token
         from .rag.database import init_db
 
         db = init_db()  # Shared DB for user lookups
@@ -476,10 +477,11 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
             ).fetchone()
             org = user_row["github_login"] if user_row else "unknown"
 
-        token = get_user_installation_token(user_id, "library")
+        # Use OAuth token for repo creation (has public_repo scope)
+        token = _get_user_oauth_token(user_id)
 
         if not token:
-            raise RuntimeError("No installation token available for user")
+            raise RuntimeError("No OAuth token available for user - please re-authenticate")
 
         return ChordExecutor(token, org)
 

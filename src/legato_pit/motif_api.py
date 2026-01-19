@@ -16,7 +16,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, current_app
 
-from .core import login_required, library_required
+from .core import login_required, library_required, paid_required
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ SYNC_THRESHOLD = 5000  # Process synchronously if under this size
 
 @motif_api_bp.route('/api/submit', methods=['POST'])
 @library_required
+@paid_required
 def submit_job():
     """Submit a transcript for motif processing.
 
@@ -128,6 +129,7 @@ def submit_job():
 
 @motif_api_bp.route('/api/jobs/<job_id>', methods=['GET'])
 @login_required
+@paid_required
 def get_job_status(job_id: str):
     """Get job status and progress.
 
@@ -196,6 +198,7 @@ def get_job_status(job_id: str):
 
 @motif_api_bp.route('/api/jobs', methods=['GET'])
 @login_required
+@paid_required
 def list_jobs():
     """List user's recent jobs.
 
@@ -246,6 +249,7 @@ def list_jobs():
 
 @motif_api_bp.route('/api/jobs/<job_id>', methods=['DELETE'])
 @login_required
+@paid_required
 def cancel_job(job_id: str):
     """Cancel a pending job.
 
@@ -282,6 +286,7 @@ def cancel_job(job_id: str):
 
 @motif_api_bp.route('/')
 @library_required
+@paid_required
 def index():
     """Motif processing page with job submission and status tracking."""
     from flask import render_template

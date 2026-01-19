@@ -17,7 +17,7 @@ from datetime import datetime
 import requests
 from flask import Blueprint, request, jsonify, session, current_app, g, render_template
 
-from .core import login_required, library_required, copilot_required
+from .core import login_required, library_required, copilot_required, paid_required
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ def verify_system_token(req) -> bool:
 
 @agents_bp.route('/')
 @library_required
+@paid_required
 @copilot_required
 def index():
     """Agents queue management page."""
@@ -140,6 +141,7 @@ def index():
 
 @agents_bp.route('/api/create', methods=['POST'])
 @login_required
+@paid_required
 @copilot_required
 def api_create_agent():
     """Create a new agent from selected notes.
@@ -287,6 +289,7 @@ def api_create_agent():
 
 @agents_bp.route('/api/queue-chord', methods=['POST'])
 @login_required
+@paid_required
 @copilot_required
 def api_queue_chord():
     """Mark a library entry as needing a chord (lightweight flagging).
@@ -356,6 +359,7 @@ def api_queue_chord():
 
 @agents_bp.route('/api/from-entry', methods=['POST'])
 @login_required
+@paid_required
 @copilot_required
 def api_queue_from_entry():
     """Queue an agent to create a Chord (Lab repo) from a Note (library entry).
@@ -563,6 +567,7 @@ def api_queue_agent():
 
 @agents_bp.route('/api/pending', methods=['GET'])
 @login_required
+@paid_required
 def api_list_pending():
     """List all pending agents.
 
@@ -613,6 +618,7 @@ def api_list_pending():
 
 @agents_bp.route('/api/pending-count', methods=['GET'])
 @login_required
+@paid_required
 def api_pending_count():
     """Get count of pending agents (lightweight for nav badge).
 
@@ -640,6 +646,7 @@ def api_pending_count():
 
 @agents_bp.route('/api/debug', methods=['GET'])
 @login_required
+@paid_required
 def api_debug_agents():
     """Debug endpoint to check agent queue database state.
 
@@ -679,6 +686,7 @@ def api_debug_agents():
 
 @agents_bp.route('/api/<queue_id>/approve', methods=['POST'])
 @login_required
+@paid_required
 @copilot_required
 def api_approve_agent(queue_id: str):
     """Approve an agent and trigger spawn.
@@ -848,6 +856,7 @@ def api_approve_agent(queue_id: str):
 
 @agents_bp.route('/api/reject-all', methods=['POST'])
 @login_required
+@paid_required
 def api_reject_all():
     """Reject all pending agents (mark as rejected, not delete).
 

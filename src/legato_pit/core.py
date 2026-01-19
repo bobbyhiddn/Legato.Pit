@@ -387,6 +387,74 @@ def login_required(f):
     return decorated_function
 
 
+def get_user_tier(user_id: str) -> str:
+    """Get a user's tier from the shared users table."""
+    if not user_id:
+        return 'free'
+
+    from .rag.database import init_db
+
+    db = init_db()
+    row = db.execute(
+        "SELECT tier FROM users WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+
+    if row and row['tier']:
+        return row['tier']
+
+    return 'free'
+
+
+def get_current_user_tier() -> str:
+    """Get the current session user's tier.
+
+    In single-tenant mode, this returns a non-free value so SaaS gating is bypassed.
+    """
+    from flask import current_app
+
+    if current_app.config.get('LEGATO_MODE') != 'multi-tenant':
+        return 'single-tenant'
+
+    user_id = session.get('user', {}).get('user_id')
+    return get_user_tier(user_id)
+
+
+def is_paid_tier(tier: str) -> bool:
+    return bool(tier) and tier != 'free'
+
+
+def paid_required(f):
+    """Decorator to require a paid subscription tier in multi-tenant mode."""
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
+
+        from flask import current_app
+
+        # Only enforce SaaS tiers in multi-tenant mode
+        if current_app.config.get('LEGATO_MODE') != 'multi-tenant':
+            return f(*args, **kwargs)
+
+        tier = get_current_user_tier()
+        if is_paid_tier(tier):
+            return f(*args, **kwargs)
+
+        if request.path.startswith('/api/') or request.is_json or request.headers.get('Accept') == 'application/json':
+            return jsonify({
+                'error': 'Subscription required',
+                'upgrade_required': True,
+            }), 402
+
+        flash('This feature requires a subscription.', 'warning')
+        return redirect(url_for('auth.setup'))
+
+    return decorated_function
+
+
 def library_required(f):
     """Decorator to require Library setup before accessing features.
 
