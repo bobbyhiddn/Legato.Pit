@@ -806,13 +806,16 @@ def backup_all_to_tigris(bucket_name: str) -> dict:
 def get_user_legato_db():
     """Get the legato database for the current authenticated user.
 
-    In multi-tenant mode, each user has their own isolated database.
-    In single-tenant mode, returns the shared legato.db.
+    SECURITY: Each user MUST have their own isolated database.
+    This function requires a valid user_id in the session.
 
     Must be called within a Flask request context.
 
     Returns:
         sqlite3.Connection to user's legato database
+
+    Raises:
+        ValueError: If no user_id is present (security violation)
     """
     from flask import g, current_app, session
 
@@ -820,21 +823,17 @@ def get_user_legato_db():
     if 'user_legato_db' in g:
         return g.user_legato_db
 
-    # Determine if we're in multi-tenant mode
-    mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+    # SECURITY: Always require user_id for database access
+    user = session.get('user')
+    if not user or not user.get('user_id'):
+        # Log security event
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error("SECURITY: Attempted database access without user_id")
+        raise ValueError("Database access requires authenticated user with user_id")
 
-    if mode == 'multi-tenant':
-        # Get user from session
-        user = session.get('user')
-        if user and user.get('user_id'):
-            user_id = user['user_id']
-            g.user_legato_db = init_db(user_id=user_id)
-        else:
-            # No user - return shared DB (for unauthenticated routes)
-            g.user_legato_db = init_db()
-    else:
-        # Single-tenant - use shared database
-        g.user_legato_db = init_db()
+    user_id = user['user_id']
+    g.user_legato_db = init_db(user_id=user_id)
 
     # Force WAL checkpoint to see latest writes
     g.user_legato_db.execute("PRAGMA wal_checkpoint(PASSIVE)")
