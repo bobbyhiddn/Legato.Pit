@@ -244,6 +244,85 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
     logger.info(f"Stored installation {installation_id} for user {user_id}")
 
 
+def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
+    """Auto-detect and configure a Legato.Library repo.
+
+    Looks for repos named 'Legato.Library' in the user's accessible repos
+    and auto-configures them.
+
+    Args:
+        user_id: The user's ID
+        installations: List of user's GitHub App installations
+
+    Returns:
+        Dict with repo config if found and configured, None otherwise
+    """
+    from .github_app import get_installation_access_token
+
+    db = _get_db()
+
+    for inst in installations:
+        installation_id = inst['installation_id'] if isinstance(inst, dict) else inst[0]
+        account_login = inst['account_login'] if isinstance(inst, dict) else inst[1]
+
+        try:
+            # Get installation token
+            token_data = get_installation_access_token(installation_id)
+            token = token_data.get('token')
+
+            if not token:
+                continue
+
+            # List repos accessible to this installation
+            import requests
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.github+json'
+            }
+            resp = requests.get(
+                'https://api.github.com/installation/repositories',
+                headers=headers
+            )
+
+            if not resp.ok:
+                continue
+
+            repos = resp.json().get('repositories', [])
+
+            # Look for Legato.Library
+            for repo in repos:
+                if repo['name'] == 'Legato.Library':
+                    repo_full_name = repo['full_name']
+
+                    # Auto-configure this as the Library
+                    db.execute(
+                        """
+                        INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
+                        VALUES (?, 'library', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id, repo_type) DO UPDATE SET
+                            repo_full_name = excluded.repo_full_name,
+                            installation_id = excluded.installation_id,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (user_id, repo_full_name, installation_id)
+                    )
+                    db.commit()
+
+                    logger.info(f"Auto-detected Library repo {repo_full_name} for user {user_id}")
+
+                    return {
+                        'repo_type': 'library',
+                        'repo_full_name': repo_full_name,
+                        'installation_id': installation_id
+                    }
+
+        except Exception as e:
+            logger.warning(f"Failed to check installation {installation_id} for Library: {e}")
+            continue
+
+    return None
+
+
 def _log_audit(user_id: str, action: str, resource_type: str,
                resource_id: Optional[str] = None, details: Optional[str] = None):
     """Log an audit event.
@@ -577,11 +656,24 @@ def setup():
         (user_id,)
     ).fetchone()
 
+    # Auto-detect Library repo if not configured but installations exist
+    repos_list = [dict(r) for r in repos]
+    has_library = any(r['repo_type'] == 'library' for r in repos_list)
+
+    if not has_library and installations:
+        detected_library = _auto_detect_library(user_id, installations)
+        if detected_library:
+            repos_list.append(detected_library)
+            flash(f'Auto-detected your Library: {detected_library["repo_full_name"]}', 'success')
+
+            # Trigger initial sync for the newly detected Library
+            trigger_user_library_sync(user_id, user.get('username'))
+
     return render_template('setup.html',
                            user=user,
                            tier=user_record['tier'] if user_record else 'free',
                            installations=[dict(i) for i in installations],
-                           repos=[dict(r) for r in repos],
+                           repos=repos_list,
                            api_keys=[dict(k) for k in api_keys])
 
 

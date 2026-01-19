@@ -58,14 +58,52 @@
         <p class="library-configured">
             Your Library: <strong>{{ library_repo.repo_full_name }}</strong>
         </p>
+        <a href="https://github.com/{{ library_repo.repo_full_name }}" target="_blank" class="btn btn-secondary btn-sm">View on GitHub</a>
         {% elif installations %}
-        <p>Create your personal knowledge store:</p>
-        <form method="post" action="{{ url_for('auth.setup_create_library') }}">
-            <button type="submit" class="btn btn-primary">Create Legato.Library</button>
-        </form>
-        <p class="help-text">This will create a <code>Legato.Library</code> repository in your GitHub account.</p>
+        <div class="library-setup-steps">
+            <p>Create your personal knowledge store in 2 steps:</p>
+
+            <div class="setup-step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <strong>Create from template</strong>
+                    <p>Click below to create your Library repo from our template:</p>
+                    <a href="https://github.com/new?template_owner=bobbyhiddn&template_name=Legato.Library&name=Legato.Library&visibility=private"
+                       target="_blank" class="btn btn-primary">
+                        Create Legato.Library
+                    </a>
+                </div>
+            </div>
+
+            <div class="setup-step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <strong>Grant access</strong>
+                    <p>After creating, install the GitHub App on your new Library repo:</p>
+                    <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-secondary">
+                        Configure App Access
+                    </a>
+                </div>
+            </div>
+
+            <div class="setup-step-done">
+                <p>Already created your Library?</p>
+                <button onclick="location.reload()" class="btn btn-outline btn-sm">Refresh to detect it</button>
+            </div>
+        </div>
         {% else %}
-        <p class="help-text">Install the GitHub App first, then you can create your Library.</p>
+        <div class="library-setup-steps">
+            <p>To get started, you'll need to:</p>
+            <div class="setup-step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <strong>Install the GitHub App</strong>
+                    <p>This grants Legato access to your selected repositories.</p>
+                    <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-primary">Install GitHub App</a>
+                </div>
+            </div>
+            <p class="help-text">After installing, you'll be able to create your Library from our template.</p>
+        </div>
         {% endif %}
     </div>
 
@@ -298,6 +336,81 @@ details.setup-section[open] summary {
     text-align: center;
     background: transparent;
     padding: 0;
+}
+
+/* Step-based setup flow */
+.library-setup-steps {
+    margin-top: 0.5rem;
+}
+
+.library-setup-steps > p {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.setup-step {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.step-number {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    background: var(--accent-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-content strong {
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.step-content p {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin: 0.5rem 0;
+}
+
+.step-content .btn {
+    margin-top: 0.5rem;
+}
+
+.setup-step-done {
+    text-align: center;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+    margin-top: 0.5rem;
+}
+
+.setup-step-done p {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-outline:hover {
+    background: var(--bg-tertiary);
 }
 
 .btn-lg {
