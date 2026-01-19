@@ -220,6 +220,19 @@ class LibrarySync:
         }
 
         try:
+            # Get default branch from repo info
+            repo_info_url = f"https://api.github.com/repos/{repo}"
+            repo_response = requests.get(repo_info_url, headers=headers, timeout=10)
+            if repo_response.ok:
+                repo_data = repo_response.json()
+                branch = repo_data.get('default_branch', branch)
+                # Check if repo is empty (no commits)
+                if repo_data.get('size', 0) == 0:
+                    logger.warning(f"Repository {repo} appears to be empty (no commits)")
+                    stats['errors'] = 0
+                    stats['message'] = 'Repository is empty - please add initial content'
+                    return stats
+
             # Get repository tree
             tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
             response = requests.get(tree_url, headers=headers, timeout=30)

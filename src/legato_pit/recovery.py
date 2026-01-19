@@ -34,6 +34,29 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def get_default_branch(repo: str, headers: dict) -> str:
+    """Get the default branch for a repository.
+
+    Args:
+        repo: Full repo name (owner/repo)
+        headers: GitHub API headers with auth
+
+    Returns:
+        Default branch name (e.g., 'main' or 'master')
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}",
+            headers=headers,
+            timeout=10
+        )
+        if resp.ok:
+            return resp.json().get('default_branch', 'main')
+    except Exception as e:
+        logger.warning(f"Failed to get default branch for {repo}: {e}")
+    return 'main'  # fallback
+
+
 # ============ Data Classes ============
 
 @dataclass
@@ -223,7 +246,8 @@ def validate_library(
 
     try:
         # Get repository tree
-        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        branch = get_default_branch(repo, headers)
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
         response = requests.get(tree_url, headers=headers, timeout=30)
         response.raise_for_status()
         tree_data = response.json()
@@ -374,7 +398,8 @@ def fix_double_frontmatter(
 
     try:
         # Get all markdown files
-        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        branch = get_default_branch(repo, headers)
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
         response = requests.get(tree_url, headers=headers, timeout=30)
         response.raise_for_status()
 
@@ -485,7 +510,8 @@ def normalize_ids(
     }
 
     try:
-        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        branch = get_default_branch(repo, headers)
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
         response = requests.get(tree_url, headers=headers, timeout=30)
         response.raise_for_status()
 
@@ -613,7 +639,8 @@ def rebuild_content_hashes(
     }
 
     try:
-        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        branch = get_default_branch(repo, headers)
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
         response = requests.get(tree_url, headers=headers, timeout=30)
         response.raise_for_status()
 
@@ -716,7 +743,8 @@ def sync_category_descriptions(
         categories = get_user_categories(db, 'default')
 
         # Get existing files in repo
-        tree_url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+        branch = get_default_branch(repo, headers)
+        tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
         response = requests.get(tree_url, headers=headers, timeout=30)
         response.raise_for_status()
 

@@ -709,9 +709,21 @@ def api_sync():
             stats = sync.sync_from_filesystem(path)
         else:
             from .core import get_user_library_repo
+            from .auth import get_user_installation_token
+            from flask import session
+
             default_repo = get_user_library_repo()
             repo = data.get('repo', default_repo)
-            stats = sync.sync_from_github(repo)
+
+            # Get user's installation token for multi-tenant mode
+            user_id = session.get('user', {}).get('user_id')
+            token = None
+            if user_id:
+                token = get_user_installation_token(user_id, 'library')
+                if not token:
+                    logger.warning(f"No installation token for user {user_id}, falling back to SYSTEM_PAT")
+
+            stats = sync.sync_from_github(repo, token=token)
 
         return jsonify({
             'status': 'success',
@@ -762,7 +774,18 @@ def api_reset():
 
         # Re-sync from configured Library
         library_repo = get_user_library_repo()
-        token = current_app.config.get('SYSTEM_PAT')
+
+        # Get user's installation token for multi-tenant mode
+        from .auth import get_user_installation_token
+        user_id = session.get('user', {}).get('user_id')
+        token = None
+        if user_id:
+            token = get_user_installation_token(user_id, 'library')
+            if not token:
+                logger.warning(f"No installation token for user {user_id}, trying SYSTEM_PAT")
+                token = current_app.config.get('SYSTEM_PAT')
+        else:
+            token = current_app.config.get('SYSTEM_PAT')
 
         embedding_service = None
         if os.environ.get('OPENAI_API_KEY'):
