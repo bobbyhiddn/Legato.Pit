@@ -144,6 +144,26 @@
     </div>
     {% endif %}
 
+    <!-- Copilot Status (Chords & Agents) -->
+    {% if is_configured %}
+    <div class="setup-section">
+        <h2>Chords & Agents</h2>
+        <p>Chords and Agents require GitHub Copilot to run AI-assisted project creation.</p>
+        <div class="copilot-status">
+            {% if user.has_copilot %}
+            <span class="copilot-badge copilot-enabled">Copilot Enabled</span>
+            <p>You have access to Chords & Agents features.</p>
+            {% else %}
+            <span class="copilot-badge copilot-disabled">Copilot Not Detected</span>
+            <p>Enable GitHub Copilot on your account to use Chords & Agents.</p>
+            {% endif %}
+        </div>
+        <form method="post" action="{{ url_for('auth.setup_check_copilot') }}" style="margin-top: 0.75rem;">
+            <button type="submit" class="btn btn-secondary btn-sm">Check Copilot Status</button>
+        </form>
+    </div>
+    {% endif %}
+
     <!-- Advanced: Manual Library Configuration (hidden) -->
     {% if is_configured %}
     <details class="setup-section">
@@ -220,6 +240,28 @@
     margin-top: 0.5rem;
     color: var(--text-secondary);
     font-size: 0.9rem;
+}
+
+.copilot-status {
+    margin: 0.5rem 0;
+}
+
+.copilot-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.copilot-enabled {
+    background: #10b981;
+    color: white;
+}
+
+.copilot-disabled {
+    background: #6b7280;
+    color: white;
 }
 
 .installation-list {

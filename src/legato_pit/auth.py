@@ -603,6 +603,17 @@ def github_app_callback():
         ).fetchone()
 
         if installations and installations['count'] > 0:
+            # Refresh Copilot status on login (in background to not slow down login)
+            def _check_copilot_bg():
+                try:
+                    has_copilot = get_user_copilot_status(user['user_id'], check_if_stale=True)
+                    logger.info(f"User {github_login} Copilot status: {has_copilot}")
+                except Exception as e:
+                    logger.warning(f"Failed to check Copilot for {github_login}: {e}")
+
+            import threading
+            threading.Thread(target=_check_copilot_bg, daemon=True).start()
+
             flash(f'Welcome back, {name or github_login}!', 'success')
             return redirect(url_for('dashboard.index'))
         else:
@@ -1056,6 +1067,39 @@ def setup_api_key():
     except Exception as e:
         logger.error(f"Failed to store API key: {e}")
         flash('Failed to store API key.', 'error')
+
+    return redirect(url_for('auth.setup'))
+
+
+@auth_bp.route('/setup/check-copilot', methods=['POST'])
+@login_required
+def setup_check_copilot():
+    """Check/refresh the user's Copilot status.
+
+    Updates the database and session with the current Copilot availability.
+    """
+    user = session['user']
+    user_id = user.get('user_id')
+
+    try:
+        # Check Copilot status (this queries GitHub)
+        has_copilot = check_user_copilot_access(user_id)
+
+        # Update database
+        update_user_copilot_status(user_id, has_copilot)
+
+        # Update session
+        session['user']['has_copilot'] = has_copilot
+        session.modified = True
+
+        if has_copilot:
+            flash('Copilot detected! Chords & Agents features are now enabled.', 'success')
+        else:
+            flash('Copilot not detected. Enable GitHub Copilot on your account to use Chords & Agents.', 'info')
+
+    except Exception as e:
+        logger.error(f"Failed to check Copilot: {e}")
+        flash(f'Failed to check Copilot status: {str(e)}', 'error')
 
     return redirect(url_for('auth.setup'))
 

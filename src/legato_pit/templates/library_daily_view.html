@@ -290,7 +290,9 @@
                     {% elif entry.chord_status == 'pending' %}
                     <span class="chord-badge pending">Pending</span>
                     {% endif %}
+                    {% if user.has_copilot %}
                     <button class="btn btn-add-chord" onclick="addToChordQueue('{{ entry.entry_id }}', '{{ entry.title|e }}')">+ Chord</button>
+                    {% endif %}
                 </div>
             </div>
             {% else %}

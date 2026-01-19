@@ -446,7 +446,9 @@
         </div>
         <div class="note-modal-actions">
             <a href="#" id="modalOpenLink" class="btn btn-primary">Open Note</a>
+            {% if user.has_copilot %}
             <button class="btn btn-secondary" id="modalAddToChord" onclick="addModalNoteToSelection()">Add to Selection</button>
+            {% endif %}
         </div>
     </div>
 </div>
