@@ -846,6 +846,74 @@ def setup_debug():
     return jsonify(debug_info)
 
 
+@auth_bp.route('/setup/library', methods=['POST'])
+def setup_library():
+    """Quick setup for Library repo.
+
+    Takes just the repo name (e.g., 'Legato.Library.username') and configures it.
+    Uses the user's first installation.
+    """
+    if 'user' not in session:
+        return redirect(url_for('auth.login'))
+
+    user = session['user']
+    user_id = user.get('user_id')
+    username = user.get('username')
+
+    repo_name = request.form.get('repo_name', '').strip()
+
+    if not repo_name:
+        flash('Please enter your Library repo name.', 'error')
+        return redirect(url_for('auth.setup'))
+
+    # Build full repo name
+    if '/' in repo_name:
+        repo_full_name = repo_name  # Already has owner
+    else:
+        repo_full_name = f"{username}/{repo_name}"
+
+    db = _get_db()
+
+    # Get user's first installation
+    inst = db.execute(
+        "SELECT installation_id FROM github_app_installations WHERE user_id = ? LIMIT 1",
+        (user_id,)
+    ).fetchone()
+
+    if not inst:
+        flash('Please install the GitHub App first.', 'error')
+        return redirect(url_for('auth.setup'))
+
+    installation_id = inst['installation_id']
+
+    try:
+        # Configure the Library
+        db.execute(
+            """
+            INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
+            VALUES (?, 'library', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, repo_type) DO UPDATE SET
+                repo_full_name = excluded.repo_full_name,
+                installation_id = excluded.installation_id,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, repo_full_name, installation_id)
+        )
+        db.commit()
+
+        flash(f'Library configured: {repo_full_name}', 'success')
+
+        # Trigger initial sync
+        trigger_user_library_sync(user_id, username)
+
+        return redirect(url_for('auth.setup'))
+
+    except Exception as e:
+        logger.error(f"Failed to configure Library: {e}")
+        flash('Failed to configure Library.', 'error')
+        return redirect(url_for('auth.setup'))
+
+
 @auth_bp.route('/setup/repo', methods=['POST'])
 def setup_repo():
     """Designate a repository for Library or Conduct.

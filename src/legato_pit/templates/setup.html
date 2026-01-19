@@ -44,9 +44,15 @@
 
             <div class="setup-step-done">
                 <p>Already created your Library?</p>
-                <button onclick="location.reload()" class="btn btn-outline btn-sm">Refresh to detect Library</button>
+                <form method="post" action="{{ url_for('auth.setup_library') }}" class="library-manual-form">
+                    <input type="text" name="repo_name"
+                           placeholder="Legato.Library.{{ session.user.username }}"
+                           value="Legato.Library.{{ session.user.username }}"
+                           class="library-input">
+                    <button type="submit" class="btn btn-primary btn-sm">Connect Library</button>
+                </form>
                 <p class="help-text" style="margin-top: 0.5rem;">
-                    If detection fails, try <a href="{{ url_for('auth.logout') }}">logging out</a> and back in.
+                    Enter your Library repo name (just the repo name, not full URL)
                 </p>
             </div>
         </div>
@@ -289,6 +295,22 @@ details.setup-section[open] summary {
 
 .repo-form, .api-key-form {
     margin-bottom: 1rem;
+}
+
+.library-manual-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.library-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: monospace;
 }
 
 .form-group {
