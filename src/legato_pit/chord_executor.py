@@ -5,7 +5,7 @@ This replaces Legato.Conduct by handling project creation directly in Pit.
 Uses embedded templates and GitHub API to create repos, push files, and
 create issues for Copilot.
 
-Supports both single-tenant (SYSTEM_PAT) and multi-tenant (installation tokens).
+Supports both single-tenant and multi-tenant modes with user installation tokens.
 """
 
 import os

@@ -218,8 +218,7 @@ def api_repo_details(repo_name: str):
     user_id = user.get('user_id')
 
     token = get_user_installation_token(user_id, 'library') if user_id else None
-    if not token:
-        token = current_app.config.get('SYSTEM_PAT')
+    # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
 
     if not token:
         return jsonify({'error': 'GitHub authorization required'}), 401
@@ -254,8 +253,7 @@ def api_delete_repo(repo_name: str):
     user_id = user.get('user_id')
 
     token = get_user_installation_token(user_id, 'library') if user_id else None
-    if not token:
-        token = current_app.config.get('SYSTEM_PAT')
+    # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
 
     if not token:
         return jsonify({'error': 'GitHub authorization required'}), 401
@@ -279,7 +277,7 @@ def api_delete_repo(repo_name: str):
         elif response.status_code == 403:
             return jsonify({
                 'error': 'Insufficient permissions to delete repository',
-                'detail': 'The SYSTEM_PAT token needs delete_repo scope'
+                'detail': 'Your GitHub installation needs delete_repo scope'
             }), 403
         else:
             return jsonify({

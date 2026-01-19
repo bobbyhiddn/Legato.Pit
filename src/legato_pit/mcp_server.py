@@ -773,9 +773,15 @@ def tool_create_note(args: dict) -> dict:
 
     full_content = frontmatter + content
 
-    # Create file in GitHub
-    token = current_app.config.get('SYSTEM_PAT')
+    # Create file in GitHub using user's installation token
+    from .auth import get_user_installation_token
     from .core import get_user_library_repo
+
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
     repo = get_user_library_repo()
 
     create_file(
@@ -973,13 +979,15 @@ def tool_list_recent_notes(args: dict) -> dict:
     }
 
 
-def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments: str) -> dict:
+def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments: str, user_id: str = None, github_login: str = None) -> dict:
     """Dispatch an incident to Conduct for an existing chord repository.
 
     Args:
         chord_repo: Full repo name (org/repo-name.Chord)
         notes: List of note dicts with entry_id, title, content
         additional_comments: Additional context for the incident
+        user_id: User ID for multi-tenant mode
+        github_login: GitHub username (org) for dispatch
 
     Returns:
         dict with success/error and dispatch details
@@ -987,12 +995,15 @@ def _create_incident_on_chord(chord_repo: str, notes: list, additional_comments:
     import os
     import secrets
     import requests as http_requests
+    from .auth import get_user_installation_token
 
-    token = os.environ.get('SYSTEM_PAT')
+    # Get user token in multi-tenant mode
+    token = get_user_installation_token(user_id, 'library') if user_id else None
     if not token:
-        return {"error": "SYSTEM_PAT not configured"}
+        return {"error": "GitHub authorization required. Please re-authenticate."}
 
-    org = os.environ.get('LEGATO_ORG', 'bobbyhiddn')
+    # Use user's GitHub login as org, fallback to env var
+    org = github_login or os.environ.get('LEGATO_ORG', 'bobbyhiddn')
     conduct_repo = os.environ.get('CONDUCT_REPO', 'Legato.Conduct')
 
     primary = notes[0]
@@ -1114,7 +1125,10 @@ def tool_spawn_agent(args: dict) -> dict:
 
     # If targeting an existing chord, create an incident issue instead of queuing
     if target_chord_repo:
-        return _create_incident_on_chord(target_chord_repo, notes, additional_comments)
+        # Get user context from MCP auth
+        user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+        github_login = g.mcp_user.get('sub') if hasattr(g, 'mcp_user') else None
+        return _create_incident_on_chord(target_chord_repo, notes, additional_comments, user_id, github_login)
 
     # Generate project name if not provided
     if not project_name:
@@ -1242,9 +1256,12 @@ def tool_update_note(args: dict) -> dict:
     if not entry:
         return {"error": f"Note not found: {entry_id}"}
 
+    # Get user context from MCP auth
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
     # Validate new category if provided
     if new_category:
-        categories = get_user_categories(db, 'default')
+        categories = get_user_categories(db, user_id or 'default')
         valid_categories = {c['name'] for c in categories}
         if new_category not in valid_categories:
             return {"error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"}
@@ -1258,9 +1275,14 @@ def tool_update_note(args: dict) -> dict:
     # Recompute content_hash if content changed
     new_content_hash = compute_content_hash(content) if new_content is not None else None
 
-    # Get current file from GitHub to preserve frontmatter structure
-    token = current_app.config.get('SYSTEM_PAT')
+    # Get user's installation token
+    from .auth import get_user_installation_token
     from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
     repo = get_user_library_repo()
 
     try:
@@ -1391,8 +1413,15 @@ def tool_delete_note(args: dict) -> dict:
     if not entry:
         return {"error": f"Note not found: {entry_id}"}
 
-    token = current_app.config.get('SYSTEM_PAT')
+    # Get user's installation token
+    from .auth import get_user_installation_token
     from .core import get_user_library_repo
+
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
     repo = get_user_library_repo()
     file_path = entry['file_path']
     title = entry['title']

@@ -81,23 +81,35 @@ def get_category_definitions():
     ]
 
 
-def dispatch_transcript(transcript_text, source_id):
+def dispatch_transcript(transcript_text, source_id, user_id=None):
     """
     Dispatch transcript to Legato.Conduct via repository_dispatch.
 
     Args:
         transcript_text: The transcript content
         source_id: Source identifier
+        user_id: User ID for multi-tenant mode
 
     Returns:
         Tuple of (success: bool, message: str)
     """
-    token = current_app.config.get('SYSTEM_PAT')
-    if not token:
-        logger.error("SYSTEM_PAT not configured")
-        return False, "System not configured for transcript dispatch"
+    from flask import session
+    from .auth import get_user_installation_token
 
-    org = current_app.config['LEGATO_ORG']
+    # In multi-tenant mode, use user's installation token
+    user = session.get('user', {})
+    user_id = user_id or user.get('user_id')
+    org = user.get('username')  # User's GitHub username
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        logger.error("No GitHub token available for transcript dispatch")
+        return False, "GitHub authorization required for transcript dispatch"
+
+    if not org:
+        logger.error("No organization available for transcript dispatch")
+        return False, "User organization not found"
+
     repo = current_app.config['CONDUCT_REPO']
 
     # Get user-defined categories for dynamic classification

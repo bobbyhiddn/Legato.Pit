@@ -13,7 +13,7 @@ from typing import Optional
 import markdown
 from flask import (
     Blueprint, render_template, request, jsonify,
-    current_app, g
+    current_app, g, session
 )
 
 from .core import login_required, library_required
@@ -218,17 +218,15 @@ def trigger_background_sync():
             else:
                 db = init_db()
 
-            # Get token - prefer user installation token in multi-tenant mode
+            # Get user installation token - required in multi-tenant mode
             token = None
             if user_id:
                 from .auth import get_user_installation_token
                 token = get_user_installation_token(user_id, 'library')
 
+            # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
             if not token:
-                token = os.environ.get('SYSTEM_PAT')
-
-            if not token:
-                logger.warning("No token available, skipping on-load sync")
+                logger.warning("No user token available, skipping on-load sync")
                 return
 
             embedding_service = None
@@ -733,7 +731,8 @@ def api_sync():
             if user_id:
                 token = get_user_installation_token(user_id, 'library')
                 if not token:
-                    logger.warning(f"No installation token for user {user_id}, falling back to SYSTEM_PAT")
+                    logger.warning(f"No installation token for user {user_id}")
+                    return jsonify({'error': 'GitHub authorization required'}), 401
 
             stats = sync.sync_from_github(repo, token=token)
 
@@ -787,17 +786,17 @@ def api_reset():
         # Re-sync from configured Library
         library_repo = get_user_library_repo()
 
-        # Get user's installation token for multi-tenant mode
+        # Get user's installation token - required in multi-tenant mode
         from .auth import get_user_installation_token
         user_id = session.get('user', {}).get('user_id')
         token = None
         if user_id:
             token = get_user_installation_token(user_id, 'library')
-            if not token:
-                logger.warning(f"No installation token for user {user_id}, trying SYSTEM_PAT")
-                token = current_app.config.get('SYSTEM_PAT')
-        else:
-            token = current_app.config.get('SYSTEM_PAT')
+
+        # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
+        if not token:
+            logger.warning(f"No installation token for user {user_id}")
+            return jsonify({'error': 'GitHub authorization required'}), 401
 
         embedding_service = None
         if os.environ.get('OPENAI_API_KEY'):

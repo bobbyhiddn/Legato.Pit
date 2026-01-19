@@ -44,10 +44,16 @@ def generate_queue_id() -> str:
 
 
 def verify_system_token(req) -> bool:
-    """Verify the request has a valid system token."""
+    """Verify the request has a valid system token.
+
+    NOTE: This is for machine-to-machine auth (Conduct -> Pit).
+    In multi-tenant mode, external API endpoints using this may need redesign
+    to include user context in the request.
+    """
     auth_header = req.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
+        # TODO: In multi-tenant mode, consider per-user API tokens
         system_pat = current_app.config.get('SYSTEM_PAT')
         return token == system_pat
     return False
@@ -468,7 +474,7 @@ def api_queue_agent():
     """Queue a new agent for approval.
 
     Called by Conduct when a PROJECT thread is classified.
-    Requires SYSTEM_PAT authentication.
+    Requires system token authentication (machine-to-machine).
 
     Request body:
     {
@@ -770,8 +776,13 @@ def api_approve_agent(queue_id: str):
                         if entry and entry['file_path']:
                             file_path = entry['file_path']
                             from .core import get_user_library_repo
+                            from .auth import get_user_installation_token
                             library_repo = get_user_library_repo()
-                            token = current_app.config.get('SYSTEM_PAT')
+                            token = get_user_installation_token(user_id, 'library') if user_id else None
+
+                            if not token:
+                                logger.warning(f"No token available to update frontmatter for {entry_id}")
+                                continue
 
                             content = get_file_content(library_repo, file_path, token)
                             if content and content.startswith('---'):

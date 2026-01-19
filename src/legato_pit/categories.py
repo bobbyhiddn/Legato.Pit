@@ -15,22 +15,22 @@ from .core import login_required, library_required
 logger = logging.getLogger(__name__)
 
 
-def create_category_folder(folder_name: str) -> dict:
+def create_category_folder(folder_name: str, token: str = None, user_id: str = None) -> dict:
     """Create a folder in the Library repo with .gitkeep.
 
     Args:
         folder_name: The folder to create (e.g., 'work-queues')
+        token: GitHub token (required)
+        user_id: User ID for getting library repo
 
     Returns:
         Dict with status and any error info
     """
     from .rag.github_service import commit_file
-
     from .core import get_user_library_repo
 
-    token = os.environ.get('SYSTEM_PAT')
     if not token:
-        return {'created': False, 'error': 'SYSTEM_PAT not configured'}
+        return {'created': False, 'error': 'GitHub authorization required'}
 
     library_repo = get_user_library_repo()
 
@@ -141,9 +141,15 @@ def api_create_category():
     if not folder_name:
         folder_name = f"{name}s"
 
+    from flask import session
+    from .auth import get_user_installation_token
+
     try:
         db = get_db()
         user_id = get_user_id()
+
+        # Get user token for GitHub operations
+        token = get_user_installation_token(user_id, 'library') if user_id != 'default' else None
 
         # Get next sort_order
         max_order = db.execute(
@@ -161,8 +167,8 @@ def api_create_category():
 
         logger.info(f"Created category: {name} (id={category_id})")
 
-        # Create folder in Library repo
-        folder_result = create_category_folder(folder_name)
+        # Create folder in Library repo (only if we have a token)
+        folder_result = create_category_folder(folder_name, token=token, user_id=user_id) if token else {'created': False, 'error': 'No token'}
         if folder_result.get('created'):
             logger.info(f"Created folder {folder_name} in Library repo")
         elif folder_result.get('exists'):
@@ -308,6 +314,9 @@ def api_update_category(category_id: int):
 
     If folder_name changes, all notes in the old folder will be moved to the new folder.
     """
+    from flask import session
+    from .auth import get_user_installation_token
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
@@ -315,6 +324,9 @@ def api_update_category(category_id: int):
     try:
         db = get_db()
         user_id = get_user_id()
+
+        # Get user token for GitHub operations
+        token = get_user_installation_token(user_id, 'library') if user_id != 'default' else None
 
         # Get current category info
         current = db.execute(
@@ -370,7 +382,7 @@ def api_update_category(category_id: int):
             from .rag.github_service import list_folder, move_file, create_file
             from .core import get_user_library_repo
 
-            token = os.environ.get('SYSTEM_PAT')
+            # Use the user token already retrieved above (line 329)
             library_repo = get_user_library_repo()
 
             if token:
@@ -426,7 +438,7 @@ def api_update_category(category_id: int):
                         'files_moved': files_moved
                     }), 500
             else:
-                logger.warning("SYSTEM_PAT not set, cannot move files during folder rename")
+                logger.warning("No GitHub token available, cannot move files during folder rename")
 
         # Update database
         updates.append('updated_at = CURRENT_TIMESTAMP')

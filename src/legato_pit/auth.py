@@ -1173,14 +1173,10 @@ def trigger_user_library_sync(user_id: str, username: str) -> dict:
         from .rag.openai_provider import OpenAIEmbeddingProvider
 
         try:
-            # Get token for user's Library
+            # Get token for user's Library - require user token in multi-tenant mode
             token = get_user_installation_token(user_id, 'library')
             if not token:
-                # Fall back to SYSTEM_PAT for testing
-                token = os.environ.get('SYSTEM_PAT')
-
-            if not token:
-                logger.warning(f"No token available for user {username} Library sync")
+                logger.warning(f"No installation token available for user {username} Library sync")
                 return
 
             # Initialize user's database

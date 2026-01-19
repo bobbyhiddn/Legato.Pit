@@ -202,9 +202,9 @@ class LibrarySync:
         Returns:
             Dict with sync statistics
         """
-        token = token or os.environ.get('SYSTEM_PAT')
+        # Token must be provided by caller - no fallback to SYSTEM_PAT for security
         if not token:
-            raise ValueError("GitHub token required for sync")
+            raise ValueError("GitHub token required for sync - callers must provide user token")
 
         headers = {
             'Authorization': f'Bearer {token}',

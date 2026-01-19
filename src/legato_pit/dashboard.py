@@ -2,7 +2,7 @@
 Dashboard for Legato.Pit
 
 Displays LEGATO system status, recent jobs, and artifacts.
-Uses server-side GitHub API calls with SYSTEM_PAT for reliable access.
+Uses server-side GitHub API calls with user installation tokens.
 """
 import logging
 from datetime import datetime
@@ -61,9 +61,10 @@ REPOS = {
 
 
 def github_api(endpoint, token=None):
-    """Make authenticated GitHub API request."""
-    token = token or current_app.config.get('SYSTEM_PAT')
+    """Make authenticated GitHub API request.
 
+    In multi-tenant mode, token must be provided - no SYSTEM_PAT fallback.
+    """
     if not token:
         logger.warning("No GitHub token available for API request")
         return None
@@ -279,9 +280,15 @@ def get_stats():
         # Count chords from GitHub (source of truth)
         # Uses repos with legato-chord topic
         try:
-            token = current_app.config.get('SYSTEM_PAT')
-            org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
-            if token:
+            from flask import session
+            from .auth import get_user_installation_token
+
+            user = session.get('user', {})
+            user_id = user.get('user_id')
+            org = user.get('username')  # User's GitHub username
+
+            token = get_user_installation_token(user_id, 'library') if user_id else None
+            if token and org:
                 from .chords import fetch_chord_repos
                 repos = fetch_chord_repos(token, org)
                 stats['chords'] = len(repos)
@@ -302,8 +309,8 @@ def get_stats():
 
 
 def get_pending_agents():
-    """Get pending agents from the queue."""
-    from flask import g
+    """Get pending agents from the queue for current user."""
+    from flask import g, session
     from .rag.database import init_agents_db
 
     try:
@@ -311,14 +318,18 @@ def get_pending_agents():
             g.agents_db_conn = init_agents_db()
         db = g.agents_db_conn
 
+        # Filter by user_id in multi-tenant mode
+        user_id = session.get('user', {}).get('user_id')
+
         rows = db.execute(
             """
             SELECT queue_id, project_name, project_type, title, description,
                    source_transcript, created_at
             FROM agent_queue
-            WHERE status = 'pending'
+            WHERE status = 'pending' AND user_id = ?
             ORDER BY created_at DESC
-            """
+            """,
+            (user_id,)
         ).fetchall()
 
         return [dict(row) for row in rows]
@@ -329,7 +340,7 @@ def get_pending_agents():
 
 
 def get_recent_chord_spawns(limit=5):
-    """Get recently approved chord spawns from the agent queue.
+    """Get recently approved chord spawns from the agent queue for current user.
 
     Returns chord approvals from local database, which is faster and
     more reliable than querying GitHub workflows.
@@ -341,7 +352,7 @@ def get_recent_chord_spawns(limit=5):
         List of chord spawn dicts with status info
     """
     import json
-    from flask import g
+    from flask import g, session
     from .rag.database import init_agents_db
 
     try:
@@ -349,21 +360,25 @@ def get_recent_chord_spawns(limit=5):
             g.agents_db_conn = init_agents_db()
         db = g.agents_db_conn
 
+        # Filter by user_id in multi-tenant mode
+        user = session.get('user', {})
+        user_id = user.get('user_id')
+
         rows = db.execute(
             """
             SELECT queue_id, project_name, project_type, title,
                    status, approved_by, approved_at, spawn_result,
                    created_at
             FROM agent_queue
-            WHERE status IN ('approved', 'rejected')
+            WHERE status IN ('approved', 'rejected') AND user_id = ?
             ORDER BY approved_at DESC
             LIMIT ?
             """,
-            (limit,)
+            (user_id, limit)
         ).fetchall()
 
         spawns = []
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+        org = user.get('username') or current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
         for row in rows:
             row = dict(row)

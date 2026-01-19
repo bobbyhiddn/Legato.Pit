@@ -19,7 +19,14 @@ memory_api_bp = Blueprint('memory_api', __name__, url_prefix='/memory/api')
 
 
 def require_api_token(f):
-    """Decorator to require Bearer token authentication."""
+    """Decorator to require Bearer token authentication.
+
+    NOTE: This API is designed for machine-to-machine auth (AI agents -> Pit).
+    In multi-tenant mode, this API needs redesign to include user context
+    in requests (e.g., user_id header or per-user API keys).
+
+    Currently uses SYSTEM_PAT for single-tenant backwards compatibility.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization', '')
@@ -28,8 +35,17 @@ def require_api_token(f):
             return jsonify({'error': 'Missing or invalid Authorization header'}), 401
 
         token = auth_header[7:]  # Remove 'Bearer ' prefix
-        expected_token = current_app.config.get('SYSTEM_PAT')
 
+        # Multi-tenant mode: Check for user-specific token first
+        # TODO: Implement per-user API tokens for multi-tenant
+        mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+        if mode == 'multi-tenant':
+            # For now, reject requests in multi-tenant mode without proper auth
+            # In future: validate user-specific tokens
+            return jsonify({'error': 'Memory API not available in multi-tenant mode (needs redesign)'}), 403
+
+        # Single-tenant: Use SYSTEM_PAT
+        expected_token = current_app.config.get('SYSTEM_PAT')
         if not expected_token or token != expected_token:
             return jsonify({'error': 'Invalid token'}), 403
 
