@@ -26,11 +26,13 @@ def create_category_folder(folder_name: str) -> dict:
     """
     from .rag.github_service import commit_file
 
+    from .core import get_user_library_repo
+
     token = os.environ.get('SYSTEM_PAT')
     if not token:
         return {'created': False, 'error': 'SYSTEM_PAT not configured'}
 
-    library_repo = os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')
+    library_repo = get_user_library_repo()
 
     try:
         result = commit_file(
@@ -366,9 +368,10 @@ def api_update_category(category_id: int):
 
         if folder_changed:
             from .rag.github_service import list_folder, move_file, create_file
+            from .core import get_user_library_repo
 
             token = os.environ.get('SYSTEM_PAT')
-            library_repo = os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')
+            library_repo = get_user_library_repo()
 
             if token:
                 try:

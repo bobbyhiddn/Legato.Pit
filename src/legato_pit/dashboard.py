@@ -194,9 +194,11 @@ def get_recent_jobs(limit=5):
 
 def get_recent_artifacts(limit=5):
     """Get recent artifacts from Library."""
-    org = current_app.config['LEGATO_ORG']
+    from .core import get_user_library_repo
 
-    commits = github_api(f'/repos/{org}/Legato.Library/commits?per_page=20')
+    library_repo = get_user_library_repo()
+
+    commits = github_api(f'/repos/{library_repo}/commits?per_page=20')
 
     if not commits:
         return []
@@ -208,7 +210,7 @@ def get_recent_artifacts(limit=5):
         if len(artifacts) >= limit:
             break
 
-        details = github_api(f'/repos/{org}/Legato.Library/commits/{commit["sha"]}')
+        details = github_api(f'/repos/{library_repo}/commits/{commit["sha"]}')
         if not details or not details.get('files'):
             continue
 

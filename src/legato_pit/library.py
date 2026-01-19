@@ -227,8 +227,10 @@ def trigger_background_sync():
                 except Exception as e:
                     logger.warning(f"Could not create embedding service: {e}")
 
+            from .core import get_user_library_repo
+            library_repo = get_user_library_repo()
             sync = LibrarySync(db, embedding_service)
-            stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+            stats = sync.sync_from_github(library_repo, token=token)
 
             if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
                 logger.info(f"On-load library sync: {stats}")
@@ -706,7 +708,9 @@ def api_sync():
             path = data.get('path', '/mnt/d/Code/Legato/Legato.Library')
             stats = sync.sync_from_filesystem(path)
         else:
-            repo = data.get('repo', 'bobbyhiddn/Legato.Library')
+            from .core import get_user_library_repo
+            default_repo = get_user_library_repo()
+            repo = data.get('repo', default_repo)
             stats = sync.sync_from_github(repo)
 
         return jsonify({
@@ -933,8 +937,9 @@ def api_update_task_status(entry_id: str):
         # Sync to GitHub if file_path exists
         if file_path:
             try:
+                from .core import get_user_library_repo
                 token = current_app.config.get('SYSTEM_PAT')
-                repo = 'bobbyhiddn/Legato.Library'
+                repo = get_user_library_repo()
 
                 if token:
                     # Get current content from GitHub
@@ -1403,6 +1408,7 @@ def api_save_entry(entry_id: str):
             }), 400
 
         # Get token and repo config
+        from .core import get_user_library_repo
         token = current_app.config.get('SYSTEM_PAT')
         if not token:
             return jsonify({
@@ -1410,7 +1416,7 @@ def api_save_entry(entry_id: str):
                 'error': 'SYSTEM_PAT not configured'
             }), 500
 
-        repo = 'bobbyhiddn/Legato.Library'
+        repo = get_user_library_repo()
 
         # Commit to GitHub
         result = commit_file(
@@ -1529,8 +1535,9 @@ key_phrases: []
         full_content = frontmatter + content
 
         # Create file in GitHub
+        from .core import get_user_library_repo
         token = current_app.config.get('SYSTEM_PAT')
-        repo = 'bobbyhiddn/Legato.Library'
+        repo = get_user_library_repo()
 
         create_file(
             repo=repo,
@@ -1635,9 +1642,10 @@ def api_update_category(entry_id: str):
         if old_file_path:
             try:
                 from .rag.github_service import get_file_content, delete_file, create_file
+                from .core import get_user_library_repo
 
                 token = current_app.config.get('SYSTEM_PAT')
-                repo = 'bobbyhiddn/Legato.Library'
+                repo = get_user_library_repo()
 
                 # Get current content
                 content = get_file_content(repo, old_file_path, token)
@@ -1750,9 +1758,10 @@ def api_delete_entry(entry_id: str):
         if file_path:
             try:
                 from .rag.github_service import delete_file
+                from .core import get_user_library_repo
 
                 token = current_app.config.get('SYSTEM_PAT')
-                repo = 'bobbyhiddn/Legato.Library'
+                repo = get_user_library_repo()
 
                 delete_file(
                     repo=repo,

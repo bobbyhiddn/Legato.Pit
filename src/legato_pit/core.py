@@ -237,7 +237,8 @@ def create_app():
                                 logger.warning(f"Could not create embedding service: {e}")
 
                         sync = LibrarySync(db, embedding_service)
-                        stats = sync.sync_from_github('bobbyhiddn/Legato.Library', token=token)
+                        library_repo = get_user_library_repo()
+                        stats = sync.sync_from_github(library_repo, token=token)
 
                         # Only log if there were actual changes
                         if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
