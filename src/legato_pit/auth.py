@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+
+class StaleInstallationError(Exception):
+    """Raised when a GitHub App installation is no longer valid.
+
+    This indicates the user needs to re-authenticate via the GitHub App flow
+    to establish a new installation.
+    """
+    def __init__(self, user_id: str, installation_id: int):
+        self.user_id = user_id
+        self.installation_id = installation_id
+        super().__init__(f"Installation {installation_id} is no longer valid for user {user_id}")
+
 # GitHub OAuth endpoints
 GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -1249,9 +1261,50 @@ def get_user_installation_token(user_id: str, repo_type: str = 'library') -> Opt
     try:
         token_manager = get_token_manager(db)
         return token_manager.get_token(installation_id)
-    except Exception as e:
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            # Installation no longer exists on GitHub - clear stale data
+            logger.warning(f"Installation {installation_id} not found on GitHub, clearing stale data")
+            _clear_stale_installation(user_id, installation_id, db)
+            raise StaleInstallationError(user_id, installation_id)
         logger.error(f"Failed to get installation token: {e}")
         return None
+    except Exception as e:
+        # Check if it's a wrapped 404
+        if '404' in str(e):
+            logger.warning(f"Installation {installation_id} appears stale (404 in error), clearing")
+            _clear_stale_installation(user_id, installation_id, db)
+            raise StaleInstallationError(user_id, installation_id)
+        logger.error(f"Failed to get installation token: {e}")
+        return None
+
+
+def _clear_stale_installation(user_id: str, installation_id: int, db):
+    """Remove stale installation data so user can re-authenticate.
+
+    Clears:
+    - user_repos entries pointing to this installation
+    - github_app_installations entry
+
+    This allows the user to re-authenticate and get a fresh installation.
+    """
+    try:
+        # Clear user_repos pointing to this installation
+        db.execute(
+            "DELETE FROM user_repos WHERE user_id = ? AND installation_id = ?",
+            (user_id, installation_id)
+        )
+
+        # Clear the installation record itself
+        db.execute(
+            "DELETE FROM github_app_installations WHERE installation_id = ? AND user_id = ?",
+            (installation_id, user_id)
+        )
+
+        db.commit()
+        logger.info(f"Cleared stale installation {installation_id} for user {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to clear stale installation: {e}")
 
 
 def _get_user_oauth_token(user_id: str) -> Optional[str]:

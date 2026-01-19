@@ -86,17 +86,27 @@ def submit_job():
     if process_sync:
         # Process synchronously for short content
         from .motif_processor import process_motif_sync
+        from .auth import StaleInstallationError
 
         logger.info(f"Processing job {job_id} synchronously for user {user_id}")
-        result = process_motif_sync(transcript, user_id, source_id)
 
-        return jsonify({
-            'job_id': job_id,
-            'status': result.get('status', 'failed'),
-            'message': 'Processed synchronously',
-            'entry_ids': result.get('entry_ids', []),
-            'error': result.get('error'),
-        })
+        try:
+            result = process_motif_sync(transcript, user_id, source_id)
+
+            return jsonify({
+                'job_id': job_id,
+                'status': result.get('status', 'failed'),
+                'message': 'Processed synchronously',
+                'entry_ids': result.get('entry_ids', []),
+                'error': result.get('error'),
+            })
+        except StaleInstallationError:
+            logger.warning(f"Stale installation for user {user_id}, needs re-auth")
+            return jsonify({
+                'error': 'GitHub authorization expired. Please re-authenticate.',
+                'needs_reauth': True,
+                'reauth_url': '/auth/github-app'
+            }), 401
 
     else:
         # Queue for async processing

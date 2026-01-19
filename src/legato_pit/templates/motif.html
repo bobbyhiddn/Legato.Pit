@@ -1188,7 +1188,12 @@ document.getElementById('motifForm').addEventListener('submit', async function(e
 
             showSuccess('Motif submitted successfully!');
         } else {
-            if (data.missing_key) {
+            if (data.needs_reauth) {
+                showError('GitHub authorization expired. Redirecting to re-authenticate...');
+                setTimeout(() => {
+                    window.location.href = data.reauth_url || '/auth/github-app';
+                }, 1500);
+            } else if (data.missing_key) {
                 showError('Please add your Anthropic API key in Settings to process motifs.');
             } else {
                 showError(data.error || 'Failed to submit motif');
