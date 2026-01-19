@@ -22,7 +22,7 @@ from flask import (
     flash, redirect, url_for, jsonify
 )
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def dispatch_transcript(transcript_text, source_id):
 
 
 @dropbox_bp.route('/')
-@login_required
+@library_required
 def index():
     """Transcript upload form."""
     return render_template('dropbox.html', title='Transcript Dropbox')

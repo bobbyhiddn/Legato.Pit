@@ -17,7 +17,7 @@ from datetime import datetime
 import requests
 from flask import Blueprint, request, jsonify, session, current_app, g, render_template
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def verify_system_token(req) -> bool:
 # ============ Page Routes ============
 
 @agents_bp.route('/')
-@login_required
+@library_required
 def index():
     """Agents queue management page."""
     db = get_db()

@@ -353,3 +353,37 @@ def login_required(f):
             return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def library_required(f):
+    """Decorator to require Library setup before accessing features.
+
+    Must be used after @login_required. Checks if user has configured
+    their Library repo. If not, redirects to setup page.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
+
+        # Check if Library is configured (multi-tenant mode only)
+        from flask import current_app
+        if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+            user = session['user']
+            user_id = user.get('user_id')
+
+            if user_id:
+                from .rag.database import init_db
+                db = init_db()  # Shared DB for user_repos
+                library = db.execute(
+                    "SELECT 1 FROM user_repos WHERE user_id = ? AND repo_type = 'library'",
+                    (user_id,)
+                ).fetchone()
+
+                if not library:
+                    flash('Please set up your Library first.', 'info')
+                    return redirect(url_for('auth.setup'))
+
+        return f(*args, **kwargs)
+    return decorated_function

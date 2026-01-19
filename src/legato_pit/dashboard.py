@@ -10,7 +10,7 @@ from datetime import datetime
 import requests
 from flask import Blueprint, render_template, current_app, jsonify
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +404,7 @@ def get_recent_chord_spawns(limit=5):
 
 
 @dashboard_bp.route('/')
-@login_required
+@library_required
 def index():
     """Main dashboard view."""
     recent_artifacts = get_recent_artifacts()
@@ -425,7 +425,7 @@ def index():
 
 
 @dashboard_bp.route('/graph3d')
-@login_required
+@library_required
 def graph3d():
     """3D graph visualization with force/dendrite/radial layouts."""
     return render_template(

@@ -16,7 +16,7 @@ from flask import (
     current_app, g
 )
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,7 @@ def render_markdown(content: str) -> str:
 
 
 @library_bp.route('/')
-@login_required
+@library_required
 def index():
     """Library browser main page."""
     # Trigger background sync if needed (doesn't block page load)

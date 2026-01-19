@@ -10,7 +10,7 @@ import re
 import logging
 from flask import Blueprint, request, jsonify, render_template, g
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -579,7 +579,7 @@ def api_reorder_categories():
 # ============ UI Route ============
 
 @categories_bp.route('/')
-@login_required
+@library_required
 def index():
     """Category management page."""
     from .rag.database import get_user_categories

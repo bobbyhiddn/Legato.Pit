@@ -16,7 +16,7 @@ from flask import (
     session, current_app, g
 )
 
-from .core import login_required
+from .core import login_required, library_required
 from .rag.chat_session_manager import get_chat_manager
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ def save_message(db_conn, session_id: str, role: str, content: str, context=None
 
 
 @chat_bp.route('/')
-@login_required
+@library_required
 def index():
     """Chat interface page."""
     services = get_services()

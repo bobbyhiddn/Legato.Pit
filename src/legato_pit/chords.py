@@ -10,7 +10,7 @@ import logging
 import requests
 from flask import Blueprint, render_template, jsonify, current_app, g
 
-from .core import login_required
+from .core import login_required, library_required
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
 
 
 @chords_bp.route('/')
-@login_required
+@library_required
 def index():
     """Chords overview - list all Chord repos."""
     token = current_app.config.get('SYSTEM_PAT')
