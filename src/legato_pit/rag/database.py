@@ -492,6 +492,18 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Migration: add has_copilot flag to users (for gating Chords/Agents features)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN has_copilot INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add copilot_checked_at timestamp to users
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN copilot_checked_at DATETIME")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # GitHub App installations (per-user scoped tokens)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS github_app_installations (

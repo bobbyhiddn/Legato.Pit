@@ -399,6 +399,37 @@ def library_required(f):
     return decorated_function
 
 
+def copilot_required(f):
+    """Decorator to require Copilot access for Chords/Agents features.
+
+    Must be used after @login_required. Checks if user has Copilot enabled.
+    If not, returns 403 for APIs or redirects to dashboard for pages.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
+
+        user = session['user']
+        has_copilot = user.get('has_copilot', False)
+
+        if not has_copilot:
+            # Check if this is an API request
+            from flask import request
+            if request.path.startswith('/api/') or request.is_json or request.headers.get('Accept') == 'application/json':
+                return jsonify({
+                    'error': 'Chords and Agents features require GitHub Copilot. Enable Copilot on your account to use these features.',
+                    'copilot_required': True
+                }), 403
+            else:
+                flash('Chords and Agents features require GitHub Copilot. Enable Copilot on your account to use these features.', 'warning')
+                return redirect(url_for('dashboard.index'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def get_user_library_repo(user_id: str = None) -> str:
     """Get the user's configured Library repository.
 

@@ -10,7 +10,7 @@ import logging
 import requests
 from flask import Blueprint, render_template, jsonify, current_app, g
 
-from .core import login_required, library_required
+from .core import login_required, library_required, copilot_required
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,7 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
 
 @chords_bp.route('/')
 @library_required
+@copilot_required
 def index():
     """Chords overview - list all Chord repos."""
     from flask import session
@@ -184,6 +185,7 @@ def index():
 
 @chords_bp.route('/api/repos')
 @login_required
+@copilot_required
 def api_list_repos():
     """API endpoint to list Chord repos."""
     from flask import session
@@ -209,6 +211,7 @@ def api_list_repos():
 
 @chords_bp.route('/api/repo/<path:repo_name>')
 @login_required
+@copilot_required
 def api_repo_details(repo_name: str):
     """API endpoint to get details for a specific repo."""
     from flask import session
@@ -230,6 +233,7 @@ def api_repo_details(repo_name: str):
 
 @chords_bp.route('/api/repo/<path:repo_name>', methods=['DELETE'])
 @login_required
+@copilot_required
 def api_delete_repo(repo_name: str):
     """Delete a Chord repository.
 
@@ -373,6 +377,7 @@ def api_delete_repo(repo_name: str):
 
 @chords_bp.route('/api/linked-notes/<path:repo_name>')
 @login_required
+@copilot_required
 def api_linked_notes(repo_name: str):
     """Get Library notes linked to a Chord repository."""
     try:
@@ -398,6 +403,7 @@ def api_linked_notes(repo_name: str):
 
 @chords_bp.route('/api/repo/<path:repo_name>/incident', methods=['POST'])
 @login_required
+@copilot_required
 def api_create_incident(repo_name: str):
     """Dispatch an incident to Conduct for an existing Chord repository.
 

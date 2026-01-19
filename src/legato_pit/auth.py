@@ -172,6 +172,7 @@ def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] 
         'github_login': github_login,
         'email': email,
         'tier': 'free',
+        'has_copilot': False,  # Will be checked when Library is configured
     }
 
 
@@ -572,7 +573,8 @@ def github_app_callback():
             'avatar_url': avatar_url,
             'github_id': github_id,
             'tier': user.get('tier', 'free'),
-            'auth_mode': 'github_app'
+            'auth_mode': 'github_app',
+            'has_copilot': bool(user.get('has_copilot', False)),
         }
         session['github_token'] = access_token
         session.permanent = True
@@ -1130,6 +1132,16 @@ def setup_create_library():
                 flash(f'Created {library_repo} as your Library.', 'success')
             else:
                 flash(f'Configured existing {library_repo} as your Library.', 'success')
+
+            # Check Copilot availability for this user
+            # This determines if they can use Chords/Agents features
+            has_copilot = check_user_copilot_access(user_id, token, library_repo)
+            update_user_copilot_status(user_id, has_copilot)
+            if has_copilot:
+                flash('Copilot detected - Chords & Agents features enabled.', 'info')
+            else:
+                flash('Copilot not detected - Chords & Agents features disabled.', 'info')
+
         else:
             flash('Failed to create Library repository.', 'error')
 
@@ -1301,6 +1313,159 @@ def _clear_stale_installation(user_id: str, installation_id: int, db):
         logger.info(f"Cleared stale installation {installation_id} for user {user_id}")
     except Exception as e:
         logger.error(f"Failed to clear stale installation: {e}")
+
+
+def check_user_copilot_access(user_id: str, token: str = None, repo_name: str = None) -> bool:
+    """Check if a user has GitHub Copilot coding agent enabled.
+
+    Uses the GraphQL suggestedActors query to see if copilot-swe-agent
+    is available as an assignee on a repo owned by the user.
+
+    Args:
+        user_id: The user's ID
+        token: GitHub token (optional, will fetch if not provided)
+        repo_name: Repo to check (optional, will use Library repo if not provided)
+
+    Returns:
+        True if Copilot is available, False otherwise
+    """
+    if not token:
+        token = get_user_installation_token(user_id, 'library')
+        if not token:
+            logger.warning(f"No token available to check Copilot for user {user_id}")
+            return False
+
+    if not repo_name:
+        # Get user's Library repo
+        db = _get_db()
+        row = db.execute(
+            "SELECT repo_full_name FROM user_repos WHERE user_id = ? AND repo_type = 'library'",
+            (user_id,)
+        ).fetchone()
+        if not row:
+            logger.warning(f"No Library repo found to check Copilot for user {user_id}")
+            return False
+        repo_name = row['repo_full_name']
+
+    owner, repo = repo_name.split('/')
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+    }
+
+    # Query suggested actors to find Copilot
+    query = """
+    query($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) {
+            suggestedActors(capabilities: [CAN_BE_ASSIGNED], first: 100) {
+                nodes {
+                    login
+                }
+            }
+        }
+    }
+    """
+
+    try:
+        resp = requests.post(
+            'https://api.github.com/graphql',
+            headers=headers,
+            json={
+                'query': query,
+                'variables': {'owner': owner, 'repo': repo}
+            },
+            timeout=30
+        )
+
+        if resp.status_code != 200:
+            logger.warning(f"GraphQL query failed for Copilot check: {resp.status_code}")
+            return False
+
+        data = resp.json()
+        nodes = data.get('data', {}).get('repository', {}).get('suggestedActors', {}).get('nodes', [])
+
+        for node in nodes:
+            if node.get('login') == 'copilot-swe-agent':
+                logger.info(f"User {user_id} has Copilot enabled")
+                return True
+
+        logger.info(f"User {user_id} does not have Copilot enabled")
+        return False
+
+    except Exception as e:
+        logger.error(f"Failed to check Copilot for user {user_id}: {e}")
+        return False
+
+
+def update_user_copilot_status(user_id: str, has_copilot: bool = None) -> bool:
+    """Update the user's Copilot status in the database.
+
+    If has_copilot is not provided, will check via API.
+
+    Args:
+        user_id: The user's ID
+        has_copilot: Optional explicit value, otherwise checks via API
+
+    Returns:
+        The user's Copilot status
+    """
+    db = _get_db()
+
+    if has_copilot is None:
+        has_copilot = check_user_copilot_access(user_id)
+
+    db.execute(
+        """UPDATE users SET has_copilot = ?, copilot_checked_at = CURRENT_TIMESTAMP
+           WHERE user_id = ?""",
+        (1 if has_copilot else 0, user_id)
+    )
+    db.commit()
+
+    return has_copilot
+
+
+def get_user_copilot_status(user_id: str, check_if_stale: bool = True) -> bool:
+    """Get the user's Copilot status, optionally refreshing if stale.
+
+    Args:
+        user_id: The user's ID
+        check_if_stale: If True, recheck if status is older than 24 hours
+
+    Returns:
+        True if user has Copilot enabled
+    """
+    from datetime import datetime, timedelta
+
+    db = _get_db()
+    row = db.execute(
+        "SELECT has_copilot, copilot_checked_at FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not row:
+        return False
+
+    has_copilot = bool(row['has_copilot'])
+    checked_at = row['copilot_checked_at']
+
+    # If never checked or stale (>24h), recheck
+    if check_if_stale:
+        should_recheck = False
+        if not checked_at:
+            should_recheck = True
+        else:
+            try:
+                checked_time = datetime.fromisoformat(checked_at.replace('Z', '+00:00'))
+                if datetime.now(checked_time.tzinfo) - checked_time > timedelta(hours=24):
+                    should_recheck = True
+            except (ValueError, AttributeError):
+                should_recheck = True
+
+        if should_recheck:
+            has_copilot = update_user_copilot_status(user_id)
+
+    return has_copilot
 
 
 def _get_user_oauth_token(user_id: str) -> Optional[str]:

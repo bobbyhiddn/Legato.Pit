@@ -19,8 +19,10 @@
             <div class="nav-links">
                 <a href="{{ url_for('dashboard.index') }}" class="nav-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}">Dashboard</a>
                 <a href="{{ url_for('library.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('library.') %}active{% endif %}">Library</a>
+                {% if user.has_copilot %}
                 <a href="{{ url_for('chords.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chords.') %}active{% endif %}">Chords</a>
                 <a href="{{ url_for('agents.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('agents.') %}active{% endif %}">Agents<span class="nav-badge" id="agentQueueBadge" style="display:none;"></span></a>
+                {% endif %}
                 <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
                 <a href="{{ url_for('motif_api.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('motif_api.') %}active{% endif %}">Motif</a>
                 <a href="{{ url_for('categories.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('categories.') %}active{% endif %}">Categories</a>
@@ -70,6 +72,7 @@
         {% block content %}{% endblock %}
     </main>
 
+    {% if user and user.has_copilot %}
     <!-- Chord Queue Sidebar (persistent across Library pages) -->
     <aside class="chord-queue-sidebar" id="chordQueueSidebar">
         <div class="chord-queue-header">
@@ -90,6 +93,7 @@
         <span class="toggle-icon">+</span>
         <span class="toggle-count" id="toggleCount">0</span>
     </button>
+    {% endif %}
 
     <footer>
         <p>{{ app_name }} &middot; {{ now.year }}</p>
@@ -246,6 +250,7 @@
         function showInfo(message) { return showToast(message, 'info'); }
     </script>
 
+    {% if user and user.has_copilot %}
     <!-- Chord Queue Modal -->
     <div class="chord-modal-overlay" id="chordModal">
         <div class="chord-modal">
@@ -266,6 +271,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <!-- Chord Queue Styles -->
     <style>
