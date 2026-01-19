@@ -289,9 +289,10 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
 
             repos = resp.json().get('repositories', [])
 
-            # Look for Legato.Library
+            # Look for Legato.Library or Legato.Library.<username>
             for repo in repos:
-                if repo['name'] == 'Legato.Library':
+                repo_name = repo['name']
+                if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
                     repo_full_name = repo['full_name']
 
                     # Auto-configure this as the Library
@@ -466,6 +467,19 @@ def github_app_callback():
                 (encrypted_refresh, user['user_id'])
             )
             db.commit()
+
+        # Store OAuth token (encrypted) for repo management
+        from .crypto import encrypt_for_user
+        db = _get_db()
+        encrypted_oauth = encrypt_for_user(user['user_id'], access_token)
+        # Token expires in 8 hours typically, but store it anyway
+        db.execute(
+            """UPDATE users SET oauth_token_encrypted = ?,
+               oauth_token_expires_at = datetime('now', '+8 hours'),
+               updated_at = CURRENT_TIMESTAMP WHERE user_id = ?""",
+            (encrypted_oauth, user['user_id'])
+        )
+        db.commit()
 
         # Session fixation protection
         session.clear()
@@ -926,6 +940,20 @@ def trigger_user_library_sync(user_id: str, username: str) -> dict:
             # Initialize user's database
             db = init_db(user_id=user_id)
 
+            # Look up user's configured Library repo
+            shared_db = init_db()  # Shared db for user_repos table
+            repo_row = shared_db.execute(
+                "SELECT repo_full_name FROM user_repos WHERE user_id = ? AND repo_type = 'library'",
+                (user_id,)
+            ).fetchone()
+
+            if repo_row:
+                library_repo = repo_row['repo_full_name']
+            else:
+                # Fallback: try common patterns
+                library_repo = f"{username}/Legato.Library.{username}"
+                logger.info(f"No configured Library for {username}, trying {library_repo}")
+
             # Set up embedding service
             embedding_service = None
             if os.environ.get('OPENAI_API_KEY'):
@@ -934,9 +962,6 @@ def trigger_user_library_sync(user_id: str, username: str) -> dict:
                     embedding_service = EmbeddingService(provider, db)
                 except Exception as e:
                     logger.warning(f"Could not create embedding service: {e}")
-
-            # Sync from user's Library
-            library_repo = f"{username}/Legato.Library"
             sync = LibrarySync(db, embedding_service)
             stats = sync.sync_from_github(library_repo, token=token)
 
@@ -993,6 +1018,94 @@ def get_user_installation_token(user_id: str, repo_type: str = 'library') -> Opt
     except Exception as e:
         logger.error(f"Failed to get installation token: {e}")
         return None
+
+
+def add_repo_to_installation(user_id: str, repo_id: int, repo_full_name: str = None) -> bool:
+    """Add a repository to the user's GitHub App installation.
+
+    This uses the user's OAuth token (from session or database) to add a repo
+    to their installation. Call this after creating a Chord repo so Legato
+    maintains access to it.
+
+    Args:
+        user_id: The user's ID
+        repo_id: The GitHub repository ID
+        repo_full_name: Optional full name for logging (org/repo)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    # Get user's OAuth token - try session first, then database
+    oauth_token = session.get('github_token')
+
+    if not oauth_token:
+        # Try to get from database
+        from .crypto import decrypt_for_user
+        db = _get_db()
+        row = db.execute(
+            """SELECT oauth_token_encrypted, oauth_token_expires_at FROM users
+               WHERE user_id = ? AND oauth_token_encrypted IS NOT NULL""",
+            (user_id,)
+        ).fetchone()
+
+        if row and row['oauth_token_encrypted']:
+            # Check if token is expired
+            expires_at = row['oauth_token_expires_at']
+            if expires_at:
+                from datetime import datetime
+                try:
+                    expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                    if expiry < datetime.now(expiry.tzinfo if expiry.tzinfo else None):
+                        logger.warning(f"OAuth token for user {user_id} is expired")
+                        # Token expired, but try anyway - might still work
+                except (ValueError, TypeError):
+                    pass  # Can't parse, try anyway
+
+            oauth_token = decrypt_for_user(user_id, row['oauth_token_encrypted'])
+
+    if not oauth_token:
+        logger.warning(f"No OAuth token available for user {user_id}, cannot add repo to installation")
+        return False
+
+    db = _get_db()
+
+    # Get user's installation ID
+    row = db.execute(
+        "SELECT installation_id FROM github_app_installations WHERE user_id = ? LIMIT 1",
+        (user_id,)
+    ).fetchone()
+
+    if not row:
+        logger.warning(f"No installation found for user {user_id}")
+        return False
+
+    installation_id = row['installation_id']
+
+    try:
+        # Add repo to installation using user's OAuth token
+        resp = requests.put(
+            f'https://api.github.com/user/installations/{installation_id}/repositories/{repo_id}',
+            headers={
+                'Authorization': f'Bearer {oauth_token}',
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+            timeout=15,
+        )
+
+        if resp.status_code == 204:
+            logger.info(f"Added repo {repo_full_name or repo_id} to installation {installation_id}")
+            return True
+        elif resp.status_code == 304:
+            logger.info(f"Repo {repo_full_name or repo_id} already in installation")
+            return True
+        else:
+            logger.warning(f"Failed to add repo to installation: {resp.status_code} - {resp.text}")
+            return False
+
+    except requests.RequestException as e:
+        logger.error(f"Error adding repo to installation: {e}")
+        return False
 
 
 def get_user_api_key(user_id: str, provider: str) -> Optional[str]:

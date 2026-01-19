@@ -414,6 +414,18 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Migration: add oauth_token_encrypted to users for repo management
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN oauth_token_encrypted BLOB")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add oauth_token_expires_at to users
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN oauth_token_expires_at DATETIME")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # GitHub App installations (per-user scoped tokens)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS github_app_installations (

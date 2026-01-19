@@ -387,3 +387,45 @@ def library_required(f):
 
         return f(*args, **kwargs)
     return decorated_function
+
+
+def get_user_library_repo(user_id: str = None) -> str:
+    """Get the user's configured Library repository.
+
+    Looks up the Library repo from user_repos table. Falls back to
+    default patterns if not configured.
+
+    Args:
+        user_id: User ID to look up. If None, uses current session user.
+
+    Returns:
+        Full repo name (e.g., 'username/Legato.Library.username')
+    """
+    from flask import current_app
+
+    if user_id is None:
+        user = session.get('user', {})
+        user_id = user.get('user_id')
+        username = user.get('login')
+    else:
+        username = None
+
+    # In multi-tenant mode, look up from database
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant' and user_id:
+        from .rag.database import init_db
+        db = init_db()  # Shared DB for user_repos
+        row = db.execute(
+            "SELECT repo_full_name FROM user_repos WHERE user_id = ? AND repo_type = 'library'",
+            (user_id,)
+        ).fetchone()
+
+        if row:
+            return row['repo_full_name']
+
+    # Fallback: use default pattern
+    if username:
+        return f"{username}/Legato.Library.{username}"
+
+    # Last resort: env var or hardcoded default
+    import os
+    return os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')

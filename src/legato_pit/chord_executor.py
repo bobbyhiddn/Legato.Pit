@@ -85,9 +85,9 @@ class ChordExecutor:
         logger.info(f"Spawning chord: {repo_name}")
 
         try:
-            # Step 1: Create repository
-            repo_url = self._create_repo(repo_short, spec.title)
-            logger.info(f"Created repo: {repo_url}")
+            # Step 1: Create repository (with legato-chord topic)
+            repo_url, repo_id = self._create_repo(repo_short, spec.title)
+            logger.info(f"Created repo: {repo_url} (id: {repo_id})")
 
             # Step 2: Push template files
             self._push_templates(repo_name, spec)
@@ -109,6 +109,7 @@ class ChordExecutor:
             return {
                 "success": True,
                 "repo_name": repo_name,
+                "repo_id": repo_id,
                 "repo_url": repo_url,
                 "issue_url": issue_url,
                 "issue_number": issue_number,
@@ -123,15 +124,20 @@ class ChordExecutor:
                 "repo_name": repo_name,
             }
 
-    def _create_repo(self, name: str, description: str) -> str:
-        """Create a new GitHub repository."""
+    def _create_repo(self, name: str, description: str) -> tuple[str, int]:
+        """Create a new GitHub repository.
+
+        Returns:
+            Tuple of (html_url, repo_id)
+        """
         # Check if repo already exists
         check_url = f"{self.api_base}/repos/{self.org}/{name}"
         check_resp = requests.get(check_url, headers=self.headers, timeout=10)
 
         if check_resp.status_code == 200:
             logger.info(f"Repo {self.org}/{name} already exists")
-            return check_resp.json()["html_url"]
+            repo_data = check_resp.json()
+            return repo_data["html_url"], repo_data["id"]
 
         # Try to create as org repo first, fall back to user repo
         create_url = f"{self.api_base}/orgs/{self.org}/repos"
@@ -152,7 +158,40 @@ class ChordExecutor:
         if resp.status_code not in (200, 201):
             raise RuntimeError(f"Failed to create repo: {resp.status_code} - {resp.text}")
 
-        return resp.json()["html_url"]
+        repo_data = resp.json()
+        repo_id = repo_data["id"]
+        repo_url = repo_data["html_url"]
+
+        # Add legato-chord topic to the repo
+        self._add_topic(f"{self.org}/{name}", "legato-chord")
+
+        return repo_url, repo_id
+
+    def _add_topic(self, repo_name: str, topic: str):
+        """Add a topic to a repository."""
+        # Get current topics
+        url = f"{self.api_base}/repos/{repo_name}/topics"
+        resp = requests.get(url, headers=self.headers, timeout=10)
+
+        current_topics = []
+        if resp.ok:
+            current_topics = resp.json().get("names", [])
+
+        if topic not in current_topics:
+            current_topics.append(topic)
+
+            # Update topics
+            resp = requests.put(
+                url,
+                headers=self.headers,
+                json={"names": current_topics},
+                timeout=10
+            )
+
+            if resp.ok:
+                logger.info(f"Added topic '{topic}' to {repo_name}")
+            else:
+                logger.warning(f"Failed to add topic to {repo_name}: {resp.status_code}")
 
     def _push_templates(self, repo_name: str, spec: ChordSpec):
         """Push template files to the repository."""
@@ -639,4 +678,25 @@ def spawn_chord(
     )
 
     executor = get_executor(user_id)
-    return executor.spawn(spec, assign_copilot=assign_copilot)
+    result = executor.spawn(spec, assign_copilot=assign_copilot)
+
+    # In multi-tenant mode, add the new repo to the user's GitHub App installation
+    if result.get("success") and user_id and result.get("repo_id"):
+        try:
+            from .auth import add_repo_to_installation
+            added = add_repo_to_installation(
+                user_id,
+                result["repo_id"],
+                result["repo_name"]
+            )
+            result["added_to_installation"] = added
+            if not added:
+                logger.warning(
+                    f"Could not auto-add {result['repo_name']} to installation. "
+                    f"User may need to manually add it."
+                )
+        except Exception as e:
+            logger.warning(f"Failed to add repo to installation: {e}")
+            result["added_to_installation"] = False
+
+    return result

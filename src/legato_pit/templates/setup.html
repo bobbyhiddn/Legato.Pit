@@ -3,14 +3,81 @@
 
 {% block content %}
 <div class="setup-container">
-    {% set is_configured = installations|length > 0 and repos|selectattr('repo_type', 'equalto', 'library')|list|length > 0 %}
+    {% set library_repo = repos|selectattr('repo_type', 'equalto', 'library')|first %}
+    {% set is_configured = library_repo is not none %}
+
     {% if is_configured %}
     <h1>Settings</h1>
     <p class="setup-subtitle">Manage your Legato configuration.</p>
     {% else %}
     <h1>Welcome to Legato</h1>
-    <p class="setup-subtitle">Let's set up your personal memory system.</p>
+    <p class="setup-subtitle">Set up your personal knowledge system in 2 steps.</p>
     {% endif %}
+
+    <!-- Onboarding Flow (not configured) -->
+    {% if not is_configured %}
+    <div class="setup-section onboarding">
+        <div class="library-setup-steps">
+            <div class="setup-step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <strong>Create your Library</strong>
+                    <p>Click below to create a private Library repo from our template:</p>
+                    <a href="https://github.com/new?template_owner=bobbyhiddn&template_name=Legato.Library.Template&name=Legato.Library.{{ session.user.login }}&description=Personal%20knowledge%20library%20for%20Legato&visibility=private"
+                       target="_blank" class="btn btn-primary">
+                        Create Legato.Library.{{ session.user.login }}
+                    </a>
+                </div>
+            </div>
+
+            <div class="setup-step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <strong>Grant Legato access</strong>
+                    <p>Install the GitHub App and select your Library repo (plus any repos tagged <code>legato-chord</code>):</p>
+                    <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-secondary">
+                        Install GitHub App
+                    </a>
+                </div>
+            </div>
+
+            <div class="setup-step-done">
+                <p>Already completed setup?</p>
+                <button onclick="location.reload()" class="btn btn-outline btn-sm">Refresh to detect Library</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Configured State -->
+    {% if is_configured %}
+    <!-- Library -->
+    <div class="setup-section">
+        <h2>Library</h2>
+        <p class="library-configured">
+            <strong>{{ library_repo.repo_full_name }}</strong>
+        </p>
+        <a href="https://github.com/{{ library_repo.repo_full_name }}" target="_blank" class="btn btn-secondary btn-sm">View on GitHub</a>
+    </div>
+
+    <!-- GitHub Installations -->
+    <div class="setup-section">
+        <h2>GitHub App Access</h2>
+        {% if installations %}
+        <ul class="installation-list">
+            {% for inst in installations %}
+            <li class="installation-item">
+                <span class="installation-account">{{ inst.account_login or 'Unknown' }}</span>
+                <span class="installation-type">{{ inst.account_type or 'user' }}</span>
+                <span class="installation-date">Installed {{ inst.created_at }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-outline btn-sm">
+            Manage App Access
+        </a>
+    </div>
 
     <!-- Tier Info -->
     <div class="setup-section">
@@ -26,116 +93,10 @@
             {% endif %}
         </p>
     </div>
+    {% endif %}
 
-    <!-- GitHub App Installations -->
-    <div class="setup-section">
-        <h2>GitHub Installations</h2>
-        {% if installations %}
-        <ul class="installation-list">
-            {% for inst in installations %}
-            <li class="installation-item">
-                <span class="installation-account">{{ inst.account_login or 'Unknown' }}</span>
-                <span class="installation-type">{{ inst.account_type or 'user' }}</span>
-                <span class="installation-date">Installed {{ inst.created_at }}</span>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="no-installations">No GitHub App installations yet.</p>
-        {% endif %}
-        <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-primary">
-            {% if installations %}Add Another Installation{% else %}Install GitHub App{% endif %}
-        </a>
-    </div>
-
-    <!-- Repository Configuration -->
-    <div class="setup-section">
-        <h2>Library Setup</h2>
-
-        {% set library_repo = repos|selectattr('repo_type', 'equalto', 'library')|first %}
-
-        {% if library_repo %}
-        <p class="library-configured">
-            Your Library: <strong>{{ library_repo.repo_full_name }}</strong>
-        </p>
-        <a href="https://github.com/{{ library_repo.repo_full_name }}" target="_blank" class="btn btn-secondary btn-sm">View on GitHub</a>
-        {% elif installations %}
-        <div class="library-setup-steps">
-            <p>Create your personal knowledge store in 2 steps:</p>
-
-            <div class="setup-step">
-                <span class="step-number">1</span>
-                <div class="step-content">
-                    <strong>Create from template</strong>
-                    <p>Click below to create your Library repo from our template:</p>
-                    <a href="https://github.com/new?template_owner=bobbyhiddn&template_name=Legato.Library.Template&name=Legato.Library&visibility=private"
-                       target="_blank" class="btn btn-primary">
-                        Create Legato.Library
-                    </a>
-                </div>
-            </div>
-
-            <div class="setup-step">
-                <span class="step-number">2</span>
-                <div class="step-content">
-                    <strong>Grant access</strong>
-                    <p>After creating, install the GitHub App on your new Library repo:</p>
-                    <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-secondary">
-                        Configure App Access
-                    </a>
-                </div>
-            </div>
-
-            <div class="setup-step-done">
-                <p>Already created your Library?</p>
-                <button onclick="location.reload()" class="btn btn-outline btn-sm">Refresh to detect it</button>
-            </div>
-        </div>
-        {% else %}
-        <div class="library-setup-steps">
-            <p>To get started, you'll need to:</p>
-            <div class="setup-step">
-                <span class="step-number">1</span>
-                <div class="step-content">
-                    <strong>Install the GitHub App</strong>
-                    <p>This grants Legato access to your selected repositories.</p>
-                    <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-primary">Install GitHub App</a>
-                </div>
-            </div>
-            <p class="help-text">After installing, you'll be able to create your Library from our template.</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Advanced Repository Configuration (hidden by default) -->
-    <details class="setup-section">
-        <summary>Advanced: Manual Repository Configuration</summary>
-        <p>Manually specify repositories (for advanced users).</p>
-
-        <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
-            <div class="form-group">
-                <label for="library_repo">Library Repository</label>
-                <input type="hidden" name="repo_type" value="library">
-                <input type="text" name="repo_full_name" id="library_repo"
-                       placeholder="username/Legato.Library"
-                       value="{{ library_repo.repo_full_name if library_repo else '' }}">
-                <select name="installation_id" id="library_installation">
-                    <option value="">Select installation...</option>
-                    {% for inst in installations %}
-                    <option value="{{ inst.installation_id }}"
-                            {% if library_repo and library_repo.installation_id == inst.installation_id %}selected{% endif %}>
-                        {{ inst.account_login }}
-                    </option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="btn btn-secondary btn-sm">Set Library</button>
-            </div>
-        </form>
-
-    </details>
-
-    <!-- API Keys (for BYK tier) -->
-    {% if tier in ['free', 'byk'] %}
+    <!-- API Keys (for BYK tier) - only show when configured -->
+    {% if is_configured and tier in ['free', 'byk'] %}
     <div class="setup-section">
         <h2>API Keys</h2>
         <p>Provide your own API keys for LLM access.</p>
@@ -169,11 +130,37 @@
     </div>
     {% endif %}
 
-    <!-- Continue to Dashboard -->
+    <!-- Advanced: Manual Library Configuration (hidden) -->
+    {% if is_configured %}
+    <details class="setup-section">
+        <summary>Advanced: Manual Library Configuration</summary>
+        <form method="post" action="{{ url_for('auth.setup_repo') }}" class="repo-form">
+            <div class="form-group">
+                <label for="library_repo_input">Library Repository</label>
+                <input type="hidden" name="repo_type" value="library">
+                <input type="text" name="repo_full_name" id="library_repo_input"
+                       placeholder="username/Legato.Library"
+                       value="{{ library_repo.repo_full_name if library_repo else '' }}">
+                <select name="installation_id" id="library_installation">
+                    <option value="">Select installation...</option>
+                    {% for inst in installations %}
+                    <option value="{{ inst.installation_id }}"
+                            {% if library_repo and library_repo.installation_id == inst.installation_id %}selected{% endif %}>
+                        {{ inst.account_login }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-secondary btn-sm">Update Library</button>
+            </div>
+        </form>
+    </details>
+    {% endif %}
+
+    <!-- Navigation -->
     <div class="setup-section setup-actions">
-        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary btn-lg">
-            {% if is_configured %}Back to Dashboard{% else %}Continue to Dashboard{% endif %}
-        </a>
+        {% if is_configured %}
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary btn-lg">Back to Dashboard</a>
+        {% endif %}
     </div>
 </div>
 
