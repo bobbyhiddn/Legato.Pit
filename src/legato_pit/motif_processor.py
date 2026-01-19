@@ -321,6 +321,14 @@ class MotifProcessor:
                 response_text = re.sub(r'^```\w*\n?', '', response_text)
                 response_text = re.sub(r'\n?```$', '', response_text)
 
+            # Extract JSON array - model may include extra text before/after
+            # Find the outermost [ and ] brackets
+            start_idx = response_text.find('[')
+            end_idx = response_text.rfind(']')
+
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                response_text = response_text[start_idx:end_idx + 1]
+
             classifications = json.loads(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse classification response: {e}")
