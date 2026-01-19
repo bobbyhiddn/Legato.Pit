@@ -154,6 +154,9 @@ def dispatch_transcript(transcript_text, source_id):
 @library_required
 def index():
     """Transcript upload form."""
+    # Check if multi-tenant mode - motif processing disabled until Pit-native implementation
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+        return render_template('dropbox_disabled.html', title='Motif Processing')
     return render_template('dropbox.html', title='Transcript Dropbox')
 
 
@@ -161,6 +164,11 @@ def index():
 @login_required
 def upload():
     """Handle transcript upload."""
+    # Disabled in multi-tenant mode until Pit-native processing is implemented
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+        flash('Motif processing is temporarily disabled while we build secure multi-tenant support.', 'warning')
+        return redirect(url_for('dropbox.index'))
+
     # Get source identifier
     source_id = sanitize_source_id(request.form.get('source_id', ''))
 
@@ -246,6 +254,13 @@ def api_upload():
     API endpoint for transcript upload.
     Accepts JSON: {"transcript": "...", "source_id": "..."}
     """
+    # Disabled in multi-tenant mode until Pit-native processing is implemented
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+        return jsonify({
+            'error': 'Motif processing is temporarily disabled while we build secure multi-tenant support.',
+            'disabled': True
+        }), 503
+
     data = request.get_json()
 
     if not data or not data.get('transcript'):

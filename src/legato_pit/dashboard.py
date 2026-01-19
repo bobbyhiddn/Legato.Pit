@@ -86,6 +86,10 @@ def github_api(endpoint, token=None):
 
 def get_system_status():
     """Get status of all LEGATO repositories."""
+    # In multi-tenant mode, skip Conduct/Listen status checks
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+        return []
+
     org = current_app.config['LEGATO_ORG']
     statuses = []
 
@@ -125,6 +129,10 @@ def get_system_status():
 
 def get_recent_jobs(limit=5):
     """Get recent transcript processing jobs."""
+    # In multi-tenant mode, Conduct is not used
+    if current_app.config.get('LEGATO_MODE') == 'multi-tenant':
+        return []
+
     org = current_app.config['LEGATO_ORG']
     conduct = current_app.config['CONDUCT_REPO']
 
