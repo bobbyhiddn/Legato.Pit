@@ -22,7 +22,7 @@ from typing import Optional
 import requests
 from flask import (
     Blueprint, redirect, url_for, session, request,
-    current_app, flash, render_template, g
+    current_app, flash, render_template, g, jsonify
 )
 
 logger = logging.getLogger(__name__)
@@ -95,9 +95,14 @@ def logout():
 # =============================================================================
 
 def _get_db():
-    """Get database connection from app context."""
-    from .rag.database import get_db
-    return get_db()
+    """Get shared database for auth tables.
+
+    Auth tables (users, installations, repos, api_keys, audit_log) are shared
+    across all users and must be accessible without a user session.
+    This is different from get_user_legato_db() which returns user-scoped databases.
+    """
+    from .rag.database import init_db
+    return init_db()
 
 
 def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] = None,

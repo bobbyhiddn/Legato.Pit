@@ -417,9 +417,9 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
     if mode == "multi-tenant" and user_id:
         # Multi-tenant: Get user's installation token
         from .auth import get_user_installation_token
-        from .rag.database import get_db
+        from .rag.database import init_db
 
-        db = get_db()
+        db = init_db()  # Shared DB for user lookups
 
         # Get user's org from their configured repos
         row = db.execute(
