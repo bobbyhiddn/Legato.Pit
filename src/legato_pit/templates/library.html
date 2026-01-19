@@ -439,9 +439,11 @@
                             </select>
                         </span>
                         <div class="action-group">
+                            {% if user.has_copilot %}
                             <button class="action-btn btn-chord" onclick="addToChordQueueLocal('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                             </button>
+                            {% endif %}
                             <button class="action-btn btn-delete" onclick="deleteEntry('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Delete note">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                             </button>
