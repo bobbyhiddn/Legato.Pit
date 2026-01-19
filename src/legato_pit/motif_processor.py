@@ -232,6 +232,10 @@ class MotifProcessor:
             self._update_stage('writing', 90)
             entry_ids = self._write_threads()
 
+            # Stage 6: Queue chords for approval
+            self._update_stage('queueing', 95)
+            self._queue_chord_entries()
+
             # Complete
             self._mark_complete(entry_ids)
             return entry_ids
@@ -792,6 +796,37 @@ Generate the complete markdown artifact with frontmatter."""
             WHERE job_id = ?
         """, (error, self.job_id))
         db.commit()
+
+    def _queue_chord_entries(self):
+        """Queue entries with needs_chord=true for user approval.
+
+        After writing entries to the Library, check if any have needs_chord=1
+        and queue them in agent_queue for approval before spawning repos.
+        """
+        from .rag.database import init_agents_db, get_user_db_path
+        from .agents import import_chords_from_library
+
+        user_db_path = get_user_db_path(self.user_id)
+        if not user_db_path or not user_db_path.exists():
+            logger.warning(f"Job {self.job_id}: No user DB found, skipping chord queueing")
+            return
+
+        user_db = sqlite3.connect(str(user_db_path))
+        user_db.row_factory = sqlite3.Row
+
+        agents_db = init_agents_db()
+
+        try:
+            stats = import_chords_from_library(user_db, agents_db)
+
+            if stats['queued'] > 0:
+                logger.info(f"Job {self.job_id}: Queued {stats['queued']} chord(s) for approval")
+            if stats['multi_note_chords'] > 0:
+                logger.info(f"Job {self.job_id}: Created {stats['multi_note_chords']} multi-note chord(s)")
+        except Exception as e:
+            logger.error(f"Job {self.job_id}: Failed to queue chords: {e}")
+        finally:
+            user_db.close()
 
 
 def process_motif_sync(transcript: str, user_id: str, source_id: str = None) -> Dict:
