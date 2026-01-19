@@ -164,17 +164,6 @@ def github_callback():
 
     username = user_data.get('login')
 
-    # Verify user is in allowlist (only in single-tenant mode)
-    # In multi-tenant mode, anyone can sign up
-    if current_app.config.get('LEGATO_MODE') != 'multi-tenant':
-        allowed_users = current_app.config.get('GITHUB_ALLOWED_USERS', [])
-        allowed_users = [u.strip() for u in allowed_users if u.strip()]
-
-        if allowed_users and username not in allowed_users:
-            logger.warning(f"Unauthorized user attempted login: {username}")
-            flash('Access denied: You are not authorized to use this application.', 'error')
-            return redirect(url_for('auth.login'))
-
     # Session fixation protection: regenerate session
     session.clear()
 
