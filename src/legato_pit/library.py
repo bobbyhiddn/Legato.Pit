@@ -755,7 +755,7 @@ def api_reset():
 
         db.execute("DELETE FROM knowledge_entries")
         db.execute("DELETE FROM embeddings")
-        db.execute("DELETE FROM sync_state")
+        db.execute("DELETE FROM sync_log")
         db.commit()
 
         logger.info(f"Cleared {entries_deleted} entries for reset")
