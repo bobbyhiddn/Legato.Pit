@@ -21,23 +21,85 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
-# Master key from environment (required for encryption operations)
+# Master key - cached after first load
 _master_key: Optional[str] = None
 
 
 def _get_master_key() -> str:
-    """Get the master encryption key from environment."""
+    """Get the master encryption key.
+
+    Priority:
+    1. Environment variable LEGATO_MASTER_KEY (for manual override)
+    2. Stored in database system_config table (auto-generated on first use)
+
+    The key is auto-generated and persisted if not found, so users
+    never need to configure encryption manually.
+    """
     global _master_key
-    if _master_key is None:
-        _master_key = os.environ.get('LEGATO_MASTER_KEY')
-        if not _master_key:
-            # Generate a warning but allow operation in dev mode
-            logger.warning(
-                "LEGATO_MASTER_KEY not set. Encryption will use a default key. "
-                "This is INSECURE and should only be used in development."
-            )
-            _master_key = "dev-only-insecure-key-do-not-use-in-production"
+    if _master_key is not None:
+        return _master_key
+
+    # Check environment variable first (allows manual override)
+    env_key = os.environ.get('LEGATO_MASTER_KEY')
+    if env_key:
+        _master_key = env_key
+        return _master_key
+
+    # Load or generate from database
+    _master_key = _load_or_create_master_key()
     return _master_key
+
+
+def _load_or_create_master_key() -> str:
+    """Load master key from database, or generate and store if not exists."""
+    import sqlite3
+    from pathlib import Path
+
+    # Get database path (same location as other DBs)
+    db_dir = Path(os.environ.get('LEGATO_DB_DIR', '/data'))
+    if not db_dir.exists():
+        db_dir = Path('./data')
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = db_dir / 'legato.db'
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    try:
+        # Ensure system_config table exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
+        # Try to load existing key
+        row = conn.execute(
+            "SELECT value FROM system_config WHERE key = 'master_encryption_key'"
+        ).fetchone()
+
+        if row:
+            logger.info("Loaded master encryption key from database")
+            return row['value']
+
+        # Generate new key
+        new_key = generate_master_key()
+
+        conn.execute(
+            "INSERT INTO system_config (key, value) VALUES (?, ?)",
+            ('master_encryption_key', new_key)
+        )
+        conn.commit()
+
+        logger.info("Generated and stored new master encryption key")
+        return new_key
+
+    finally:
+        conn.close()
 
 
 def derive_user_key(user_id: str) -> bytes:
