@@ -744,10 +744,9 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
         )
     """)
 
-    # Create indexes
+    # Create indexes (for columns that always exist)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_status ON agent_queue(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_source ON agent_queue(source_transcript)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_user ON agent_queue(user_id)")
 
     # Migration: Add missing columns if they don't exist
     cursor.execute("PRAGMA table_info(agent_queue)")
@@ -760,8 +759,9 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     if 'user_id' not in columns:
         cursor.execute("ALTER TABLE agent_queue ADD COLUMN user_id TEXT")
         logger.info("Added user_id column to agent_queue")
-        # Create index for user_id
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_user ON agent_queue(user_id)")
+
+    # Create user_id index after migration ensures column exists
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_user ON agent_queue(user_id)")
 
     # Sync history to track processed workflow runs (persists even when queue is cleared)
     cursor.execute("""
