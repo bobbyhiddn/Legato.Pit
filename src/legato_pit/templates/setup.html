@@ -67,7 +67,11 @@
         <p class="library-configured">
             <strong>{{ library_repo.repo_full_name }}</strong>
         </p>
-        <a href="https://github.com/{{ library_repo.repo_full_name }}" target="_blank" class="btn btn-secondary btn-sm">View on GitHub</a>
+        <div class="library-actions">
+            <a href="https://github.com/{{ library_repo.repo_full_name }}" target="_blank" class="btn btn-secondary btn-sm">View on GitHub</a>
+            <button type="button" id="reset-sync-btn" class="btn btn-outline btn-sm">Reset & Re-sync</button>
+        </div>
+        <p id="reset-status" class="reset-status"></p>
     </div>
 
     <!-- GitHub Installations -->
@@ -430,5 +434,67 @@ details.setup-section[open] summary {
     padding: 0.75rem 2rem;
     font-size: 1.1rem;
 }
+
+.library-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.reset-status {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    min-height: 1.25rem;
+}
+
+.reset-status.success {
+    color: var(--text-success, #10b981);
+}
+
+.reset-status.error {
+    color: var(--text-error, #ef4444);
+}
+
+.reset-status.loading {
+    color: var(--text-secondary);
+}
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const resetBtn = document.getElementById('reset-sync-btn');
+    const statusEl = document.getElementById('reset-status');
+
+    if (resetBtn) {
+        resetBtn.addEventListener('click', async function() {
+            if (!confirm('This will clear all local data and re-sync from your Library repo. Continue?')) {
+                return;
+            }
+
+            resetBtn.disabled = true;
+            statusEl.className = 'reset-status loading';
+            statusEl.textContent = 'Clearing data and syncing...';
+
+            try {
+                const response = await fetch('/library/api/reset', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    statusEl.className = 'reset-status success';
+                    const synced = data.sync_stats?.entries_created || 0;
+                    statusEl.textContent = `Done! Cleared ${data.entries_deleted} old entries, synced ${synced} from ${data.library_repo}`;
+                } else {
+                    statusEl.className = 'reset-status error';
+                    statusEl.textContent = data.error || 'Reset failed';
+                }
+            } catch (err) {
+                statusEl.className = 'reset-status error';
+                statusEl.textContent = 'Request failed: ' + err.message;
+            } finally {
+                resetBtn.disabled = false;
+            }
+        });
+    }
+});
+</script>
 {% endblock %}
