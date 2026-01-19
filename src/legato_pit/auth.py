@@ -247,8 +247,10 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
 def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
     """Auto-detect and configure a Legato.Library repo.
 
-    Looks for repos named 'Legato.Library' in the user's accessible repos
-    and auto-configures them.
+    Uses multiple strategies:
+    1. Check repos already in GitHub App installation
+    2. Use OAuth token to search user's repos for Legato.Library pattern
+    3. If found outside installation, auto-add it to the installation
 
     Args:
         user_id: The user's ID
@@ -258,23 +260,21 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
         Dict with repo config if found and configured, None otherwise
     """
     from .github_app import get_installation_access_token
+    import requests
 
     db = _get_db()
 
+    # Strategy 1: Check repos already in installation
     for inst in installations:
         installation_id = inst['installation_id'] if isinstance(inst, dict) else inst[0]
-        account_login = inst['account_login'] if isinstance(inst, dict) else inst[1]
 
         try:
-            # Get installation token
             token_data = get_installation_access_token(installation_id)
             token = token_data.get('token')
 
             if not token:
                 continue
 
-            # List repos accessible to this installation
-            import requests
             headers = {
                 'Authorization': f'Bearer {token}',
                 'Accept': 'application/vnd.github+json'
@@ -284,18 +284,88 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
                 headers=headers
             )
 
-            if not resp.ok:
-                continue
+            if resp.ok:
+                repos = resp.json().get('repositories', [])
+                for repo in repos:
+                    repo_name = repo['name']
+                    if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
+                        repo_full_name = repo['full_name']
 
-            repos = resp.json().get('repositories', [])
+                        db.execute(
+                            """
+                            INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
+                            VALUES (?, 'library', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT(user_id, repo_type) DO UPDATE SET
+                                repo_full_name = excluded.repo_full_name,
+                                installation_id = excluded.installation_id,
+                                updated_at = CURRENT_TIMESTAMP
+                            """,
+                            (user_id, repo_full_name, installation_id)
+                        )
+                        db.commit()
 
-            # Look for Legato.Library or Legato.Library.<username>
-            for repo in repos:
-                repo_name = repo['name']
-                if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
-                    repo_full_name = repo['full_name']
+                        logger.info(f"Auto-detected Library repo {repo_full_name} for user {user_id}")
+                        return {
+                            'repo_type': 'library',
+                            'repo_full_name': repo_full_name,
+                            'installation_id': installation_id
+                        }
 
-                    # Auto-configure this as the Library
+        except Exception as e:
+            logger.warning(f"Failed to check installation {installation_id} for Library: {e}")
+
+    # Strategy 2: Use OAuth token to search user's repos
+    oauth_token = _get_user_oauth_token(user_id)
+    if not oauth_token:
+        logger.warning(f"No OAuth token for user {user_id}, cannot search for Library")
+        return None
+
+    # Get user's GitHub login
+    user_row = db.execute(
+        "SELECT github_login FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not user_row:
+        return None
+
+    github_login = user_row['github_login']
+
+    try:
+        # Search for Legato.Library repos owned by user
+        headers = {
+            'Authorization': f'Bearer {oauth_token}',
+            'Accept': 'application/vnd.github+json'
+        }
+
+        # Try specific repo name first
+        for repo_name in [f'Legato.Library.{github_login}', 'Legato.Library']:
+            resp = requests.get(
+                f'https://api.github.com/repos/{github_login}/{repo_name}',
+                headers=headers,
+                timeout=10
+            )
+
+            if resp.ok:
+                repo_data = resp.json()
+                repo_full_name = repo_data['full_name']
+                repo_id = repo_data['id']
+
+                logger.info(f"Found Library repo via OAuth: {repo_full_name}")
+
+                # Try to add to installation
+                if installations:
+                    installation_id = installations[0]['installation_id'] if isinstance(installations[0], dict) else installations[0][0]
+
+                    try:
+                        added = add_repo_to_installation(user_id, repo_id, repo_full_name)
+                        if added:
+                            logger.info(f"Auto-added Library {repo_full_name} to installation")
+                    except Exception as e:
+                        logger.warning(f"Could not auto-add Library to installation: {e}")
+                        # Continue anyway - we found the repo
+
+                    # Configure the Library
                     db.execute(
                         """
                         INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
@@ -309,17 +379,14 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
                     )
                     db.commit()
 
-                    logger.info(f"Auto-detected Library repo {repo_full_name} for user {user_id}")
-
                     return {
                         'repo_type': 'library',
                         'repo_full_name': repo_full_name,
                         'installation_id': installation_id
                     }
 
-        except Exception as e:
-            logger.warning(f"Failed to check installation {installation_id} for Library: {e}")
-            continue
+    except Exception as e:
+        logger.warning(f"Failed to search for Library via OAuth: {e}")
 
     return None
 
