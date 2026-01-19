@@ -676,7 +676,20 @@ def github_app_installed():
         # Verify we can get a token
         token_data = get_installation_access_token(installation_id)
 
-        flash(f'Successfully installed Legato on {account_login}!', 'success')
+        # Auto-detect Library repo from the newly installed repos
+        db = _get_db()
+        installations = db.execute(
+            "SELECT installation_id FROM github_app_installations WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+        detected = _auto_detect_library(user_id, installations)
+        if detected:
+            logger.info(f"Auto-detected Library repo after installation: {detected.get('repo_full_name')}")
+            flash(f'Successfully installed Legato on {account_login}! Library detected: {detected.get("repo_full_name")}', 'success')
+        else:
+            flash(f'Successfully installed Legato on {account_login}!', 'success')
+
         logger.info(f"Installation {installation_id} completed for user {user_id}")
 
         return redirect(url_for('auth.setup'))
