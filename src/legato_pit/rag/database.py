@@ -738,6 +738,7 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
             approved_by TEXT,
             approved_at DATETIME,
             spawn_result TEXT,
+            user_id TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -746,13 +747,21 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_status ON agent_queue(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_source ON agent_queue(source_transcript)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_user ON agent_queue(user_id)")
 
-    # Migration: Add comments column if it doesn't exist
+    # Migration: Add missing columns if they don't exist
     cursor.execute("PRAGMA table_info(agent_queue)")
     columns = [row[1] for row in cursor.fetchall()]
+
     if 'comments' not in columns:
         cursor.execute("ALTER TABLE agent_queue ADD COLUMN comments TEXT DEFAULT '[]'")
         logger.info("Added comments column to agent_queue")
+
+    if 'user_id' not in columns:
+        cursor.execute("ALTER TABLE agent_queue ADD COLUMN user_id TEXT")
+        logger.info("Added user_id column to agent_queue")
+        # Create index for user_id
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_queue_user ON agent_queue(user_id)")
 
     # Sync history to track processed workflow runs (persists even when queue is cleared)
     cursor.execute("""

@@ -84,16 +84,26 @@ def index():
     pending_agents = [dict(row) for row in pending_rows]
 
     # Look up note titles for related_entry_ids and parse comments
-    legato_db = get_legato_db()
+    # Only access legato_db if we have pending agents with related entries
+    legato_db = None
     for agent in pending_agents:
         if agent.get('related_entry_id'):
-            # Handle comma-separated entry IDs (take first one for display)
-            entry_id = agent['related_entry_id'].split(',')[0].strip()
-            note = legato_db.execute(
-                "SELECT title FROM knowledge_entries WHERE entry_id = ?",
-                (entry_id,)
-            ).fetchone()
-            agent['related_note_title'] = note['title'] if note else None
+            # Lazy load legato_db only when needed
+            if legato_db is None:
+                try:
+                    legato_db = get_legato_db()
+                except ValueError:
+                    # No user_id available - skip note title lookups
+                    legato_db = False
+
+            if legato_db:
+                # Handle comma-separated entry IDs (take first one for display)
+                entry_id = agent['related_entry_id'].split(',')[0].strip()
+                note = legato_db.execute(
+                    "SELECT title FROM knowledge_entries WHERE entry_id = ?",
+                    (entry_id,)
+                ).fetchone()
+                agent['related_note_title'] = note['title'] if note else None
 
         # Parse comments JSON array
         if agent.get('comments'):

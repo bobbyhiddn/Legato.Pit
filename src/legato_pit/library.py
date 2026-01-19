@@ -245,8 +245,11 @@ def trigger_background_sync():
             if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
                 logger.info(f"On-load library sync: {stats}")
 
-            # Cleanup orphaned chord references
-            org = os.environ.get('LEGATO_ORG', 'bobbyhiddn')
+            # Cleanup orphaned chord references - use user's org
+            org = user.get('username') or os.environ.get('LEGATO_ORG')
+            if not org:
+                logger.debug("No org available for chord cleanup")
+                return
             try:
                 notes_with_chords = db.execute(
                     """
@@ -451,11 +454,13 @@ def view_entry(entry_id: str):
     ).fetchone()
 
     if chord_info:
-        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+        # Use user's org for chord URL
+        user = session.get('user', {})
+        org = user.get('username') or current_app.config.get('LEGATO_ORG')
         entry_dict['chord'] = {
             'name': chord_info['project_name'],
             'repo': f"{chord_info['project_name']}.Chord",
-            'url': f"https://github.com/{org}/{chord_info['project_name']}.Chord",
+            'url': f"https://github.com/{org}/{chord_info['project_name']}.Chord" if org else None,
             'approved_at': chord_info['approved_at'],
         }
 
