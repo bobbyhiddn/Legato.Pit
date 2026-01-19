@@ -163,22 +163,29 @@ def github_callback():
         return redirect(url_for('auth.login'))
 
     username = user_data.get('login')
+    github_id = user_data.get('id')
+    name = user_data.get('name') or username
+    avatar_url = user_data.get('avatar_url')
+
+    # Create or get user record for multi-tenant isolation
+    user = _get_or_create_user(github_id, username, name=name, avatar_url=avatar_url)
 
     # Session fixation protection: regenerate session
     session.clear()
 
-    # Store user info in session
+    # Store user info in session (including user_id for database isolation)
     session['user'] = {
+        'user_id': user['user_id'],
         'username': username,
-        'name': user_data.get('name') or username,
-        'avatar_url': user_data.get('avatar_url'),
-        'github_id': user_data.get('id')
+        'name': name,
+        'avatar_url': avatar_url,
+        'github_id': github_id
     }
     session['github_token'] = access_token
     session.permanent = True
 
-    logger.info(f"User logged in: {username}")
-    flash(f'Welcome, {session["user"]["name"]}!', 'success')
+    logger.info(f"User logged in: {username} (user_id: {user['user_id']})")
+    flash(f'Welcome, {name}!', 'success')
 
     return redirect(url_for('dashboard.index'))
 
