@@ -30,3 +30,6 @@ numpy>=1.24.0
 
 # JWT for MCP OAuth tokens
 PyJWT>=2.8.0
+
+# Cryptography for token encryption
+cryptography>=41.0.0
