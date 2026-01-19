@@ -431,13 +431,11 @@ def github_app_login():
     session['app_oauth_state'] = state
 
     # Build authorization URL
-    # Scopes:
-    # - read:user, user:email: User identification
-    # - repo: Access to repos for Library detection and installation management
+    # Note: GitHub App OAuth does NOT use scopes - permissions are defined
+    # in the App's settings. Including scope causes a 404 error.
     params = {
         'client_id': client_id,
         'redirect_uri': url_for('auth.github_app_callback', _external=True),
-        'scope': 'read:user user:email repo',
         'state': state
     }
 
