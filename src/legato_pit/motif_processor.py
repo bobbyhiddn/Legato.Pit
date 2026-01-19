@@ -871,6 +871,10 @@ def process_motif_sync(transcript: str, user_id: str, source_id: str = None) -> 
             'entry_ids': entry_ids,
         }
     except Exception as e:
+        # Re-raise StaleInstallationError so API can handle re-auth
+        from .auth import StaleInstallationError
+        if isinstance(e, StaleInstallationError):
+            raise
         logger.error(f"Sync processing failed: {e}")
         return {
             'success': False,
