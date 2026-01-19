@@ -1429,12 +1429,15 @@ The following is the complete content from {len(entries)} source note(s). Use th
         # Store all entry IDs as comma-separated in related_entry_id
         related_ids = ','.join(e['entry_id'] for e in entries)
 
+        # Get user_id for multi-tenant isolation
+        user_id = session.get('user', {}).get('user_id')
+
         agents_db.execute(
             """
             INSERT INTO agent_queue
             (queue_id, project_name, project_type, title, description,
-             signal_json, tasker_body, source_transcript, related_entry_id, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+             signal_json, tasker_body, source_transcript, related_entry_id, status, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             """,
             (
                 queue_id,
@@ -1446,6 +1449,7 @@ The following is the complete content from {len(entries)} source note(s). Use th
                 tasker_body,
                 f"library:chord:{len(entries)}",
                 related_ids,
+                user_id,
             )
         )
         agents_db.commit()

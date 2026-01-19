@@ -14,7 +14,8 @@ primary_region = 'dfw'
 
 [processes]
   # Worker runs as a background thread in the app process (shares database)
-  app = "gunicorn --workers=2 --bind=0.0.0.0:8000 main:app"
+  # Timeout increased for long-running operations like Library sync with embeddings
+  app = "gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:8000 main:app"
 
 [env]
   FLASK_ENV = 'production'
