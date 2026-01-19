@@ -164,11 +164,20 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
 @library_required
 def index():
     """Chords overview - list all Chord repos."""
-    token = current_app.config.get('SYSTEM_PAT')
-    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+    from flask import session
+    from .auth import get_user_installation_token
+
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+    org = user.get('username')  # User's GitHub username
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        token = current_app.config.get('SYSTEM_PAT')
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
     repos = []
-    if token:
+    if token and org:
         repos = fetch_chord_repos(token, org)
 
     return render_template('chords.html', repos=repos)
@@ -178,13 +187,22 @@ def index():
 @login_required
 def api_list_repos():
     """API endpoint to list Chord repos."""
-    token = current_app.config.get('SYSTEM_PAT')
-    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
+    from flask import session
+    from .auth import get_user_installation_token
+
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+    org = user.get('username')
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        token = current_app.config.get('SYSTEM_PAT')
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
     if not token:
-        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+        return jsonify({'error': 'GitHub authorization required'}), 401
 
-    repos = fetch_chord_repos(token, org)
+    repos = fetch_chord_repos(token, org) if org else []
 
     return jsonify({
         'repos': repos,
@@ -196,10 +214,18 @@ def api_list_repos():
 @login_required
 def api_repo_details(repo_name: str):
     """API endpoint to get details for a specific repo."""
-    token = current_app.config.get('SYSTEM_PAT')
+    from flask import session
+    from .auth import get_user_installation_token
+
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        token = current_app.config.get('SYSTEM_PAT')
 
     if not token:
-        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+        return jsonify({'error': 'GitHub authorization required'}), 401
 
     details = fetch_repo_details(token, repo_name)
 
@@ -224,10 +250,18 @@ def api_delete_repo(repo_name: str):
         "notes_reset": 1
     }
     """
-    token = current_app.config.get('SYSTEM_PAT')
+    from flask import session
+    from .auth import get_user_installation_token
+
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        token = current_app.config.get('SYSTEM_PAT')
 
     if not token:
-        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+        return jsonify({'error': 'GitHub authorization required'}), 401
 
     try:
         # First, delete the GitHub repository
@@ -389,16 +423,23 @@ def api_create_incident(repo_name: str):
         "dispatched": true
     }
     """
-    from flask import request
+    from flask import request, session
+    from .auth import get_user_installation_token
     import os
     import secrets
 
-    token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+    org = user.get('username')
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        token = current_app.config.get('SYSTEM_PAT') or os.environ.get('SYSTEM_PAT')
+        org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
 
     if not token:
-        return jsonify({'error': 'SYSTEM_PAT not configured'}), 500
+        return jsonify({'error': 'GitHub authorization required'}), 401
 
-    org = current_app.config.get('LEGATO_ORG', 'bobbyhiddn')
     conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
 
     data = request.get_json()

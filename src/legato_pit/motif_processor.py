@@ -229,11 +229,15 @@ class MotifProcessor:
             self._extract_threads()
 
             # Stage 5: Write
-            self._update_stage('writing', 90)
+            self._update_stage('writing', 85)
             entry_ids = self._write_threads()
 
-            # Stage 6: Queue chords for approval
-            self._update_stage('queueing', 95)
+            # Stage 6: Generate embeddings
+            self._update_stage('embedding', 92)
+            self._generate_embeddings()
+
+            # Stage 7: Queue chords for approval
+            self._update_stage('queueing', 97)
             self._queue_chord_entries()
 
             # Complete
@@ -804,6 +808,44 @@ Generate the complete markdown artifact with frontmatter."""
             WHERE job_id = ?
         """, (error, self.job_id))
         db.commit()
+
+    def _generate_embeddings(self):
+        """Generate embeddings for entries that don't have them.
+
+        Uses user's OpenAI API key to generate embeddings for newly created
+        knowledge entries so they appear in the graph.
+        """
+        from .rag.database import get_user_db_path
+        from .rag.embedding_service import EmbeddingService
+        from .rag.embedding_provider import OpenAIProvider
+        from .auth import get_user_api_key
+
+        # Get user's OpenAI API key
+        openai_key = get_user_api_key(self.user_id, 'openai')
+        if not openai_key:
+            logger.warning(f"Job {self.job_id}: No OpenAI API key configured, skipping embedding generation")
+            return
+
+        user_db_path = get_user_db_path(self.user_id)
+        if not user_db_path or not user_db_path.exists():
+            logger.warning(f"Job {self.job_id}: No user DB found, skipping embedding generation")
+            return
+
+        try:
+            user_db = sqlite3.connect(str(user_db_path))
+            user_db.row_factory = sqlite3.Row
+
+            provider = OpenAIProvider(api_key=openai_key)
+            embedding_service = EmbeddingService(provider, user_db)
+
+            count = embedding_service.generate_missing_embeddings('knowledge', delay=0.1)
+
+            logger.info(f"Job {self.job_id}: Generated {count} embedding(s)")
+
+            user_db.close()
+
+        except Exception as e:
+            logger.error(f"Job {self.job_id}: Failed to generate embeddings: {e}")
 
     def _queue_chord_entries(self):
         """Queue entries with needs_chord=true for user approval.
