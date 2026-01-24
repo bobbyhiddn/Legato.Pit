@@ -782,7 +782,7 @@ def tool_create_note(args: dict) -> dict:
     if not token:
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
-    repo = get_user_library_repo()
+    repo = get_user_library_repo(user_id)
 
     create_file(
         repo=repo,
@@ -1283,7 +1283,7 @@ def tool_update_note(args: dict) -> dict:
     if not token:
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
-    repo = get_user_library_repo()
+    repo = get_user_library_repo(user_id)
 
     try:
         current_content = get_file_content(repo, file_path, token)
@@ -1422,7 +1422,7 @@ def tool_delete_note(args: dict) -> dict:
     if not token:
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
-    repo = get_user_library_repo()
+    repo = get_user_library_repo(user_id)
     file_path = entry['file_path']
     title = entry['title']
 

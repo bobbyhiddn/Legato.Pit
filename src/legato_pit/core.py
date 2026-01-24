@@ -583,7 +583,7 @@ def get_user_library_repo(user_id: str = None) -> str:
     if user_id is None:
         user = session.get('user', {})
         user_id = user.get('user_id')
-        username = user.get('login')
+        username = user.get('username')
     else:
         username = None
 
