@@ -534,6 +534,15 @@ TOOLS = [
             },
             "required": ["job_id"]
         }
+    },
+    {
+        "name": "check_connection",
+        "description": "Diagnostic tool to check MCP connection status, user authentication, and GitHub App setup. Use this to troubleshoot connectivity issues.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
     }
 ]
 
@@ -563,6 +572,7 @@ def handle_tool_call(params: dict) -> dict:
         'get_note_context': tool_get_note_context,
         'process_motif': tool_process_motif,
         'get_processing_status': tool_get_processing_status,
+        'check_connection': tool_check_connection,
     }
 
     handler = tool_handlers.get(name)
@@ -778,8 +788,12 @@ def tool_create_note(args: dict) -> dict:
     from .core import get_user_library_repo
 
     user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    github_login = g.mcp_user.get('sub') if hasattr(g, 'mcp_user') else None
+    logger.info(f"MCP create_note: user_id={user_id}, github_login={github_login}")
+
     token = get_user_installation_token(user_id, 'library') if user_id else None
     if not token:
+        logger.warning(f"MCP create_note: No token for user_id={user_id} - user may need to complete GitHub App setup via web")
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
     repo = get_user_library_repo(user_id)
@@ -1906,6 +1920,92 @@ def tool_get_processing_status(args: dict) -> dict:
 
     if job['status'] == 'failed':
         result['error'] = job['error_message']
+
+    return result
+
+
+def tool_check_connection(args: dict) -> dict:
+    """Diagnostic tool to check MCP connection and user state."""
+    from .auth import get_user_installation_token, _get_db as get_auth_db
+
+    result = {
+        "mcp_auth": {},
+        "github_app": {},
+        "database": {},
+        "recommendations": []
+    }
+
+    # Check MCP authentication
+    if hasattr(g, 'mcp_user') and g.mcp_user:
+        result["mcp_auth"]["authenticated"] = True
+        result["mcp_auth"]["user_id"] = g.mcp_user.get('user_id')
+        result["mcp_auth"]["github_login"] = g.mcp_user.get('sub')
+        result["mcp_auth"]["github_id"] = g.mcp_user.get('github_id')
+    else:
+        result["mcp_auth"]["authenticated"] = False
+        result["recommendations"].append("MCP authentication failed - re-authenticate the MCP client")
+        return result
+
+    user_id = g.mcp_user.get('user_id')
+    github_login = g.mcp_user.get('sub')
+
+    # Check user_repos table for library configuration
+    auth_db = get_auth_db()
+    user_repo = auth_db.execute(
+        """
+        SELECT repo_full_name, installation_id, created_at
+        FROM user_repos
+        WHERE user_id = ? AND repo_type = 'library'
+        """,
+        (user_id,)
+    ).fetchone()
+
+    if user_repo:
+        result["github_app"]["library_configured"] = True
+        result["github_app"]["library_repo"] = user_repo['repo_full_name']
+        result["github_app"]["installation_id"] = user_repo['installation_id']
+
+        # Try to get installation token
+        token = get_user_installation_token(user_id, 'library')
+        if token:
+            result["github_app"]["token_valid"] = True
+        else:
+            result["github_app"]["token_valid"] = False
+            result["recommendations"].append("GitHub App token is invalid - the installation may have been removed. Re-install the GitHub App via the web interface.")
+    else:
+        result["github_app"]["library_configured"] = False
+        result["recommendations"].append(f"No library repo configured for user {user_id}. Complete GitHub App setup via the Legato web interface.")
+
+        # Check if there's a user record at all
+        user_record = auth_db.execute(
+            "SELECT github_id, github_login FROM users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if user_record:
+            result["database"]["user_exists"] = True
+            result["database"]["db_github_login"] = user_record['github_login']
+        else:
+            result["database"]["user_exists"] = False
+            result["recommendations"].append("User record not found in database - this is unexpected")
+
+    # Check for Anthropic API key (needed for process_motif)
+    user_db = get_db()
+    api_key = user_db.execute(
+        "SELECT anthropic_api_key FROM user_settings WHERE id = 1"
+    ).fetchone()
+
+    if api_key and api_key['anthropic_api_key']:
+        result["database"]["anthropic_api_key_set"] = True
+    else:
+        result["database"]["anthropic_api_key_set"] = False
+        result["recommendations"].append("Anthropic API key not configured. Add it in Legato Settings to enable process_motif.")
+
+    # Count notes in library
+    note_count = user_db.execute(
+        "SELECT COUNT(*) as count FROM knowledge_entries"
+    ).fetchone()
+    result["database"]["note_count"] = note_count['count'] if note_count else 0
 
     return result
 

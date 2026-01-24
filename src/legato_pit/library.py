@@ -192,16 +192,39 @@ def trigger_background_sync():
     Also cleans up orphaned chord references.
     """
     global _sync_in_progress
+    from flask import current_app, session
 
     with _sync_lock:
         if _sync_in_progress:
             return  # Sync already running
         _sync_in_progress = True
 
+    # Capture Flask context values BEFORE starting background thread
+    # Background threads don't have Flask app/request context
+    mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+    username = user.get('username')
+
+    # Get library repo while we have Flask context
+    from .core import get_user_library_repo
+    library_repo = get_user_library_repo()
+
+    # Get token while we have Flask context
+    token = None
+    if user_id:
+        from .auth import get_user_installation_token
+        token = get_user_installation_token(user_id, 'library')
+
+    if not token:
+        logger.warning("No user token available, skipping on-load sync")
+        with _sync_lock:
+            _sync_in_progress = False
+        return
+
     def do_sync():
         global _sync_in_progress
         try:
-            from flask import current_app, session
             from .rag.database import init_db
             from .rag.library_sync import LibrarySync
             from .rag.embedding_service import EmbeddingService
@@ -209,25 +232,10 @@ def trigger_background_sync():
             from .chords import fetch_chord_repos
 
             # Get user-specific database in multi-tenant mode
-            mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
-            user = session.get('user', {})
-            user_id = user.get('user_id')
-
             if mode == 'multi-tenant':
                 db = init_db(user_id=user_id) if user_id else init_db()
             else:
                 db = init_db()
-
-            # Get user installation token - required in multi-tenant mode
-            token = None
-            if user_id:
-                from .auth import get_user_installation_token
-                token = get_user_installation_token(user_id, 'library')
-
-            # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
-            if not token:
-                logger.warning("No user token available, skipping on-load sync")
-                return
 
             embedding_service = None
             if os.environ.get('OPENAI_API_KEY'):
@@ -237,16 +245,14 @@ def trigger_background_sync():
                 except Exception as e:
                     logger.warning(f"Could not create embedding service: {e}")
 
-            from .core import get_user_library_repo
-            library_repo = get_user_library_repo()
             sync = LibrarySync(db, embedding_service)
             stats = sync.sync_from_github(library_repo, token=token)
 
             if stats.get('entries_created', 0) > 0 or stats.get('entries_updated', 0) > 0:
                 logger.info(f"On-load library sync: {stats}")
 
-            # Cleanup orphaned chord references - use user's org
-            org = user.get('username') or os.environ.get('LEGATO_ORG')
+            # Cleanup orphaned chord references - use user's org (captured from outer scope)
+            org = username or os.environ.get('LEGATO_ORG')
             if not org:
                 logger.debug("No org available for chord cleanup")
                 return

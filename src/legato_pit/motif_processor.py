@@ -891,15 +891,18 @@ def process_motif_sync(transcript: str, user_id: str, source_id: str = None) -> 
         Dict with job_id, status, entry_ids, etc.
     """
     from .rag.database import init_db
+    from datetime import datetime, timedelta
 
     job_id = f"job-{secrets.token_hex(8)}"
 
-    # Create job record
+    # Create job record with locked_until set to prevent background worker from claiming
+    # (worker checks for locked_until IS NULL OR locked_until < now to identify crashed jobs)
     db = init_db()
+    lock_until = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
     db.execute("""
-        INSERT INTO processing_jobs (job_id, user_id, input_content, source_id, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'processing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    """, (job_id, user_id, transcript, source_id))
+        INSERT INTO processing_jobs (job_id, user_id, input_content, source_id, status, worker_id, locked_until, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'processing', 'sync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    """, (job_id, user_id, transcript, source_id, lock_until))
     db.commit()
 
     try:
