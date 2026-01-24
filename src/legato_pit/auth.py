@@ -1785,11 +1785,18 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
 
     # Try to refresh using refresh_token
     if row['refresh_token_encrypted']:
+        logger.info(f"Attempting token refresh for user {user_id}")
         refresh_token = decrypt_for_user(user_id, row['refresh_token_encrypted'])
         if refresh_token:
             new_token = _refresh_oauth_token(user_id, refresh_token)
             if new_token:
                 return new_token
+            else:
+                logger.warning(f"Token refresh failed for user {user_id}")
+        else:
+            logger.warning(f"Could not decrypt refresh token for user {user_id}")
+    else:
+        logger.warning(f"No refresh token stored for user {user_id}")
 
     # Last resort: return possibly-expired token (might still work)
     if row['oauth_token_encrypted']:
@@ -1813,7 +1820,10 @@ def _refresh_oauth_token(user_id: str, refresh_token: str) -> Optional[str]:
     client_secret = current_app.config.get('GITHUB_CLIENT_SECRET')
 
     if not client_id or not client_secret:
+        logger.warning(f"Cannot refresh token: GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET not configured")
         return None
+
+    logger.info(f"Attempting to refresh OAuth token for user {user_id}")
 
     try:
         resp = requests.post(
@@ -1832,6 +1842,10 @@ def _refresh_oauth_token(user_id: str, refresh_token: str) -> Optional[str]:
             data = resp.json()
             new_token = data.get('access_token')
             new_refresh = data.get('refresh_token')
+
+            if data.get('error'):
+                logger.warning(f"GitHub token refresh error: {data.get('error')} - {data.get('error_description')}")
+                return None
 
             if new_token:
                 # Store the new tokens

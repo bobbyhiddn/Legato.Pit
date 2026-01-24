@@ -210,6 +210,34 @@ def user_detail(user_id: str):
             logger.error(f"Failed to get agents: {e}")
             user['agents'] = []
 
+        # Get token status
+        try:
+            token_row = db.execute("""
+                SELECT oauth_token_encrypted, oauth_token_expires_at, refresh_token_encrypted
+                FROM users WHERE user_id = ?
+            """, (user_id,)).fetchone()
+
+            from datetime import datetime
+            user['token_status'] = {
+                'has_oauth_token': bool(token_row and token_row['oauth_token_encrypted']),
+                'has_refresh_token': bool(token_row and token_row['refresh_token_encrypted']),
+                'oauth_expires_at': token_row['oauth_token_expires_at'] if token_row else None,
+            }
+
+            # Check if expired
+            if token_row and token_row['oauth_token_expires_at']:
+                try:
+                    expiry = datetime.fromisoformat(token_row['oauth_token_expires_at'].replace('Z', '+00:00'))
+                    user['token_status']['is_expired'] = expiry < datetime.now(expiry.tzinfo) if expiry.tzinfo else expiry < datetime.now()
+                except:
+                    user['token_status']['is_expired'] = None
+            else:
+                user['token_status']['is_expired'] = None
+
+        except Exception as e:
+            logger.error(f"Failed to get token status: {e}")
+            user['token_status'] = {}
+
         return render_template('admin/user_detail.html', profile=user)
 
     except Exception as e:

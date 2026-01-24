@@ -63,6 +63,9 @@
     .info-item span {
         color: var(--text-primary, #e6edf3);
     }
+    .status-ok { color: #3fb950; }
+    .status-warn { color: #d29922; }
+    .status-error { color: #f85149; }
     .item-list {
         list-style: none;
         padding: 0;
@@ -141,6 +144,36 @@
             <div class="info-item">
                 <label>Updated</label>
                 <span>{{ profile.updated_at[:19] if profile.updated_at else '-' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Token Status</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <label>OAuth Token</label>
+                <span class="{% if profile.token_status.has_oauth_token %}status-ok{% else %}status-error{% endif %}">
+                    {{ 'Present' if profile.token_status.has_oauth_token else 'Missing' }}
+                </span>
+            </div>
+            <div class="info-item">
+                <label>Refresh Token</label>
+                <span class="{% if profile.token_status.has_refresh_token %}status-ok{% else %}status-warn{% endif %}">
+                    {{ 'Present' if profile.token_status.has_refresh_token else 'Missing' }}
+                </span>
+            </div>
+            <div class="info-item">
+                <label>Token Expires</label>
+                <span>{{ profile.token_status.oauth_expires_at[:19] if profile.token_status.oauth_expires_at else '-' }}</span>
+            </div>
+            <div class="info-item">
+                <label>Expired?</label>
+                <span class="{% if profile.token_status.is_expired %}status-error{% else %}status-ok{% endif %}">
+                    {% if profile.token_status.is_expired == None %}Unknown
+                    {% elif profile.token_status.is_expired %}Yes - needs re-auth
+                    {% else %}No{% endif %}
+                </span>
             </div>
         </div>
     </div>
