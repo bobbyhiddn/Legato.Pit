@@ -202,25 +202,28 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
         installation_data: Full installation data from GitHub
     """
     from .crypto import encrypt_for_user
+    from flask import has_request_context
 
     db = _get_db()
     account = installation_data.get('account', {})
 
     # CRITICAL: Verify user_id and get canonical user_id by github_id
     # This prevents storing installation with stale/wrong user_id from session
-    github_id = session.get('user', {}).get('github_id')
-    if github_id:
-        canonical_user = db.execute(
-            "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
-        ).fetchone()
-        if canonical_user:
-            canonical_user_id = canonical_user['user_id']
-            # Fix session if it's out of sync
-            if user_id != canonical_user_id:
-                logger.warning(f"Fixing user_id mismatch: session={user_id}, canonical={canonical_user_id}")
-                user_id = canonical_user_id
-                session['user']['user_id'] = user_id
-                session.modified = True
+    # Only do this if we have a request context with session
+    if has_request_context():
+        github_id = session.get('user', {}).get('github_id')
+        if github_id:
+            canonical_user = db.execute(
+                "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
+            ).fetchone()
+            if canonical_user:
+                canonical_user_id = canonical_user['user_id']
+                # Fix session if it's out of sync
+                if user_id != canonical_user_id:
+                    logger.warning(f"Fixing user_id mismatch: session={user_id}, canonical={canonical_user_id}")
+                    user_id = canonical_user_id
+                    session['user']['user_id'] = user_id
+                    session.modified = True
 
     # Verify user exists (FK constraint requires it)
     user_exists = db.execute(
@@ -229,8 +232,7 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
 
     if not user_exists:
         # User record missing - try to recreate from session
-        from flask import session
-        user_session = session.get('user', {})
+        user_session = session.get('user', {}) if has_request_context() else {}
         github_id = user_session.get('github_id')
         github_login = user_session.get('username')
 
@@ -245,8 +247,9 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
                 # User exists with a different user_id - update session to use the correct one
                 correct_user_id = existing_user['user_id']
                 logger.warning(f"User {user_id} not found but github_id {github_id} exists as {correct_user_id}, fixing session")
-                session['user']['user_id'] = correct_user_id
-                session.modified = True
+                if has_request_context():
+                    session['user']['user_id'] = correct_user_id
+                    session.modified = True
                 # Use the correct user_id for the rest of this function
                 user_id = correct_user_id
             else:
