@@ -247,6 +247,76 @@ def get_recent_artifacts(limit=5):
     return artifacts
 
 
+def get_recent_notes(limit: int = 5) -> list:
+    """Get most recent notes for the current user.
+
+    Args:
+        limit: Maximum number of notes to return
+
+    Returns:
+        List of note dicts with entry_id, title, category, created_at
+    """
+    from .rag.database import get_user_legato_db
+
+    try:
+        db = get_user_legato_db()
+        rows = db.execute("""
+            SELECT entry_id, title, category, created_at
+            FROM knowledge_entries
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error fetching recent notes: {e}")
+        return []
+
+
+def get_calendar_preview() -> dict:
+    """Get current month calendar data with note counts per day.
+
+    Returns:
+        Dict with year, month, month_name, and days (dict of date -> count)
+    """
+    from .rag.database import get_user_legato_db
+    import calendar
+
+    try:
+        db = get_user_legato_db()
+        today = datetime.now()
+        year_month = today.strftime('%Y-%m')
+
+        rows = db.execute("""
+            SELECT DATE(created_at) as date, COUNT(*) as count
+            FROM knowledge_entries
+            WHERE strftime('%Y-%m', created_at) = ?
+            GROUP BY DATE(created_at)
+        """, (year_month,)).fetchall()
+
+        # Build calendar data
+        cal = calendar.Calendar(firstweekday=6)  # Sunday first
+        weeks = cal.monthdays2calendar(today.year, today.month)
+
+        return {
+            'year': today.year,
+            'month': today.month,
+            'month_name': today.strftime('%B'),
+            'days': {row['date']: row['count'] for row in rows},
+            'weeks': weeks,  # List of weeks, each week is list of (day, weekday) tuples
+            'today': today.strftime('%Y-%m-%d')
+        }
+    except Exception as e:
+        logger.error(f"Error fetching calendar preview: {e}")
+        return {
+            'year': datetime.now().year,
+            'month': datetime.now().month,
+            'month_name': datetime.now().strftime('%B'),
+            'days': {},
+            'weeks': [],
+            'today': datetime.now().strftime('%Y-%m-%d')
+        }
+
+
 def get_stats():
     """Get system statistics from local database and GitHub.
 
@@ -440,8 +510,8 @@ def index():
     return render_template(
         'dashboard.html',
         title='Dashboard',
-        system_status=get_system_status(),
-        recent_jobs=get_recent_jobs(),
+        recent_notes=get_recent_notes(),
+        calendar_preview=get_calendar_preview(),
         recent_chord_spawns=get_recent_chord_spawns(),
         recent_artifacts=recent_artifacts,
         stats=get_stats(),
@@ -470,8 +540,8 @@ def api_status():
     trigger_library_sync_if_new_artifacts(recent_artifacts)
 
     return jsonify({
-        'system_status': get_system_status(),
-        'recent_jobs': get_recent_jobs(),
+        'recent_notes': get_recent_notes(),
+        'calendar_preview': get_calendar_preview(),
         'recent_chord_spawns': get_recent_chord_spawns(),
         'recent_artifacts': recent_artifacts,
         'stats': get_stats(),

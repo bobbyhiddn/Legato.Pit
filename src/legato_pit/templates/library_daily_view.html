@@ -245,13 +245,19 @@
         </div>
 
         <div class="sidebar-section">
-            <h3>Quick Links</h3>
+            <h3>Views</h3>
             <nav class="sidebar-nav">
                 <a href="{{ url_for('library.index') }}" class="sidebar-link">
                     <span>Overview</span>
                 </a>
                 <a href="{{ url_for('library.daily_index') }}" class="sidebar-link active">
-                    <span>Daily View</span>
+                    <span>Daily</span>
+                </a>
+                <a href="{{ url_for('library.monthly_index') }}" class="sidebar-link">
+                    <span>Monthly</span>
+                </a>
+                <a href="{{ url_for('library.yearly_index') }}" class="sidebar-link">
+                    <span>Yearly</span>
                 </a>
             </nav>
         </div>

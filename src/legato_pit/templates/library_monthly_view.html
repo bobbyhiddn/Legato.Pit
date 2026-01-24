@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+
+{% block title %}{{ month_name }} {{ year }} - Library - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .library-layout {
+        display: flex;
+        gap: 1rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0 1rem;
+    }
+
+    .library-sidebar {
+        width: 180px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 70px;
+        height: fit-content;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .month-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .month-header-info h1 {
+        margin: 0 0 0.25rem 0;
+    }
+
+    .month-header-info .subtitle {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .month-nav {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .month-nav a {
+        padding: 0.5rem 1rem;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .month-nav a:hover {
+        background: var(--bg-secondary);
+    }
+
+    .month-nav a.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    /* Calendar Grid */
+    .calendar-grid {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .calendar-header {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        text-align: center;
+        font-weight: 600;
+        color: var(--text-secondary);
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 0.5rem;
+    }
+
+    .calendar-week {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+    }
+
+    .calendar-day {
+        aspect-ratio: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        position: relative;
+        min-height: 50px;
+    }
+
+    .calendar-day.empty {
+        background: transparent;
+    }
+
+    .calendar-day:not(.empty) {
+        background: var(--bg-tertiary);
+        cursor: pointer;
+    }
+
+    .calendar-day:not(.empty):hover {
+        background: var(--bg-secondary);
+    }
+
+    .calendar-day.has-notes {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .calendar-day.has-notes:hover {
+        background: rgba(88, 166, 255, 0.25);
+    }
+
+    .calendar-day.today {
+        border: 2px solid var(--accent-color);
+    }
+
+    .calendar-day .day-number {
+        font-size: 1rem;
+    }
+
+    .calendar-day .day-count {
+        font-size: 0.7rem;
+        color: var(--accent-color);
+        font-weight: 600;
+        margin-top: 2px;
+    }
+
+    /* Notes List */
+    .notes-section h2 {
+        margin-bottom: 1rem;
+    }
+
+    .notes-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .note-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.2s;
+    }
+
+    .note-item:hover {
+        border-color: var(--accent-color);
+    }
+
+    .note-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .note-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .note-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .month-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .calendar-day {
+            min-height: 40px;
+            font-size: 0.75rem;
+        }
+
+        .calendar-day .day-number {
+            font-size: 0.875rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
+                    <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Views</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Overview</span>
+                </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
+                    <span>Daily</span>
+                </a>
+                <a href="{{ url_for('library.monthly_index') }}" class="sidebar-link active">
+                    <span>Monthly</span>
+                </a>
+                <a href="{{ url_for('library.yearly_index') }}" class="sidebar-link">
+                    <span>Yearly</span>
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <header class="month-header">
+            <div class="month-header-info">
+                <h1>{{ month_name }} {{ year }}</h1>
+                <p class="subtitle">{{ entries|length }} note{{ 's' if entries|length != 1 else '' }}</p>
+            </div>
+            <nav class="month-nav">
+                <a href="{{ url_for('library.monthly_view', year_month=prev_month) if prev_month else '#' }}"
+                   class="{% if not prev_month %}disabled{% endif %}">
+                    &larr; Previous
+                </a>
+                <a href="{{ url_for('library.monthly_index') }}">All Months</a>
+                <a href="{{ url_for('library.yearly_view', year=year) }}">{{ year }}</a>
+                <a href="{{ url_for('library.monthly_view', year_month=next_month) if next_month else '#' }}"
+                   class="{% if not next_month %}disabled{% endif %}">
+                    Next &rarr;
+                </a>
+            </nav>
+        </header>
+
+        <!-- Calendar Grid -->
+        <div class="calendar-grid">
+            <div class="calendar-header">
+                <span>Sun</span>
+                <span>Mon</span>
+                <span>Tue</span>
+                <span>Wed</span>
+                <span>Thu</span>
+                <span>Fri</span>
+                <span>Sat</span>
+            </div>
+            {% for week in weeks %}
+            <div class="calendar-week">
+                {% for day, weekday in week %}
+                {% if day == 0 %}
+                <span class="calendar-day empty"></span>
+                {% else %}
+                {% set date_str = '%04d-%02d-%02d'|format(year, month, day) %}
+                {% set count = daily_counts.get(date_str, 0) %}
+                <a href="{{ url_for('library.daily_view', date=date_str) }}"
+                   class="calendar-day {% if count > 0 %}has-notes{% endif %} {% if date_str == today %}today{% endif %}">
+                    <span class="day-number">{{ day }}</span>
+                    {% if count > 0 %}
+                    <span class="day-count">{{ count }}</span>
+                    {% endif %}
+                </a>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Notes List -->
+        <section class="notes-section">
+            <h2>All Notes This Month</h2>
+            {% if entries %}
+            <div class="notes-list">
+                {% for entry in entries %}
+                <a href="{{ url_for('library.view_entry', entry_id=entry.entry_id) }}" class="note-item">
+                    <div class="note-info">
+                        <div class="note-title">{{ entry.title }}</div>
+                        <div class="note-meta">
+                            <span class="badge badge-{{ entry.category }}">{{ entry.category }}</span>
+                            <span>{{ entry.created_at[:10] }}</span>
+                            {% if entry.chord_status == 'active' %}
+                            <span class="badge badge-chord">chord</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-state">No notes this month</p>
+            {% endif %}
+        </section>
+    </main>
+</div>
+{% endblock %}

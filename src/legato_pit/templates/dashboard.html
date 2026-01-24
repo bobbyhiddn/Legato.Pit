@@ -358,6 +358,143 @@
         color: var(--accent-color);
         font-weight: 600;
     }
+
+    /* Dashboard Grid Layout */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    @media (max-width: 768px) {
+        .dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* Recent Notes */
+    .recent-notes-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .recent-note-item {
+        display: block;
+        padding: 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        text-decoration: none;
+        color: inherit;
+        transition: background 0.2s;
+    }
+
+    .recent-note-item:hover {
+        background: var(--bg-secondary);
+    }
+
+    .recent-note-item .note-title {
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+        color: var(--text-primary);
+    }
+
+    .recent-note-item .note-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+    }
+
+    .recent-note-item .note-date {
+        color: var(--text-secondary);
+    }
+
+    .view-all-link {
+        display: block;
+        text-align: center;
+        padding: 0.75rem;
+        margin-top: 0.75rem;
+        color: var(--accent-color);
+        text-decoration: none;
+        font-size: 0.875rem;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .view-all-link:hover {
+        text-decoration: underline;
+    }
+
+    /* Mini Calendar */
+    .calendar-card h2 {
+        text-align: center;
+    }
+
+    .mini-calendar {
+        font-size: 0.8rem;
+    }
+
+    .calendar-header {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        text-align: center;
+        font-weight: 600;
+        color: var(--text-secondary);
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 0.5rem;
+    }
+
+    .calendar-week {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+    }
+
+    .calendar-day {
+        aspect-ratio: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        position: relative;
+    }
+
+    .calendar-day.empty {
+        background: transparent;
+    }
+
+    .calendar-day:not(.empty) {
+        background: var(--bg-tertiary);
+    }
+
+    .calendar-day:not(.empty):hover {
+        background: var(--bg-secondary);
+    }
+
+    .calendar-day.has-notes {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .calendar-day.today {
+        border: 2px solid var(--accent-color);
+    }
+
+    .day-count {
+        position: absolute;
+        bottom: 1px;
+        right: 2px;
+        font-size: 0.6rem;
+        color: var(--accent-color);
+        font-weight: 600;
+    }
 </style>
 {% endblock %}
 
@@ -464,18 +601,60 @@
     <!-- Graph Tooltip -->
     <div class="graph-tooltip" id="graphTooltip"></div>
 
-    <section class="card">
-        <h2>System Status</h2>
-        <div class="status-list">
-            {% for status in system_status %}
-            <div class="status-item status-{{ status.status }}">
-                <span class="status-indicator"></span>
-                <span class="status-name">{{ status.name }}</span>
-                <span class="status-text">{{ status.text }}</span>
+    <!-- Dashboard Grid -->
+    <div class="dashboard-grid">
+        <!-- Recent Notes -->
+        <section class="card">
+            <h2>Recent Notes</h2>
+            {% if recent_notes %}
+            <div class="recent-notes-list">
+                {% for note in recent_notes %}
+                <a href="{{ url_for('library.view_entry', entry_id=note.entry_id) }}" class="recent-note-item">
+                    <div class="note-title">{{ note.title }}</div>
+                    <div class="note-meta">
+                        <span class="badge badge-{{ note.category }}">{{ note.category }}</span>
+                        <span class="note-date">{{ note.created_at[:10] }}</span>
+                    </div>
+                </a>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </div>
-    </section>
+            <a href="{{ url_for('library.daily_index') }}" class="view-all-link">View all by date →</a>
+            {% else %}
+            <p class="empty-state">No notes yet</p>
+            {% endif %}
+        </section>
+
+        <!-- Calendar Preview -->
+        <section class="card calendar-card">
+            <h2>{{ calendar_preview.month_name }} {{ calendar_preview.year }}</h2>
+            <div class="mini-calendar">
+                <div class="calendar-header">
+                    <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                </div>
+                <div class="calendar-body">
+                    {% for week in calendar_preview.weeks %}
+                    <div class="calendar-week">
+                        {% for day, weekday in week %}
+                        {% if day == 0 %}
+                        <span class="calendar-day empty"></span>
+                        {% else %}
+                        {% set date_str = '%04d-%02d-%02d'|format(calendar_preview.year, calendar_preview.month, day) %}
+                        {% set count = calendar_preview.days.get(date_str, 0) %}
+                        <a href="{{ url_for('library.daily_view', date=date_str) }}"
+                           class="calendar-day {% if count > 0 %}has-notes{% endif %} {% if date_str == calendar_preview.today %}today{% endif %}"
+                           title="{{ count }} note{{ 's' if count != 1 else '' }}">
+                            {{ day }}
+                            {% if count > 0 %}<span class="day-count">{{ count }}</span>{% endif %}
+                        </a>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <a href="{{ url_for('library.daily_index') }}" class="view-all-link">View calendar →</a>
+        </section>
+    </div>
 
     {% if pending_agents %}
     <section class="card card-highlight">
@@ -511,29 +690,13 @@
     </section>
     {% endif %}
 
-    <section class="card">
-        <h2>Recent Jobs</h2>
-        {% if recent_jobs %}
-        <div class="job-list">
-            {% for job in recent_jobs %}
-            <a href="{{ job.url }}" target="_blank" class="job-item">
-                <div class="job-status status-{{ job.status }}">
-                    <span class="status-indicator"></span>
-                </div>
-                <div class="job-info">
-                    <span class="job-title">{{ job.title }}</span>
-                    <span class="job-meta">{{ job.status_text }} &middot; {{ job.created_at[:10] }}</span>
-                </div>
-            </a>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="empty-state">No recent jobs</p>
-        {% endif %}
-    </section>
+    <!-- Second Row Grid -->
+    <div class="dashboard-grid">
+        <!-- Pending Agents already handled above -->
 
-    <section class="card">
-        <h2>Recent Chord Spawns</h2>
+        <!-- Recent Activity -->
+        <section class="card">
+            <h2>Recent Activity</h2>
         {% if recent_chord_spawns %}
         <div class="job-list">
             {% for spawn in recent_chord_spawns %}
@@ -562,25 +725,27 @@
             {% endfor %}
         </div>
         {% else %}
-        <p class="empty-state">No chord spawns yet</p>
+        <p class="empty-state">No activity yet</p>
         {% endif %}
-    </section>
+        </section>
 
-    <section class="card">
-        <h2>Recent Artifacts</h2>
-        {% if recent_artifacts %}
-        <div class="artifact-list">
-            {% for artifact in recent_artifacts %}
-            <div class="artifact-item">
-                <span class="artifact-name">{{ artifact.name }}</span>
-                <span class="badge badge-{{ artifact.category }}">{{ artifact.category }}</span>
+        <!-- Recent Artifacts -->
+        <section class="card">
+            <h2>Recent Artifacts</h2>
+            {% if recent_artifacts %}
+            <div class="artifact-list">
+                {% for artifact in recent_artifacts %}
+                <div class="artifact-item">
+                    <span class="artifact-name">{{ artifact.name }}</span>
+                    <span class="badge badge-{{ artifact.category }}">{{ artifact.category }}</span>
+                </div>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="empty-state">No artifacts yet</p>
-        {% endif %}
-    </section>
+            {% else %}
+            <p class="empty-state">No artifacts yet</p>
+            {% endif %}
+        </section>
+    </div>
 
     <div class="quick-action">
         <a href="{{ url_for('dropbox.index') }}" class="btn btn-primary btn-large">

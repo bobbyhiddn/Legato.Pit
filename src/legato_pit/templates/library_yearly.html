@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Daily View - Library - {{ app_name }}{% endblock %}
+{% block title %}Yearly View - Library - {{ app_name }}{% endblock %}
 
 {% block head %}
 <style>
@@ -87,63 +87,41 @@
         margin: 0;
     }
 
-    .date-picker-row {
-        display: flex;
-        gap: 0.5rem;
-        align-items: center;
-        margin-bottom: 1.5rem;
-    }
-
-    .date-picker-row input[type="date"] {
-        padding: 0.5rem 0.75rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-        font-size: 0.875rem;
-    }
-
-    .date-list {
+    .year-list {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1rem;
     }
 
-    .date-card {
+    .year-card {
         background: var(--card-bg);
         border: 1px solid var(--border-color);
         border-radius: 8px;
-        padding: 1rem;
+        padding: 1.5rem;
         text-decoration: none;
         color: inherit;
         transition: border-color 0.2s, transform 0.2s;
+        text-align: center;
     }
 
-    .date-card:hover {
+    .year-card:hover {
         border-color: var(--accent-color);
         transform: translateY(-2px);
     }
 
-    .date-card-date {
-        font-size: 1.25rem;
-        font-weight: 600;
+    .year-card-year {
+        font-size: 2rem;
+        font-weight: 700;
         color: var(--text-primary);
     }
 
-    .date-card-weekday {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        margin-top: 0.25rem;
-    }
-
-    .date-card-count {
-        font-size: 0.875rem;
+    .year-card-count {
+        font-size: 1rem;
         color: var(--accent-color);
         margin-top: 0.5rem;
     }
 
-    .today-card {
+    .current-year {
         border-color: var(--accent-color);
         background: rgba(88, 166, 255, 0.1);
     }
@@ -183,13 +161,13 @@
                 <a href="{{ url_for('library.index') }}" class="sidebar-link">
                     <span>Overview</span>
                 </a>
-                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link active">
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
                     <span>Daily</span>
                 </a>
                 <a href="{{ url_for('library.monthly_index') }}" class="sidebar-link">
                     <span>Monthly</span>
                 </a>
-                <a href="{{ url_for('library.yearly_index') }}" class="sidebar-link">
+                <a href="{{ url_for('library.yearly_index') }}" class="sidebar-link active">
                     <span>Yearly</span>
                 </a>
             </nav>
@@ -198,22 +176,17 @@
 
     <main class="library-main">
         <header class="page-header">
-            <h1>Daily View</h1>
-            <p class="subtitle">Browse notes by date</p>
+            <h1>Yearly View</h1>
+            <p class="subtitle">Browse notes by year</p>
         </header>
 
-        <div class="date-picker-row">
-            <input type="date" id="datePicker" onchange="goToDate(this.value)">
-            <button class="btn btn-secondary btn-sm" onclick="goToToday()">Today</button>
-        </div>
-
-        <div class="date-list">
-            {% for d in dates %}
-            <a href="{{ url_for('library.daily_view', date=d.date) }}"
-               class="date-card {% if d.date == today %}today-card{% endif %}">
-                <div class="date-card-date">{{ d.date[8:10] }}</div>
-                <div class="date-card-weekday">{{ d.date }}</div>
-                <div class="date-card-count">{{ d.count }} note{{ 's' if d.count != 1 else '' }}</div>
+        <div class="year-list">
+            {% set current_year = now().strftime('%Y') if now is defined else '' %}
+            {% for y in years %}
+            <a href="{{ url_for('library.yearly_view', year=y.year) }}"
+               class="year-card {% if y.year == current_year %}current-year{% endif %}">
+                <div class="year-card-year">{{ y.year }}</div>
+                <div class="year-card-count">{{ y.count }} note{{ 's' if y.count != 1 else '' }}</div>
             </a>
             {% else %}
             <p class="empty-state">No notes yet</p>
@@ -221,19 +194,4 @@
         </div>
     </main>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-    function goToDate(dateStr) {
-        if (dateStr) {
-            window.location.href = `/library/daily/${dateStr}`;
-        }
-    }
-
-    function goToToday() {
-        const today = new Date().toISOString().split('T')[0];
-        window.location.href = `/library/daily/${today}`;
-    }
-</script>
 {% endblock %}

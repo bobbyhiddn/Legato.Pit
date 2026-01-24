@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block title %}{{ year }} - Library - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .library-layout {
+        display: flex;
+        gap: 1rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0 1rem;
+    }
+
+    .library-sidebar {
+        width: 180px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 70px;
+        height: fit-content;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+    }
+
+    .library-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .sidebar-section h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .sidebar-link {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .sidebar-link:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .sidebar-link.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .sidebar-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .year-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .year-header-info h1 {
+        margin: 0 0 0.25rem 0;
+    }
+
+    .year-header-info .subtitle {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .year-nav {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .year-nav a {
+        padding: 0.5rem 1rem;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .year-nav a:hover {
+        background: var(--bg-secondary);
+    }
+
+    .year-nav a.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    /* Month Grid */
+    .month-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+    }
+
+    .month-tile {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1.25rem;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.2s, transform 0.2s;
+        text-align: center;
+    }
+
+    .month-tile:hover {
+        border-color: var(--accent-color);
+        transform: translateY(-2px);
+    }
+
+    .month-tile.has-notes {
+        background: rgba(88, 166, 255, 0.1);
+    }
+
+    .month-tile.current-month {
+        border-color: var(--accent-color);
+    }
+
+    .month-tile-name {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .month-tile-short {
+        display: none;
+    }
+
+    .month-tile-count {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin-top: 0.5rem;
+    }
+
+    .month-tile-count.zero {
+        color: var(--text-secondary);
+        font-weight: 400;
+    }
+
+    .month-tile-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    /* Year Stats */
+    .year-stats {
+        display: flex;
+        gap: 2rem;
+        padding: 1.5rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-top: 1.5rem;
+    }
+
+    .year-stat {
+        text-align: center;
+    }
+
+    .year-stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--accent-color);
+    }
+
+    .year-stat-label {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+    }
+
+    @media (max-width: 900px) {
+        .month-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+
+    @media (max-width: 768px) {
+        .library-layout {
+            flex-direction: column;
+        }
+
+        .library-sidebar {
+            width: 100%;
+            position: static;
+            max-height: none;
+        }
+
+        .year-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .month-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .month-tile-name {
+            display: none;
+        }
+
+        .month-tile-short {
+            display: block;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .year-stats {
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .year-stat {
+            flex: 1;
+            min-width: 80px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="library-layout">
+    <aside class="library-sidebar">
+        <div class="sidebar-section">
+            <h3>Categories</h3>
+            <nav class="sidebar-nav">
+                {% for cat in categories %}
+                <a href="{{ url_for('library.view_category', category=cat.category) }}" class="sidebar-link">
+                    <span>{{ cat.display_name or cat.category or 'Uncategorized' }}</span>
+                    <span class="sidebar-count">{{ cat.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Views</h3>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('library.index') }}" class="sidebar-link">
+                    <span>Overview</span>
+                </a>
+                <a href="{{ url_for('library.daily_index') }}" class="sidebar-link">
+                    <span>Daily</span>
+                </a>
+                <a href="{{ url_for('library.monthly_index') }}" class="sidebar-link">
+                    <span>Monthly</span>
+                </a>
+                <a href="{{ url_for('library.yearly_index') }}" class="sidebar-link active">
+                    <span>Yearly</span>
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="library-main">
+        <header class="year-header">
+            <div class="year-header-info">
+                <h1>{{ year }}</h1>
+                {% set total_notes = months | sum(attribute='count') %}
+                <p class="subtitle">{{ total_notes }} note{{ 's' if total_notes != 1 else '' }} across {{ months | selectattr('count', 'gt', 0) | list | length }} month{{ 's' if months | selectattr('count', 'gt', 0) | list | length != 1 else '' }}</p>
+            </div>
+            <nav class="year-nav">
+                <a href="{{ url_for('library.yearly_view', year=prev_year) if prev_year else '#' }}"
+                   class="{% if not prev_year %}disabled{% endif %}">
+                    &larr; {{ prev_year or 'Previous' }}
+                </a>
+                <a href="{{ url_for('library.yearly_index') }}">All Years</a>
+                <a href="{{ url_for('library.yearly_view', year=next_year) if next_year else '#' }}"
+                   class="{% if not next_year %}disabled{% endif %}">
+                    {{ next_year or 'Next' }} &rarr;
+                </a>
+            </nav>
+        </header>
+
+        <!-- Month Grid -->
+        <div class="month-grid">
+            {% set current_month = now().strftime('%Y-%m') if now is defined else '' %}
+            {% for m in months %}
+            <a href="{{ url_for('library.monthly_view', year_month=m.month) }}"
+               class="month-tile {% if m.count > 0 %}has-notes{% endif %} {% if m.month == current_month %}current-month{% endif %}">
+                <div class="month-tile-name">{{ m.name }}</div>
+                <div class="month-tile-short">{{ m.short_name }}</div>
+                <div class="month-tile-count {% if m.count == 0 %}zero{% endif %}">{{ m.count }}</div>
+                <div class="month-tile-label">note{{ 's' if m.count != 1 else '' }}</div>
+            </a>
+            {% endfor %}
+        </div>
+
+        <!-- Year Stats -->
+        <div class="year-stats">
+            <div class="year-stat">
+                <div class="year-stat-value">{{ total_notes }}</div>
+                <div class="year-stat-label">Total Notes</div>
+            </div>
+            <div class="year-stat">
+                <div class="year-stat-value">{{ months | selectattr('count', 'gt', 0) | list | length }}</div>
+                <div class="year-stat-label">Active Months</div>
+            </div>
+            <div class="year-stat">
+                {% set max_month = months | sort(attribute='count', reverse=true) | first %}
+                <div class="year-stat-value">{{ max_month.count if max_month else 0 }}</div>
+                <div class="year-stat-label">Best Month{% if max_month and max_month.count > 0 %} ({{ max_month.short_name }}){% endif %}</div>
+            </div>
+            <div class="year-stat">
+                {% set avg = (total_notes / 12) | round(1) %}
+                <div class="year-stat-value">{{ avg }}</div>
+                <div class="year-stat-label">Avg/Month</div>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

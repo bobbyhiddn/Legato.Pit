@@ -634,6 +634,191 @@ def daily_view(date: str):
     )
 
 
+# ============ Monthly Views ============
+
+@library_bp.route('/monthly')
+@login_required
+def monthly_index():
+    """Show monthly view with month picker."""
+    db = get_db()
+
+    # Get months with note counts
+    months = db.execute("""
+        SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY strftime('%Y-%m', created_at)
+        ORDER BY month DESC
+    """).fetchall()
+
+    # Get categories for sidebar
+    categories = get_categories_with_counts()
+
+    return render_template(
+        'library_monthly.html',
+        months=[dict(m) for m in months],
+        categories=categories,
+    )
+
+
+@library_bp.route('/monthly/<year_month>')
+@login_required
+def monthly_view(year_month: str):
+    """Show all notes for a specific month with calendar grid."""
+    import calendar
+
+    # Validate format YYYY-MM
+    try:
+        dt = datetime.strptime(year_month, '%Y-%m')
+    except ValueError:
+        flash('Invalid month format. Use YYYY-MM', 'error')
+        return redirect(url_for('library.monthly_index'))
+
+    db = get_db()
+
+    # Get daily counts for calendar grid
+    daily_counts = db.execute("""
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE strftime('%Y-%m', created_at) = ?
+        GROUP BY DATE(created_at)
+    """, (year_month,)).fetchall()
+
+    # Get all entries for listing
+    entries = db.execute("""
+        SELECT entry_id, title, category, created_at, chord_status
+        FROM knowledge_entries
+        WHERE strftime('%Y-%m', created_at) = ?
+        ORDER BY created_at DESC
+    """, (year_month,)).fetchall()
+
+    # Get categories for sidebar
+    categories = get_categories_with_counts()
+
+    # Navigation - previous/next months with entries
+    prev_month = db.execute("""
+        SELECT strftime('%Y-%m', created_at) as month
+        FROM knowledge_entries
+        WHERE strftime('%Y-%m', created_at) < ?
+        ORDER BY month DESC LIMIT 1
+    """, (year_month,)).fetchone()
+
+    next_month = db.execute("""
+        SELECT strftime('%Y-%m', created_at) as month
+        FROM knowledge_entries
+        WHERE strftime('%Y-%m', created_at) > ?
+        ORDER BY month ASC LIMIT 1
+    """, (year_month,)).fetchone()
+
+    # Build calendar weeks
+    cal = calendar.Calendar(firstweekday=6)  # Sunday first
+    weeks = cal.monthdays2calendar(dt.year, dt.month)
+
+    return render_template(
+        'library_monthly_view.html',
+        year_month=year_month,
+        year=dt.year,
+        month=dt.month,
+        month_name=dt.strftime('%B'),
+        daily_counts={row['date']: row['count'] for row in daily_counts},
+        weeks=weeks,
+        entries=[dict(e) for e in entries],
+        prev_month=prev_month['month'] if prev_month else None,
+        next_month=next_month['month'] if next_month else None,
+        categories=categories,
+        today=datetime.now().strftime('%Y-%m-%d'),
+    )
+
+
+# ============ Yearly Views ============
+
+@library_bp.route('/yearly')
+@login_required
+def yearly_index():
+    """Show yearly view with year picker."""
+    db = get_db()
+
+    # Get years with note counts
+    years = db.execute("""
+        SELECT strftime('%Y', created_at) as year, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY strftime('%Y', created_at)
+        ORDER BY year DESC
+    """).fetchall()
+
+    # Get categories for sidebar
+    categories = get_categories_with_counts()
+
+    return render_template(
+        'library_yearly.html',
+        years=[dict(y) for y in years],
+        categories=categories,
+    )
+
+
+@library_bp.route('/yearly/<year>')
+@login_required
+def yearly_view(year: str):
+    """Show 12-month grid for a specific year."""
+    # Validate year format
+    try:
+        year_int = int(year)
+        if year_int < 1900 or year_int > 2100:
+            raise ValueError("Year out of range")
+    except ValueError:
+        flash('Invalid year format', 'error')
+        return redirect(url_for('library.yearly_index'))
+
+    db = get_db()
+
+    # Get monthly counts for the year
+    monthly_counts = db.execute("""
+        SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE strftime('%Y', created_at) = ?
+        GROUP BY strftime('%Y-%m', created_at)
+    """, (year,)).fetchall()
+
+    # Get categories for sidebar
+    categories = get_categories_with_counts()
+
+    # Navigation - previous/next years with entries
+    prev_year = db.execute("""
+        SELECT strftime('%Y', created_at) as year
+        FROM knowledge_entries
+        WHERE strftime('%Y', created_at) < ?
+        ORDER BY year DESC LIMIT 1
+    """, (year,)).fetchone()
+
+    next_year = db.execute("""
+        SELECT strftime('%Y', created_at) as year
+        FROM knowledge_entries
+        WHERE strftime('%Y', created_at) > ?
+        ORDER BY year ASC LIMIT 1
+    """, (year,)).fetchone()
+
+    # Build month data for grid
+    months = []
+    for m in range(1, 13):
+        month_str = f"{year}-{m:02d}"
+        count = next((r['count'] for r in monthly_counts if r['month'] == month_str), 0)
+        months.append({
+            'month': month_str,
+            'name': datetime(year_int, m, 1).strftime('%B'),
+            'short_name': datetime(year_int, m, 1).strftime('%b'),
+            'count': count,
+        })
+
+    return render_template(
+        'library_yearly_view.html',
+        year=year,
+        months=months,
+        monthly_counts={row['month']: row['count'] for row in monthly_counts},
+        prev_year=prev_year['year'] if prev_year else None,
+        next_year=next_year['year'] if next_year else None,
+        categories=categories,
+    )
+
+
 @library_bp.route('/api/entries')
 @login_required
 def api_list_entries():
