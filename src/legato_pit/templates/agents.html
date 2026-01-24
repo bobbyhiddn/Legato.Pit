@@ -12,6 +12,13 @@
     .page-header h1 {
         margin-bottom: 0.25rem;
     }
+    .btn-warning {
+        background: #d29922;
+        color: #fff;
+    }
+    .btn-warning:hover {
+        background: #e3a82b;
+    }
     .agent-note-link {
         color: var(--accent-color);
         text-decoration: none;
@@ -305,7 +312,7 @@
     {% if failed_agents %}
     <section class="card">
         <h2 style="color: #f85149;">Failed Spawns</h2>
-        <p style="color: var(--text-muted); margin-bottom: 1rem;">These chords failed to spawn. You may need to <a href="{{ url_for('auth.github_app') }}">re-authenticate with GitHub</a> if your token expired.</p>
+        <p style="color: var(--text-muted); margin-bottom: 1rem;">These chords failed to spawn. You may need to <a href="{{ url_for('auth.github_app_login') }}?next=/agents/">re-authenticate with GitHub</a> if your token expired.</p>
         <div class="agent-list">
             {% for agent in failed_agents %}
             <div class="agent-item agent-failed" style="border-left: 3px solid #f85149;">
@@ -505,11 +512,14 @@ async function approveAgent(queueId) {
             item.querySelector('.agent-actions').innerHTML = '<span class="badge badge-approved">Approved - spawning...</span>';
             setTimeout(() => window.location.reload(), 2000);
         } else if (data.needs_reauth) {
-            // OAuth token expired - show re-auth prompt
-            showError('GitHub authorization expired. Redirecting to re-authenticate...');
-            setTimeout(() => {
-                window.location.href = data.reauth_url || '/auth/github-app';
-            }, 1500);
+            // OAuth token expired - swap Approve button with Re-authenticate button
+            showError('GitHub authorization expired. Please re-authenticate to continue.');
+            const actionsDiv = item.querySelector('.agent-actions');
+            const reauthUrl = (data.reauth_url || '/auth/github-app') + '?next=/agents/';
+            actionsDiv.innerHTML = `
+                <a href="${reauthUrl}" class="btn btn-warning">Re-authenticate</a>
+                <button class="btn btn-secondary" onclick="rejectAgent('${queueId}')">Reject</button>
+            `;
         } else {
             showError(data.error || 'Failed to approve');
             btn.disabled = false;
@@ -602,11 +612,10 @@ async function retrySpawn(queueId, button) {
             // Remove the failed item and reload
             setTimeout(() => window.location.reload(), 1500);
         } else if (data.needs_reauth) {
-            // OAuth token expired - redirect to re-auth
-            showError('GitHub authorization expired. Redirecting to re-authenticate...');
-            setTimeout(() => {
-                window.location.href = data.reauth_url || '/auth/github-app';
-            }, 1500);
+            // OAuth token expired - swap Retry button with Re-authenticate button
+            showError('GitHub authorization expired. Please re-authenticate to continue.');
+            const reauthUrl = (data.reauth_url || '/auth/github-app') + '?next=/agents/';
+            button.outerHTML = `<a href="${reauthUrl}" class="btn btn-warning">Re-authenticate</a>`;
         } else {
             showError(data.error || 'Spawn failed again');
             button.disabled = false;

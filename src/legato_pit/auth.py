@@ -459,6 +459,13 @@ def github_app_login():
     state = secrets.token_urlsafe(32)
     session['app_oauth_state'] = state
 
+    # Store next URL for post-auth redirect (e.g., back to agents page)
+    next_url = request.args.get('next')
+    if next_url:
+        # Basic validation - must be a relative path
+        if next_url.startswith('/') and not next_url.startswith('//'):
+            session['auth_next_url'] = next_url
+
     # Build authorization URL
     # Note: GitHub App OAuth does NOT use scopes - permissions are defined
     # in the App's settings. Including scope causes a 404 error.
@@ -603,6 +610,9 @@ def github_app_callback():
         # Trigger user-specific Library sync in background
         trigger_user_library_sync(user['user_id'], github_login)
 
+        # Check for stored next URL (e.g., returning to agents page after re-auth)
+        next_url = session.pop('auth_next_url', None)
+
         # Check if user has any installations
         db = _get_db()
         installations = db.execute(
@@ -611,11 +621,12 @@ def github_app_callback():
         ).fetchone()
 
         if installations and installations['count'] > 0:
-            # User has installations - go to dashboard
+            # User has installations
             flash(f'Welcome back, {name or github_login}!', 'success')
-            return redirect(url_for('dashboard.index'))
+            # Redirect to stored next URL or dashboard
+            return redirect(next_url or url_for('dashboard.index'))
         else:
-            # First time user - redirect to setup
+            # First time user - redirect to setup (ignore next URL for new users)
             flash(f'Welcome, {name or github_login}! Let\'s set up your Legato installation.', 'success')
             return redirect(url_for('auth.setup'))
 
