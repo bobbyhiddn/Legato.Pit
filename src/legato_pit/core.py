@@ -382,12 +382,15 @@ def create_app():
             admin_users = [u.strip() for u in admin_users if u.strip()]
             is_admin = username in admin_users
 
-        # Check trial expiration status
+        # Check trial expiration status (but not for beta users or paid tiers)
         trial_expired = False
         if 'user' in session and app.config.get('LEGATO_MODE') == 'multi-tenant':
             user_id = session['user'].get('user_id')
             if user_id:
-                trial_expired = is_trial_expired(user_id)
+                effective_tier = get_effective_tier(user_id)
+                # Only show trial expired for actual trial users, not beta/paid
+                if effective_tier == 'trial':
+                    trial_expired = is_trial_expired(user_id)
 
         return {
             'now': datetime.now(),
