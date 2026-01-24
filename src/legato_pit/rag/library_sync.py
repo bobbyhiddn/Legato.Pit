@@ -18,6 +18,38 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def _parse_frontmatter_date(date_value) -> Optional[str]:
+    """Parse a frontmatter date value to ISO format string.
+
+    Handles various formats:
+    - ISO strings: "2024-01-15T10:30:00Z"
+    - Date strings: "2024-01-15"
+    - Datetime objects
+    - None
+
+    Returns:
+        ISO format string or None
+    """
+    if not date_value:
+        return None
+
+    if isinstance(date_value, datetime):
+        return date_value.isoformat()
+
+    if isinstance(date_value, str):
+        # Already looks like ISO format
+        if 'T' in date_value or len(date_value) == 10:
+            return date_value
+        # Try parsing common formats
+        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d']:
+            try:
+                return datetime.strptime(date_value, fmt).isoformat()
+            except ValueError:
+                continue
+
+    return None
+
+
 def parse_markdown_frontmatter(content: str) -> Tuple[Dict, str]:
     """Parse YAML frontmatter from markdown content.
 
@@ -359,6 +391,14 @@ class LibrarySync:
             logger.warning(f"Invalid task_status '{task_status}' in {path}, ignoring")
             task_status = None
 
+        # Extract created/updated dates from frontmatter (use as source of truth)
+        created_at = frontmatter.get('created') or frontmatter.get('created_at')
+        updated_at = frontmatter.get('updated') or frontmatter.get('updated_at')
+
+        # Parse date strings to ISO format if needed
+        created_at = _parse_frontmatter_date(created_at)
+        updated_at = _parse_frontmatter_date(updated_at)
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -436,33 +476,33 @@ class LibrarySync:
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
                     task_status = ?, due_date = ?, content_hash = ?,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, path)
+                 task_status, due_date, content_hash, updated_at, path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
             return 'updated'
         else:
-            # Create new entry
+            # Create new entry - use frontmatter dates if available
             self.conn.execute(
                 """
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 task_status, due_date, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
                 (entry_id, title, category, body, path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash)
+                 task_status, due_date, content_hash, created_at, updated_at)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
@@ -564,6 +604,14 @@ class LibrarySync:
             logger.warning(f"Invalid task_status '{task_status}' in {relative_path}, ignoring")
             task_status = None
 
+        # Extract created/updated dates from frontmatter (use as source of truth)
+        created_at = frontmatter.get('created') or frontmatter.get('created_at')
+        updated_at = frontmatter.get('updated') or frontmatter.get('updated_at')
+
+        # Parse date strings to ISO format if needed
+        created_at = _parse_frontmatter_date(created_at)
+        updated_at = _parse_frontmatter_date(updated_at)
+
         # Extract topic tags - stored as JSON strings
         import json
         domain_tags_raw = frontmatter.get('domain_tags')
@@ -629,32 +677,33 @@ class LibrarySync:
                     chord_id = ?, chord_status = ?, chord_repo = ?,
                     domain_tags = ?, key_phrases = ?, source_transcript = ?,
                     task_status = ?, due_date = ?, content_hash = ?,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                 WHERE file_path = ?
                 """,
                 (entry_id, title, category, body,
                  needs_chord, chord_name, chord_scope,
                  final_chord_id, final_chord_status, final_chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, relative_path)
+                 task_status, due_date, content_hash, updated_at, relative_path)
             )
             self.conn.commit()
             logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
             return 'updated'
         else:
+            # Create new entry - use frontmatter dates if available
             self.conn.execute(
                 """
                 INSERT INTO knowledge_entries
                 (entry_id, title, category, content, file_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 task_status, due_date, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
                 (entry_id, title, category, body, relative_path,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash)
+                 task_status, due_date, content_hash, created_at, updated_at)
             )
             self.conn.commit()
             logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))

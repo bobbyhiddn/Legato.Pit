@@ -1476,18 +1476,16 @@ def get_user_installation_token(user_id: str, repo_type: str = 'library') -> Opt
         return token_manager.get_token(installation_id)
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
-            # Installation no longer exists on GitHub - clear stale data
-            logger.warning(f"Installation {installation_id} not found on GitHub, clearing stale data")
-            _clear_stale_installation(user_id, installation_id, db)
-            raise StaleInstallationError(user_id, installation_id)
+            # Installation not found - could be transient, don't clear immediately
+            # Just log and return None so caller can handle gracefully
+            logger.warning(f"Installation {installation_id} returned 404 - may be transient or actually removed")
+            # Don't clear installation data on first 404 - could be GitHub hiccup
+            # User can manually re-auth if it's truly gone
+            return None
         logger.error(f"Failed to get installation token: {e}")
         return None
     except Exception as e:
-        # Check if it's a wrapped 404
-        if '404' in str(e):
-            logger.warning(f"Installation {installation_id} appears stale (404 in error), clearing")
-            _clear_stale_installation(user_id, installation_id, db)
-            raise StaleInstallationError(user_id, installation_id)
+        # Log the error but don't clear installation data
         logger.error(f"Failed to get installation token: {e}")
         return None
 
