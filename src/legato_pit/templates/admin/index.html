@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Console - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .admin-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .admin-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border-color, #30363d);
+    }
+    .admin-header h1 {
+        color: var(--text-primary, #e6edf3);
+        margin: 0;
+    }
+    .admin-nav {
+        display: flex;
+        gap: 1rem;
+    }
+    .admin-nav a {
+        color: var(--text-secondary, #8b949e);
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        transition: background 0.2s;
+    }
+    .admin-nav a:hover, .admin-nav a.active {
+        background: var(--bg-secondary, #21262d);
+        color: var(--text-primary, #e6edf3);
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    .stat-card {
+        background: var(--bg-secondary, #21262d);
+        padding: 1.5rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color, #30363d);
+    }
+    .stat-card h3 {
+        color: var(--text-secondary, #8b949e);
+        font-size: 0.875rem;
+        margin: 0 0 0.5rem 0;
+        text-transform: uppercase;
+    }
+    .stat-card .value {
+        color: var(--text-primary, #e6edf3);
+        font-size: 2rem;
+        font-weight: 600;
+    }
+    .users-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--bg-secondary, #21262d);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .users-table th, .users-table td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color, #30363d);
+    }
+    .users-table th {
+        background: var(--bg-tertiary, #161b22);
+        color: var(--text-secondary, #8b949e);
+        font-weight: 500;
+        font-size: 0.875rem;
+        text-transform: uppercase;
+    }
+    .users-table td {
+        color: var(--text-primary, #e6edf3);
+    }
+    .users-table tr:hover {
+        background: var(--bg-tertiary, #161b22);
+    }
+    .tier-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    .tier-free { background: #6e7681; color: #fff; }
+    .tier-beta { background: #238636; color: #fff; }
+    .tier-starter { background: #1f6feb; color: #fff; }
+    .tier-pro { background: #8957e5; color: #fff; }
+    .tier-founder { background: #da3633; color: #fff; }
+    .copilot-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
+    .copilot-yes { background: #238636; color: #fff; }
+    .copilot-no { background: #6e7681; color: #fff; }
+    .tier-select {
+        background: var(--bg-tertiary, #161b22);
+        color: var(--text-primary, #e6edf3);
+        border: 1px solid var(--border-color, #30363d);
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+    }
+    .action-btn {
+        background: var(--bg-tertiary, #161b22);
+        color: var(--text-primary, #e6edf3);
+        border: 1px solid var(--border-color, #30363d);
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        margin-left: 0.5rem;
+    }
+    .action-btn:hover {
+        background: var(--bg-secondary, #21262d);
+    }
+    .user-link {
+        color: var(--accent-color, #58a6ff);
+        text-decoration: none;
+    }
+    .user-link:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Admin Console</h1>
+        <nav class="admin-nav">
+            <a href="{{ url_for('admin.index') }}" class="active">Users</a>
+            <a href="{{ url_for('admin.system_status') }}">System</a>
+            <a href="{{ url_for('admin.logout') }}" style="color: #f85149;">Logout</a>
+        </nav>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <h3>Total Users</h3>
+            <div class="value">{{ stats.total_users }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Copilot Enabled</h3>
+            <div class="value">{{ stats.users_with_copilot }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Paid Users</h3>
+            <div class="value">{{ stats.paid_users }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Pending Agents</h3>
+            <div class="value">{{ stats.agents.get('pending', 0) }}</div>
+        </div>
+    </div>
+
+    <h2 style="color: var(--text-primary); margin-bottom: 1rem;">Users</h2>
+    <table class="users-table">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Tier</th>
+                <th>Copilot</th>
+                <th>Repos</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('admin.user_detail', user_id=user.user_id) }}" class="user-link">
+                        {{ user.github_login }}
+                    </a>
+                </td>
+                <td>{{ user.email or '-' }}</td>
+                <td>
+                    <select class="tier-select" onchange="setTier('{{ user.user_id }}', this.value)" data-current="{{ user.tier or 'free' }}">
+                        <option value="free" {% if user.tier == 'free' or not user.tier %}selected{% endif %}>Free</option>
+                        <option value="beta" {% if user.tier == 'beta' %}selected{% endif %}>Beta</option>
+                        <option value="starter" {% if user.tier == 'starter' %}selected{% endif %}>Starter</option>
+                        <option value="pro" {% if user.tier == 'pro' %}selected{% endif %}>Pro</option>
+                        <option value="founder" {% if user.tier == 'founder' %}selected{% endif %}>Founder</option>
+                    </select>
+                </td>
+                <td>
+                    <button class="copilot-badge {% if user.has_copilot %}copilot-yes{% else %}copilot-no{% endif %}"
+                            onclick="toggleCopilot('{{ user.user_id }}', {{ 'false' if user.has_copilot else 'true' }})">
+                        {{ 'Yes' if user.has_copilot else 'No' }}
+                    </button>
+                </td>
+                <td>{{ user.repo_count }}</td>
+                <td>{{ user.last_login[:10] if user.last_login else '-' }}</td>
+                <td>
+                    <a href="{{ url_for('admin.user_detail', user_id=user.user_id) }}" class="action-btn">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+async function setTier(userId, tier) {
+    try {
+        const resp = await fetch(`/admin/api/user/${userId}/tier`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tier})
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        // Visual feedback
+        const select = document.querySelector(`select[data-current]`);
+        if (select) select.dataset.current = tier;
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function toggleCopilot(userId, enable) {
+    try {
+        const resp = await fetch(`/admin/api/user/${userId}/copilot`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({has_copilot: enable})
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        // Reload to show updated state
+        location.reload();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+</script>
+{% endblock %}

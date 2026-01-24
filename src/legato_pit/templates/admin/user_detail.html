@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}User: {{ user.github_login }} - Admin - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .admin-container {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .back-link {
+        color: var(--text-secondary, #8b949e);
+        text-decoration: none;
+        display: inline-block;
+        margin-bottom: 1rem;
+    }
+    .back-link:hover {
+        color: var(--text-primary, #e6edf3);
+    }
+    .user-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 2rem;
+    }
+    .user-header h1 {
+        color: var(--text-primary, #e6edf3);
+        margin: 0 0 0.5rem 0;
+    }
+    .user-id {
+        color: var(--text-secondary, #8b949e);
+        font-size: 0.875rem;
+        font-family: monospace;
+    }
+    .section {
+        background: var(--bg-secondary, #21262d);
+        border-radius: 8px;
+        border: 1px solid var(--border-color, #30363d);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .section h2 {
+        color: var(--text-primary, #e6edf3);
+        font-size: 1.125rem;
+        margin: 0 0 1rem 0;
+    }
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+    .info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    .info-item label {
+        color: var(--text-secondary, #8b949e);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+    }
+    .info-item span {
+        color: var(--text-primary, #e6edf3);
+    }
+    .item-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .item-list li {
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--border-color, #30363d);
+        color: var(--text-primary, #e6edf3);
+    }
+    .item-list li:last-child {
+        border-bottom: none;
+    }
+    .delete-btn {
+        background: #da3633;
+        color: #fff;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.875rem;
+    }
+    .delete-btn:hover {
+        background: #f85149;
+    }
+    .tier-badge, .copilot-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .tier-free { background: #6e7681; color: #fff; }
+    .tier-beta { background: #238636; color: #fff; }
+    .tier-starter { background: #1f6feb; color: #fff; }
+    .tier-pro { background: #8957e5; color: #fff; }
+    .tier-founder { background: #da3633; color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <a href="{{ url_for('admin.index') }}" class="back-link">&larr; Back to Users</a>
+
+    <div class="user-header">
+        <div>
+            <h1>{{ user.github_login }}</h1>
+            <div class="user-id">{{ user.user_id }}</div>
+        </div>
+        <button class="delete-btn" onclick="deleteUser()">Delete User</button>
+    </div>
+
+    <div class="section">
+        <h2>Account Info</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <label>Email</label>
+                <span>{{ user.email or '-' }}</span>
+            </div>
+            <div class="info-item">
+                <label>GitHub ID</label>
+                <span>{{ user.github_id }}</span>
+            </div>
+            <div class="info-item">
+                <label>Tier</label>
+                <span class="tier-badge tier-{{ user.tier or 'free' }}">{{ user.tier or 'free' }}</span>
+            </div>
+            <div class="info-item">
+                <label>Copilot</label>
+                <span>{{ 'Enabled' if user.has_copilot else 'Disabled' }}</span>
+            </div>
+            <div class="info-item">
+                <label>Created</label>
+                <span>{{ user.created_at[:19] if user.created_at else '-' }}</span>
+            </div>
+            <div class="info-item">
+                <label>Last Login</label>
+                <span>{{ user.last_login[:19] if user.last_login else '-' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Installations ({{ user.installations|length }})</h2>
+        {% if user.installations %}
+        <ul class="item-list">
+            {% for inst in user.installations %}
+            <li>
+                Installation #{{ inst.installation_id }}
+                <span style="color: var(--text-secondary); font-size: 0.875rem;">
+                    - Added {{ inst.created_at[:10] if inst.created_at else 'unknown' }}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color: var(--text-secondary);">No installations</p>
+        {% endif %}
+    </div>
+
+    <div class="section">
+        <h2>Repositories ({{ user.repos|length }})</h2>
+        {% if user.repos %}
+        <ul class="item-list">
+            {% for repo in user.repos %}
+            <li>
+                <strong>{{ repo.repo_full_name }}</strong>
+                <span style="color: var(--text-secondary); font-size: 0.875rem;">
+                    ({{ repo.repo_type }})
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color: var(--text-secondary);">No repositories configured</p>
+        {% endif %}
+    </div>
+
+    <div class="section">
+        <h2>Recent Agents ({{ user.agents|length }})</h2>
+        {% if user.agents %}
+        <ul class="item-list">
+            {% for agent in user.agents %}
+            <li>
+                <strong>{{ agent.project_name }}</strong>
+                <span style="color: var(--text-secondary); font-size: 0.875rem;">
+                    - {{ agent.status }} - {{ agent.created_at[:10] if agent.created_at else '' }}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color: var(--text-secondary);">No agents</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+async function deleteUser() {
+    if (!confirm('Are you sure you want to delete this user? This cannot be undone.')) {
+        return;
+    }
+    if (!confirm('This will delete ALL user data including their Library database. Continue?')) {
+        return;
+    }
+
+    try {
+        const resp = await fetch('/admin/api/user/{{ user.user_id }}/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        alert('User deleted');
+        window.location.href = '/admin/';
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+</script>
+{% endblock %}

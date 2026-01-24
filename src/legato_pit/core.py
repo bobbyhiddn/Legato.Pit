@@ -113,6 +113,7 @@ def create_app():
     from .oauth_server import oauth_bp
     from .mcp_server import mcp_bp
     from .motif_api import motif_api_bp
+    from .admin import admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -126,6 +127,7 @@ def create_app():
     app.register_blueprint(oauth_bp)  # OAuth 2.1 AS with DCR for MCP
     app.register_blueprint(mcp_bp)    # MCP protocol handler
     app.register_blueprint(motif_api_bp)  # Motif processing with job queue
+    app.register_blueprint(admin_bp)  # Admin console
 
     # Initialize all databases on startup
     with app.app_context():
@@ -335,12 +337,23 @@ def create_app():
     # Context processor for templates
     @app.context_processor
     def inject_globals():
+        # Check if current user is admin (bootstrap auth OR GitHub user in list)
+        is_admin = False
+        if session.get('admin_authenticated'):
+            is_admin = True
+        elif 'user' in session:
+            username = session['user'].get('login') or session['user'].get('username')
+            admin_users = app.config.get('ADMIN_USERS', '').split(',') if app.config.get('ADMIN_USERS') else ['bobbyhiddn']
+            admin_users = [u.strip() for u in admin_users if u.strip()]
+            is_admin = username in admin_users
+
         return {
             'now': datetime.now(),
             'app_name': app.config['APP_NAME'],
             'app_description': app.config['APP_DESCRIPTION'],
             'user': session.get('user'),
-            'is_authenticated': 'user' in session
+            'is_authenticated': 'user' in session,
+            'is_admin': is_admin
         }
 
     # Root redirect

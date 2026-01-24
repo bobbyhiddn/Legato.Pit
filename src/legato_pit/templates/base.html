@@ -41,6 +41,12 @@
                                 <span class="user-menu-username">@{{ user.username }}</span>
                             </div>
                             <div class="user-menu-divider"></div>
+                            {% if is_admin %}
+                            <a href="{{ url_for('admin.index') }}" class="user-menu-item">
+                                <span class="user-menu-icon">&#9733;</span>
+                                Admin
+                            </a>
+                            {% endif %}
                             <a href="{{ url_for('auth.setup') }}" class="user-menu-item">
                                 <span class="user-menu-icon">&#9881;</span>
                                 Settings

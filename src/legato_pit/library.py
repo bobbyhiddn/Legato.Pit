@@ -1594,6 +1594,7 @@ def api_create_note():
     import hashlib
     import re
     from datetime import datetime
+    from flask import session
     from .rag.database import get_user_categories
     from .rag.github_service import create_file
 

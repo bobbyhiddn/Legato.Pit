@@ -1,0 +1,350 @@
+"""
+Admin Console for Legato.Pit
+
+Provides admin-only views for:
+- User management (tiers, status)
+- System status
+- Configuration
+
+Authentication:
+- Bootstrap: ADMIN_USERNAME + ADMIN_PASSWORD env vars for initial access
+- After setup: GitHub users in ADMIN_USERS list can access
+"""
+
+import logging
+import secrets
+from functools import wraps
+
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, current_app
+
+logger = logging.getLogger(__name__)
+
+admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
+
+# Admin users - can be overridden via ADMIN_USERS env var (comma-separated)
+DEFAULT_ADMINS = ['bobbyhiddn']
+
+
+def get_admin_users() -> list[str]:
+    """Get list of admin usernames."""
+    env_admins = current_app.config.get('ADMIN_USERS', '')
+    if env_admins:
+        return [u.strip() for u in env_admins.split(',') if u.strip()]
+    return DEFAULT_ADMINS
+
+
+def is_admin() -> bool:
+    """Check if current session has admin access.
+
+    Admin access is granted if:
+    1. Session has admin_authenticated=True (from bootstrap login), OR
+    2. Logged-in GitHub user is in the admin users list
+    """
+    # Check bootstrap admin auth
+    if session.get('admin_authenticated'):
+        return True
+
+    # Check GitHub user in admin list
+    if 'user' in session:
+        username = session['user'].get('login') or session['user'].get('username')
+        if username in get_admin_users():
+            return True
+
+    return False
+
+
+def admin_required(f):
+    """Decorator requiring admin access."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_admin():
+            # Redirect to admin login
+            return redirect(url_for('admin.login'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@admin_bp.route('/login', methods=['GET', 'POST'])
+def login():
+    """Admin login page - bootstrap access with username/password."""
+    # Already authenticated?
+    if is_admin():
+        return redirect(url_for('admin.index'))
+
+    error = None
+
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+
+        # Get credentials from env
+        admin_username = current_app.config.get('ADMIN_USERNAME')
+        admin_password = current_app.config.get('ADMIN_PASSWORD')
+
+        if not admin_username or not admin_password:
+            error = 'Admin credentials not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD env vars.'
+            logger.warning("Admin login attempted but credentials not configured")
+        elif username == admin_username and secrets.compare_digest(password, admin_password):
+            session['admin_authenticated'] = True
+            logger.info(f"Admin login successful for {username}")
+            return redirect(url_for('admin.index'))
+        else:
+            error = 'Invalid credentials'
+            logger.warning(f"Failed admin login attempt for username: {username}")
+
+    return render_template('admin/login.html', error=error)
+
+
+@admin_bp.route('/logout')
+def logout():
+    """Clear admin session."""
+    session.pop('admin_authenticated', None)
+    flash('Admin session ended.', 'info')
+    return redirect(url_for('admin.login'))
+
+
+@admin_bp.route('/')
+@admin_required
+def index():
+    """Admin dashboard - overview and user list."""
+    from .rag.database import init_db
+
+    db = init_db()
+
+    # Get all users with their details
+    users = db.execute("""
+        SELECT
+            u.user_id,
+            u.github_id,
+            u.github_login,
+            u.email,
+            u.tier,
+            u.has_copilot,
+            u.created_at,
+            u.last_login,
+            (SELECT COUNT(*) FROM github_app_installations WHERE user_id = u.user_id) as installation_count,
+            (SELECT COUNT(*) FROM user_repos WHERE user_id = u.user_id) as repo_count
+        FROM users u
+        ORDER BY u.last_login DESC NULLS LAST
+    """).fetchall()
+
+    users = [dict(u) for u in users]
+
+    # Get system stats
+    stats = {
+        'total_users': len(users),
+        'users_with_copilot': sum(1 for u in users if u.get('has_copilot')),
+        'paid_users': sum(1 for u in users if u.get('tier') and u['tier'] != 'free'),
+    }
+
+    # Get agent queue stats
+    try:
+        from .rag.database import get_agents_db
+        agents_db = get_agents_db()
+        agent_stats = agents_db.execute("""
+            SELECT status, COUNT(*) as count
+            FROM agent_queue
+            GROUP BY status
+        """).fetchall()
+        stats['agents'] = {row['status']: row['count'] for row in agent_stats}
+    except Exception as e:
+        logger.warning(f"Could not get agent stats: {e}")
+        stats['agents'] = {}
+
+    return render_template('admin/index.html', users=users, stats=stats)
+
+
+@admin_bp.route('/user/<user_id>')
+@admin_required
+def user_detail(user_id: str):
+    """View detailed info for a specific user."""
+    from .rag.database import init_db
+
+    db = init_db()
+
+    user = db.execute("""
+        SELECT * FROM users WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    if not user:
+        flash('User not found.', 'error')
+        return redirect(url_for('admin.index'))
+
+    user = dict(user)
+
+    # Get user's installations
+    installations = db.execute("""
+        SELECT * FROM github_app_installations WHERE user_id = ?
+    """, (user_id,)).fetchall()
+    user['installations'] = [dict(i) for i in installations]
+
+    # Get user's repos
+    repos = db.execute("""
+        SELECT * FROM user_repos WHERE user_id = ?
+    """, (user_id,)).fetchall()
+    user['repos'] = [dict(r) for r in repos]
+
+    # Get user's agents
+    try:
+        from .rag.database import get_agents_db
+        agents_db = get_agents_db()
+        agents = agents_db.execute("""
+            SELECT queue_id, project_name, status, created_at, approved_at
+            FROM agent_queue
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        """, (user_id,)).fetchall()
+        user['agents'] = [dict(a) for a in agents]
+    except Exception:
+        user['agents'] = []
+
+    return render_template('admin/user_detail.html', user=user)
+
+
+@admin_bp.route('/api/user/<user_id>/tier', methods=['POST'])
+@admin_required
+def api_set_user_tier(user_id: str):
+    """Set a user's subscription tier."""
+    from .rag.database import init_db
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    tier = data.get('tier', '').strip()
+    valid_tiers = ['free', 'beta', 'starter', 'pro', 'founder']
+
+    if tier not in valid_tiers:
+        return jsonify({'error': f'Invalid tier. Must be one of: {", ".join(valid_tiers)}'}), 400
+
+    db = init_db()
+
+    # Check user exists
+    user = db.execute("SELECT github_login FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    db.execute("UPDATE users SET tier = ? WHERE user_id = ?", (tier, user_id))
+    db.commit()
+
+    logger.info(f"Admin set tier for {user['github_login']} to {tier}")
+
+    return jsonify({
+        'status': 'success',
+        'user_id': user_id,
+        'tier': tier,
+    })
+
+
+@admin_bp.route('/api/user/<user_id>/copilot', methods=['POST'])
+@admin_required
+def api_set_user_copilot(user_id: str):
+    """Toggle a user's Copilot access."""
+    from .rag.database import init_db
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    has_copilot = bool(data.get('has_copilot', False))
+
+    db = init_db()
+
+    user = db.execute("SELECT github_login FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    db.execute("UPDATE users SET has_copilot = ? WHERE user_id = ?", (has_copilot, user_id))
+    db.commit()
+
+    logger.info(f"Admin set has_copilot for {user['github_login']} to {has_copilot}")
+
+    return jsonify({
+        'status': 'success',
+        'user_id': user_id,
+        'has_copilot': has_copilot,
+    })
+
+
+@admin_bp.route('/api/user/<user_id>/delete', methods=['POST'])
+@admin_required
+def api_delete_user(user_id: str):
+    """Delete a user and all their data."""
+    from .rag.database import init_db, get_user_db_path
+    import os
+
+    db = init_db()
+
+    user = db.execute("SELECT github_login FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    username = user['github_login']
+
+    # Delete from shared tables
+    db.execute("DELETE FROM user_repos WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM github_app_installations WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    db.commit()
+
+    # Delete user's database file
+    user_db_path = get_user_db_path(user_id)
+    if user_db_path and user_db_path.exists():
+        try:
+            os.remove(user_db_path)
+            logger.info(f"Deleted user database: {user_db_path}")
+        except Exception as e:
+            logger.error(f"Failed to delete user database: {e}")
+
+    # Delete from agents db
+    try:
+        from .rag.database import get_agents_db
+        agents_db = get_agents_db()
+        agents_db.execute("DELETE FROM agent_queue WHERE user_id = ?", (user_id,))
+        agents_db.commit()
+    except Exception as e:
+        logger.warning(f"Could not delete user agents: {e}")
+
+    logger.info(f"Admin deleted user: {username} ({user_id})")
+
+    return jsonify({
+        'status': 'success',
+        'message': f'User {username} deleted',
+    })
+
+
+@admin_bp.route('/system')
+@admin_required
+def system_status():
+    """System status and configuration."""
+    import os
+    from pathlib import Path
+
+    status = {
+        'mode': current_app.config.get('LEGATO_MODE', 'unknown'),
+        'debug': current_app.debug,
+        'env': os.environ.get('FLASK_ENV', 'unknown'),
+    }
+
+    # Check database files
+    data_path = Path(os.environ.get('FLY_VOLUME_PATH', '/data'))
+    if data_path.exists():
+        db_files = list(data_path.glob('*.db'))
+        status['databases'] = [
+            {'name': f.name, 'size_mb': round(f.stat().st_size / 1024 / 1024, 2)}
+            for f in db_files
+        ]
+    else:
+        status['databases'] = []
+
+    # Check config
+    status['config'] = {
+        'LEGATO_ORG': current_app.config.get('LEGATO_ORG', 'not set'),
+        'GITHUB_APP_ID': bool(current_app.config.get('GITHUB_APP_ID')),
+        'OPENAI_API_KEY': bool(current_app.config.get('OPENAI_API_KEY')),
+        'ANTHROPIC_API_KEY': bool(current_app.config.get('ANTHROPIC_API_KEY')),
+    }
+
+    return render_template('admin/system.html', status=status)
