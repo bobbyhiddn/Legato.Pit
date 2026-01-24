@@ -1759,9 +1759,26 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
     oauth_token = session.get('github_token')
     if oauth_token:
         logger.info(f"Found OAuth token in session for user {user_id} (len={len(oauth_token)}, prefix={oauth_token[:10] if len(oauth_token) > 10 else 'N/A'}...)")
-        return oauth_token
 
-    logger.info(f"No session token, checking database for user {user_id}")
+        # Validate session token is still working
+        import requests
+        try:
+            test_resp = requests.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {oauth_token}", "Accept": "application/vnd.github+json"},
+                timeout=5
+            )
+            if test_resp.status_code == 200:
+                return oauth_token
+            else:
+                logger.warning(f"Session token invalid (status {test_resp.status_code}), clearing from session")
+                session.pop('github_token', None)
+                # Fall through to database/refresh logic
+        except Exception as e:
+            logger.warning(f"Failed to validate session token: {e}")
+            # Fall through to database/refresh logic
+
+    logger.info(f"No valid session token, checking database for user {user_id}")
 
     # Try database
     from .crypto import decrypt_for_user, encrypt_for_user

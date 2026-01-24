@@ -787,7 +787,18 @@ def api_approve_agent(queue_id: str):
 
         # Set status based on spawn result
         spawn_success = dispatch_result.get('success', False)
+        spawn_error = dispatch_result.get('error', '')
         new_status = 'spawned' if spawn_success else 'spawn_failed'
+
+        # Check if failure was due to token issues - prompt reauth
+        if not spawn_success and ('re-authenticate' in spawn_error.lower() or '401' in spawn_error):
+            # Clear the invalid session token
+            session.pop('github_token', None)
+            return jsonify({
+                'error': 'GitHub authorization expired. Please re-authenticate to approve agents.',
+                'needs_reauth': True,
+                'reauth_url': '/auth/github-app-login'
+            }), 401
 
         # Update agent queue status
         agents_db.execute(
@@ -948,7 +959,17 @@ def api_retry_spawn(queue_id: str):
         dispatch_result = trigger_spawn_workflow(agent, user_id=user_id)
 
         spawn_success = dispatch_result.get('success', False)
+        spawn_error = dispatch_result.get('error', '')
         new_status = 'spawned' if spawn_success else 'spawn_failed'
+
+        # Check if failure was due to token issues - prompt reauth
+        if not spawn_success and ('re-authenticate' in spawn_error.lower() or '401' in spawn_error):
+            session.pop('github_token', None)
+            return jsonify({
+                'error': 'GitHub authorization expired. Please re-authenticate to retry spawning.',
+                'needs_reauth': True,
+                'reauth_url': '/auth/github-app-login'
+            }), 401
 
         # Update status
         agents_db.execute(

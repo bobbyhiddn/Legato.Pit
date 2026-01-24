@@ -644,7 +644,7 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events(user_id, timestamp)")
 
     conn.commit()
-    logger.info(f"Legato database initialized at {path}")
+    logger.debug(f"Legato database initialized at {path}")
 
     return conn
 
@@ -788,7 +788,7 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_run ON sync_history(run_id)")
 
     conn.commit()
-    logger.info(f"Agents database initialized at {path}")
+    logger.debug(f"Agents database initialized at {path}")
 
     return conn
 
@@ -837,7 +837,7 @@ def init_chat_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
 
     conn.commit()
-    logger.info(f"Chat database initialized at {path}")
+    logger.debug(f"Chat database initialized at {path}")
 
     return conn
 
