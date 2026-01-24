@@ -143,6 +143,31 @@
         min-height: 0;
     }
 
+    /* Custom scrollbar for legend */
+    .legend-items::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .legend-items::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+    }
+
+    .legend-items::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 3px;
+    }
+
+    .legend-items::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Firefox scrollbar */
+    .legend-items {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.2) rgba(255, 255, 255, 0.05);
+    }
+
     .legend-header {
         display: flex;
         justify-content: space-between;
