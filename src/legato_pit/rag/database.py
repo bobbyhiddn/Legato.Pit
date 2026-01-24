@@ -16,10 +16,16 @@ Archive databases (for future):
 import os
 import sqlite3
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Track which databases have been initialized to avoid re-running migrations
+# This prevents lock contention when multiple threads/workers call init_db
+_initialized_dbs: set = set()
+_init_lock = threading.Lock()
 
 # Default database path - can be overridden by FLY_VOLUME_PATH
 DEFAULT_DB_DIR = Path(__file__).parent.parent.parent.parent / "data"
@@ -121,6 +127,15 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         path = get_db_path("legato.db")
 
     conn = get_connection(path)
+
+    # Check if this database has already been initialized in this process
+    # This prevents running migrations multiple times and causing lock contention
+    db_key = str(path)
+    with _init_lock:
+        if db_key in _initialized_dbs:
+            return conn
+        _initialized_dbs.add(db_key)
+
     cursor = conn.cursor()
 
     # Knowledge entries from Library
@@ -731,6 +746,14 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """
     path = db_path or get_db_path("agents.db")
     conn = get_connection(path)
+
+    # Check if already initialized to avoid lock contention
+    db_key = str(path)
+    with _init_lock:
+        if db_key in _initialized_dbs:
+            return conn
+        _initialized_dbs.add(db_key)
+
     cursor = conn.cursor()
 
     # Agent queue for pending project spawns
@@ -804,6 +827,14 @@ def init_chat_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """
     path = db_path or get_db_path("chat.db")
     conn = get_connection(path)
+
+    # Check if already initialized to avoid lock contention
+    db_key = str(path)
+    with _init_lock:
+        if db_key in _initialized_dbs:
+            return conn
+        _initialized_dbs.add(db_key)
+
     cursor = conn.cursor()
 
     # Chat sessions

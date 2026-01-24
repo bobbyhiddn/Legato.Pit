@@ -237,6 +237,7 @@ class MotifWorker:
             'connection',
             'temporary',
             'overloaded',
+            'database is locked',  # SQLite contention
             '529',  # Anthropic overloaded
             '503',  # Service unavailable
         ]
