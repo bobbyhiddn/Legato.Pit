@@ -782,6 +782,7 @@
         async function updateAgentBadge() {
             try {
                 const response = await fetch('/agents/api/pending-count');
+                if (!response.ok) return; // Silently fail if not authorized
                 const data = await response.json();
                 const badge = document.getElementById('agentQueueBadge');
                 if (badge && data.count > 0) {
@@ -791,7 +792,7 @@
                     badge.style.display = 'none';
                 }
             } catch (error) {
-                console.error('Failed to fetch agent count:', error);
+                // Silently ignore - user may not have access
             }
         }
 

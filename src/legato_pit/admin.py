@@ -140,8 +140,8 @@ def index():
 
     # Get agent queue stats
     try:
-        from .rag.database import get_agents_db
-        agents_db = get_agents_db()
+        from .rag.database import init_agents_db
+        agents_db = init_agents_db()
         agent_stats = agents_db.execute("""
             SELECT status, COUNT(*) as count
             FROM agent_queue
@@ -187,8 +187,8 @@ def user_detail(user_id: str):
 
     # Get user's agents
     try:
-        from .rag.database import get_agents_db
-        agents_db = get_agents_db()
+        from .rag.database import init_agents_db
+        agents_db = init_agents_db()
         agents = agents_db.execute("""
             SELECT queue_id, project_name, status, created_at, approved_at
             FROM agent_queue
@@ -300,8 +300,8 @@ def api_delete_user(user_id: str):
 
     # Delete from agents db
     try:
-        from .rag.database import get_agents_db
-        agents_db = get_agents_db()
+        from .rag.database import init_agents_db
+        agents_db = init_agents_db()
         agents_db.execute("DELETE FROM agent_queue WHERE user_id = ?", (user_id,))
         agents_db.commit()
     except Exception as e:
