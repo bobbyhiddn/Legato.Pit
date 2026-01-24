@@ -437,6 +437,59 @@
         text-decoration: underline;
     }
 
+    /* Motif Jobs */
+    .motif-jobs-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .motif-job-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        font-size: 0.85rem;
+    }
+
+    .motif-job-item .job-id {
+        font-family: monospace;
+        color: var(--text-secondary);
+    }
+
+    .motif-job-item .job-notes {
+        margin-left: auto;
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+    }
+
+    .motif-job-item .job-error {
+        margin-left: auto;
+        cursor: help;
+    }
+
+    .motif-job-item .badge-completed {
+        background: var(--color-success, #238636);
+        color: white;
+    }
+
+    .motif-job-item .badge-processing {
+        background: var(--color-warning, #9e6a03);
+        color: white;
+    }
+
+    .motif-job-item .badge-pending {
+        background: var(--text-secondary);
+        color: var(--bg-primary);
+    }
+
+    .motif-job-item .badge-failed {
+        background: var(--color-danger, #da3633);
+        color: white;
+    }
+
     /* Mini Calendar */
     .calendar-card h2 {
         text-align: center;
@@ -740,20 +793,25 @@
         {% endif %}
         </section>
 
-        <!-- Recent Artifacts -->
+        <!-- Recent Motif Jobs -->
         <section class="card">
-            <h2>Recent Artifacts</h2>
-            {% if recent_artifacts %}
-            <div class="artifact-list">
-                {% for artifact in recent_artifacts %}
-                <div class="artifact-item">
-                    <span class="artifact-name">{{ artifact.name }}</span>
-                    <span class="badge badge-{{ artifact.category }}">{{ artifact.category }}</span>
+            <h2>Recent Motif Jobs</h2>
+            {% if recent_motif_jobs %}
+            <div class="motif-jobs-list">
+                {% for job in recent_motif_jobs %}
+                <div class="motif-job-item">
+                    <span class="job-id">{{ job.job_id }}</span>
+                    <span class="badge badge-{{ job.status }}">{{ job.status }}</span>
+                    {% if job.status == 'completed' %}
+                    <span class="job-notes">{{ job.notes_created }} note{{ 's' if job.notes_created != 1 else '' }}</span>
+                    {% elif job.error %}
+                    <span class="job-error" title="{{ job.error }}">⚠</span>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="empty-state">No artifacts yet</p>
+            <p class="empty-state">No motif jobs yet</p>
             {% endif %}
         </section>
     </div>

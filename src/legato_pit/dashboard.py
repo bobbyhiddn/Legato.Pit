@@ -1,7 +1,7 @@
 """
 Dashboard for Legato.Pit
 
-Displays LEGATO system status, recent jobs, and artifacts.
+Displays LEGATO system status, recent notes, and motif processing jobs.
 Uses server-side GitHub API calls with user installation tokens.
 """
 import logging
@@ -15,42 +15,6 @@ from .core import login_required, library_required
 logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
-
-
-def trigger_library_sync_if_new_artifacts(artifacts):
-    """Trigger library sync if there are new artifacts.
-
-    Compares dashboard artifacts with local DB to detect new files.
-    """
-    if not artifacts:
-        return
-
-    try:
-        from flask import g
-        from .rag.database import get_user_legato_db
-
-        db = get_user_legato_db()
-
-        # Get known file paths from local DB
-        rows = db.execute("SELECT file_path FROM knowledge_entries WHERE file_path IS NOT NULL").fetchall()
-        known_paths = {row['file_path'] for row in rows}
-
-        # Check if any dashboard artifacts are not in local DB
-        new_found = False
-        for artifact in artifacts:
-            if artifact.get('path') and artifact['path'] not in known_paths:
-                new_found = True
-                break
-
-        if new_found:
-            # Import and trigger sync from library module
-            from .library import should_sync, trigger_background_sync
-            if should_sync():
-                logger.info("Dashboard detected new artifacts, triggering library sync")
-                trigger_background_sync()
-
-    except Exception as e:
-        logger.warning(f"Error checking for new artifacts: {e}")
 
 # Repository names
 REPOS = {
@@ -201,50 +165,49 @@ def get_recent_jobs(limit=5):
     return jobs
 
 
-def get_recent_artifacts(limit=5):
-    """Get recent artifacts from Library."""
-    from .core import get_user_library_repo
+def get_recent_motif_jobs(limit=5):
+    """Get recent motif processing jobs for the current user.
 
-    library_repo = get_user_library_repo()
+    Args:
+        limit: Maximum number of jobs to return
 
-    commits = github_api(f'/repos/{library_repo}/commits?per_page=20')
+    Returns:
+        List of job dicts with job_id, status, notes_created, created_at, error
+    """
+    from flask import session
+    from .rag.database import init_db
 
-    if not commits:
+    user = session.get('user')
+    if not user or not user.get('user_id'):
         return []
 
-    artifacts = []
-    seen_files = set()
+    user_id = user['user_id']
+    db = init_db()  # Shared DB has processing_jobs
 
-    for commit in commits:
-        if len(artifacts) >= limit:
-            break
+    rows = db.execute("""
+        SELECT job_id, status, result_entry_ids, error_message, created_at, completed_at
+        FROM processing_jobs
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+    """, (user_id, limit)).fetchall()
 
-        details = github_api(f'/repos/{library_repo}/commits/{commit["sha"]}')
-        if not details or not details.get('files'):
-            continue
+    jobs = []
+    for row in rows:
+        # Count notes created from result_entry_ids (comma-separated)
+        result_ids = row['result_entry_ids'] or ''
+        notes_created = len([x for x in result_ids.split(',') if x.strip()]) if result_ids else 0
 
-        for file in details['files']:
-            if len(artifacts) >= limit:
-                break
+        jobs.append({
+            'job_id': row['job_id'][:8],  # Short ID for display
+            'status': row['status'],
+            'notes_created': notes_created,
+            'created_at': row['created_at'],
+            'completed_at': row['completed_at'],
+            'error': row['error_message'][:50] if row['error_message'] else None
+        })
 
-            filename = file['filename']
-            if (filename.endswith('.md') and
-                'README' not in filename and
-                filename not in seen_files):
-
-                seen_files.add(filename)
-                parts = filename.split('/')
-                category = parts[0] if len(parts) > 1 else 'unknown'
-                name = parts[-1].replace('.md', '')
-
-                artifacts.append({
-                    'name': name,
-                    'category': category.rstrip('s'),  # epiphanys -> epiphany
-                    'path': filename,
-                    'date': commit['commit']['author']['date']
-                })
-
-    return artifacts
+    return jobs
 
 
 def get_recent_notes(limit: int = 5) -> list:
@@ -502,18 +465,13 @@ def get_recent_chord_spawns(limit=5):
 @library_required
 def index():
     """Main dashboard view."""
-    recent_artifacts = get_recent_artifacts()
-
-    # Check if there are new artifacts that need syncing
-    trigger_library_sync_if_new_artifacts(recent_artifacts)
-
     return render_template(
         'dashboard.html',
         title='Dashboard',
         recent_notes=get_recent_notes(),
         calendar_preview=get_calendar_preview(),
         recent_chord_spawns=get_recent_chord_spawns(),
-        recent_artifacts=recent_artifacts,
+        recent_motif_jobs=get_recent_motif_jobs(),
         stats=get_stats(),
         pending_agents=get_pending_agents()
     )
@@ -534,16 +492,11 @@ def graph3d():
 @login_required
 def api_status():
     """API endpoint for dashboard data (for live updates)."""
-    recent_artifacts = get_recent_artifacts()
-
-    # Check if there are new artifacts that need syncing
-    trigger_library_sync_if_new_artifacts(recent_artifacts)
-
     return jsonify({
         'recent_notes': get_recent_notes(),
         'calendar_preview': get_calendar_preview(),
         'recent_chord_spawns': get_recent_chord_spawns(),
-        'recent_artifacts': recent_artifacts,
+        'recent_motif_jobs': get_recent_motif_jobs(),
         'stats': get_stats(),
         'updated_at': datetime.now().isoformat()
     })
