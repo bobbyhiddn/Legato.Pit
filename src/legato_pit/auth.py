@@ -609,7 +609,7 @@ def github_app_callback():
         # Log the login
         _log_audit(user['user_id'], 'login', 'user', user['user_id'], '{"method": "github_app"}')
 
-        logger.info(f"GitHub App user logged in: {github_login}")
+        logger.info(f"GitHub App user logged in: {github_login}, user_id={user['user_id']}, session_has_token={bool(session.get('github_token'))}")
 
         # Trigger user-specific Library sync in background
         trigger_user_library_sync(user['user_id'], github_login)
