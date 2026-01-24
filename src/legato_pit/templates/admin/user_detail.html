@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}User: {{ user.github_login }} - Admin - {{ app_name }}{% endblock %}
+{% block title %}User: {{ profile.github_login }} - Admin - {{ app_name }}{% endblock %}
 
 {% block head %}
 <style>
@@ -109,8 +109,8 @@
 
     <div class="user-header">
         <div>
-            <h1>{{ user.github_login }}</h1>
-            <div class="user-id">{{ user.user_id }}</div>
+            <h1>{{ profile.github_login }}</h1>
+            <div class="user-id">{{ profile.user_id }}</div>
         </div>
         <button class="delete-btn" onclick="deleteUser()">Delete User</button>
     </div>
@@ -120,36 +120,36 @@
         <div class="info-grid">
             <div class="info-item">
                 <label>Email</label>
-                <span>{{ user.email or '-' }}</span>
+                <span>{{ profile.email or '-' }}</span>
             </div>
             <div class="info-item">
                 <label>GitHub ID</label>
-                <span>{{ user.github_id }}</span>
+                <span>{{ profile.github_id }}</span>
             </div>
             <div class="info-item">
                 <label>Tier</label>
-                <span class="tier-badge tier-{{ user.tier or 'free' }}">{{ user.tier or 'free' }}</span>
+                <span class="tier-badge tier-{{ profile.tier or 'free' }}">{{ profile.tier or 'free' }}</span>
             </div>
             <div class="info-item">
                 <label>Copilot</label>
-                <span>{{ 'Enabled' if user.has_copilot else 'Disabled' }}</span>
+                <span>{{ 'Enabled' if profile.has_copilot else 'Disabled' }}</span>
             </div>
             <div class="info-item">
                 <label>Created</label>
-                <span>{{ user.created_at[:19] if user.created_at else '-' }}</span>
+                <span>{{ profile.created_at[:19] if profile.created_at else '-' }}</span>
             </div>
             <div class="info-item">
                 <label>Updated</label>
-                <span>{{ user.updated_at[:19] if user.updated_at else '-' }}</span>
+                <span>{{ profile.updated_at[:19] if profile.updated_at else '-' }}</span>
             </div>
         </div>
     </div>
 
     <div class="section">
-        <h2>Installations ({{ user.installations|length }})</h2>
-        {% if user.installations %}
+        <h2>Installations ({{ profile.installations|length }})</h2>
+        {% if profile.installations %}
         <ul class="item-list">
-            {% for inst in user.installations %}
+            {% for inst in profile.installations %}
             <li>
                 Installation #{{ inst.get('installation_id', 'N/A') }}
                 <span style="color: var(--text-secondary); font-size: 0.875rem;">
@@ -164,10 +164,10 @@
     </div>
 
     <div class="section">
-        <h2>Repositories ({{ user.repos|length }})</h2>
-        {% if user.repos %}
+        <h2>Repositories ({{ profile.repos|length }})</h2>
+        {% if profile.repos %}
         <ul class="item-list">
-            {% for repo in user.repos %}
+            {% for repo in profile.repos %}
             <li>
                 <strong>{{ repo.repo_full_name }}</strong>
                 <span style="color: var(--text-secondary); font-size: 0.875rem;">
@@ -182,10 +182,10 @@
     </div>
 
     <div class="section">
-        <h2>Recent Agents ({{ user.agents|length }})</h2>
-        {% if user.agents %}
+        <h2>Recent Agents ({{ profile.agents|length }})</h2>
+        {% if profile.agents %}
         <ul class="item-list">
-            {% for agent in user.agents %}
+            {% for agent in profile.agents %}
             <li>
                 <strong>{{ agent.project_name }}</strong>
                 <span style="color: var(--text-secondary); font-size: 0.875rem;">
@@ -210,7 +210,7 @@ async function deleteUser() {
     }
 
     try {
-        const resp = await fetch('/admin/api/user/{{ user.user_id }}/delete', {
+        const resp = await fetch('/admin/api/user/{{ profile.user_id }}/delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         });

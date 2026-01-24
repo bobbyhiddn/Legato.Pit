@@ -210,7 +210,7 @@ def user_detail(user_id: str):
             logger.error(f"Failed to get agents: {e}")
             user['agents'] = []
 
-        return render_template('admin/user_detail.html', user=user)
+        return render_template('admin/user_detail.html', profile=user)
 
     except Exception as e:
         logger.error(f"User detail view failed: {e}")
