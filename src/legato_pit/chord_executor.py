@@ -67,6 +67,7 @@ class ChordExecutor:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        logger.info(f"ChordExecutor initialized: org={org}, token_len={len(token) if token else 0}, token_prefix={token[:10] if token and len(token) > 10 else 'N/A'}...")
 
     def spawn(self, spec: ChordSpec, assign_copilot: bool = True) -> dict:
         """
@@ -148,14 +149,19 @@ class ChordExecutor:
             "auto_init": True,  # Creates initial commit with README
         }
 
+        logger.info(f"Creating repo at {create_url} for org={self.org}")
         resp = requests.post(create_url, headers=self.headers, json=payload, timeout=30)
 
         if resp.status_code == 404:
             # Not an org, try as user
             create_url = f"{self.api_base}/user/repos"
+            logger.info(f"Org not found, trying user repo at {create_url}")
             resp = requests.post(create_url, headers=self.headers, json=payload, timeout=30)
 
         if resp.status_code not in (200, 201):
+            # Log token info for debugging (prefix only, not full token)
+            token_info = f"len={len(self.token)}, prefix={self.token[:7]}..." if self.token else "None"
+            logger.error(f"Repo creation failed: status={resp.status_code}, token_info={token_info}")
             raise RuntimeError(f"Failed to create repo: {resp.status_code} - {resp.text}")
 
         repo_data = resp.json()

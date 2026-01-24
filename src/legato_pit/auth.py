@@ -537,6 +537,10 @@ def github_app_callback():
         access_token = token_data.get('access_token')
         refresh_token = token_data.get('refresh_token')
 
+        logger.info(f"Token exchange result: access_token_len={len(access_token) if access_token else 0}, "
+                    f"refresh_token_present={bool(refresh_token)}, "
+                    f"access_token_prefix={access_token[:10] if access_token and len(access_token) > 10 else 'N/A'}...")
+
         if not access_token:
             raise ValueError("No access token in response")
 
@@ -1749,10 +1753,15 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
     """
     from datetime import datetime
 
+    logger.debug(f"_get_user_oauth_token called for user_id={user_id}")
+
     # Try session first
     oauth_token = session.get('github_token')
     if oauth_token:
+        logger.debug(f"Found OAuth token in session for user {user_id} (len={len(oauth_token)})")
         return oauth_token
+
+    logger.debug(f"No session token, checking database for user {user_id}")
 
     # Try database
     from .crypto import decrypt_for_user, encrypt_for_user
@@ -1764,7 +1773,10 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
     ).fetchone()
 
     if not row:
+        logger.warning(f"No user row found in database for user_id={user_id}")
         return None
+
+    logger.debug(f"Found user row: has_oauth={bool(row['oauth_token_encrypted'])}, expires_at={row['oauth_token_expires_at']}, has_refresh={bool(row['refresh_token_encrypted'])}")
 
     # Check if stored token is still valid
     if row['oauth_token_encrypted']:
@@ -1782,7 +1794,10 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
         if not is_expired:
             token = decrypt_for_user(user_id, row['oauth_token_encrypted'])
             if token:
+                logger.debug(f"Decrypted valid OAuth token for user {user_id} (len={len(token)})")
                 return token
+            else:
+                logger.warning(f"Failed to decrypt OAuth token for user {user_id}")
 
     # Try to refresh using refresh_token
     if row['refresh_token_encrypted']:

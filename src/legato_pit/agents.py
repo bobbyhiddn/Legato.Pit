@@ -734,9 +734,12 @@ def api_approve_agent(queue_id: str):
         user = session.get('user', {})
         user_id = user.get('user_id')
 
+        logger.info(f"api_approve_agent: user_id={user_id}, session_keys={list(session.keys())}")
+
         if user_id:
             from .auth import _get_user_oauth_token
             oauth_token = _get_user_oauth_token(user_id)
+            logger.info(f"api_approve_agent: oauth_token present={bool(oauth_token)}, len={len(oauth_token) if oauth_token else 0}")
 
             if not oauth_token:
                 return jsonify({
