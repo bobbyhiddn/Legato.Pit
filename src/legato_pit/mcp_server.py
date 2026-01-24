@@ -1941,6 +1941,19 @@ def tool_check_connection(args: dict) -> dict:
         result["mcp_auth"]["user_id"] = g.mcp_user.get('user_id')
         result["mcp_auth"]["github_login"] = g.mcp_user.get('sub')
         result["mcp_auth"]["github_id"] = g.mcp_user.get('github_id')
+
+        # Show if canonical user_id lookup was performed
+        # Note: The middleware already resolved canonical user_id before this runs
+        auth_db = get_auth_db()
+        github_id = g.mcp_user.get('github_id')
+        if github_id:
+            canonical = auth_db.execute(
+                "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
+            ).fetchone()
+            if canonical:
+                result["mcp_auth"]["canonical_user_id"] = canonical['user_id']
+                if canonical['user_id'] != g.mcp_user.get('user_id'):
+                    result["mcp_auth"]["user_id_corrected"] = True
     else:
         result["mcp_auth"]["authenticated"] = False
         result["recommendations"].append("MCP authentication failed - re-authenticate the MCP client")
@@ -2003,10 +2016,15 @@ def tool_check_connection(args: dict) -> dict:
         result["database"]["api_key_error"] = str(e)
 
     # Count notes in library
-    note_count = user_db.execute(
-        "SELECT COUNT(*) as count FROM knowledge_entries"
-    ).fetchone()
-    result["database"]["note_count"] = note_count['count'] if note_count else 0
+    try:
+        user_db = get_db()  # Gets user's legato database
+        note_count = user_db.execute(
+            "SELECT COUNT(*) as count FROM knowledge_entries"
+        ).fetchone()
+        result["database"]["note_count"] = note_count['count'] if note_count else 0
+    except Exception as e:
+        result["database"]["note_count"] = "error"
+        result["database"]["note_count_error"] = str(e)
 
     return result
 

@@ -847,6 +847,19 @@ def require_mcp_auth(f):
             }
 
         logger.debug(f"MCP auth successful for user: {claims.get('sub')}")
+
+        # CRITICAL: Resolve canonical user_id by github_id to prevent stale JWT issues
+        # The JWT may contain an old user_id if the user record was recreated
+        github_id = claims.get('github_id')
+        if github_id:
+            db = get_db()
+            canonical = db.execute(
+                "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
+            ).fetchone()
+            if canonical and canonical['user_id'] != claims.get('user_id'):
+                logger.warning(f"MCP user_id mismatch: jwt={claims.get('user_id')}, canonical={canonical['user_id']} - using canonical")
+                claims['user_id'] = canonical['user_id']
+
         # Store claims in g for use in handler
         g.mcp_user = claims
 

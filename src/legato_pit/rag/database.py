@@ -976,7 +976,26 @@ def get_user_legato_db():
 
     # Try MCP context (API routes)
     if not user_id and hasattr(g, 'mcp_user') and g.mcp_user:
-        user_id = g.mcp_user.get('user_id')
+        mcp_user_id = g.mcp_user.get('user_id')
+        github_id = g.mcp_user.get('github_id')
+
+        # CRITICAL: Look up canonical user_id by github_id to prevent stale JWT issues
+        # The JWT may contain an old user_id if the user record was recreated
+        if github_id:
+            shared_db = init_db()  # Shared database has users table
+            canonical = shared_db.execute(
+                "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
+            ).fetchone()
+            if canonical:
+                canonical_user_id = canonical['user_id']
+                if canonical_user_id != mcp_user_id:
+                    logger.warning(f"MCP user_id mismatch: jwt={mcp_user_id}, canonical={canonical_user_id}")
+                user_id = canonical_user_id
+            else:
+                # No user found by github_id, fall back to JWT user_id
+                user_id = mcp_user_id
+        else:
+            user_id = mcp_user_id
 
     # SECURITY: Always require user_id for database access
     if not user_id:
