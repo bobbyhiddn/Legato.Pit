@@ -1990,16 +1990,17 @@ def tool_check_connection(args: dict) -> dict:
             result["recommendations"].append("User record not found in database - this is unexpected")
 
     # Check for Anthropic API key (needed for process_motif)
-    user_db = get_db()
-    api_key = user_db.execute(
-        "SELECT anthropic_api_key FROM user_settings WHERE id = 1"
-    ).fetchone()
-
-    if api_key and api_key['anthropic_api_key']:
-        result["database"]["anthropic_api_key_set"] = True
-    else:
+    from .auth import get_user_api_key
+    try:
+        api_key = get_user_api_key(user_id, 'anthropic')
+        if api_key:
+            result["database"]["anthropic_api_key_set"] = True
+        else:
+            result["database"]["anthropic_api_key_set"] = False
+            result["recommendations"].append("Anthropic API key not configured. Add it in Legato Settings to enable process_motif.")
+    except Exception as e:
         result["database"]["anthropic_api_key_set"] = False
-        result["recommendations"].append("Anthropic API key not configured. Add it in Legato Settings to enable process_motif.")
+        result["database"]["api_key_error"] = str(e)
 
     # Count notes in library
     note_count = user_db.execute(

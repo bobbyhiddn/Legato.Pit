@@ -48,10 +48,39 @@ class MotifWorker:
             logger.warning(f"Worker {self.worker_id} already running")
             return
 
+        # Clean up stale jobs before starting
+        self._cleanup_stale_jobs()
+
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info(f"Motif worker {self.worker_id} started")
+
+    def _cleanup_stale_jobs(self):
+        """Mark very old processing jobs as failed to prevent infinite retries."""
+        from .rag.database import init_db
+
+        try:
+            db = init_db()
+
+            # Mark jobs stuck in 'processing' for more than 1 hour as failed
+            # These are likely from crashed workers or database lock issues
+            one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+
+            cursor = db.execute("""
+                UPDATE processing_jobs
+                SET status = 'failed',
+                    error_message = 'Job timed out - stuck in processing state',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'processing'
+                  AND updated_at < ?
+            """, (one_hour_ago,))
+            db.commit()
+
+            if cursor.rowcount > 0:
+                logger.info(f"Cleaned up {cursor.rowcount} stale processing jobs")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup stale jobs: {e}")
 
     def stop(self):
         """Signal the worker to stop."""
@@ -229,6 +258,16 @@ class MotifWorker:
         Returns:
             True if the error is transient and should be retried
         """
+        error_str = str(error).lower()
+
+        # These errors are NOT retryable - they indicate permanent failures
+        permanent_errors = [
+            'unique constraint',
+            'database is locked',  # SQLite contention - backing off won't help if stuck
+        ]
+        if any(pattern in error_str for pattern in permanent_errors):
+            return False
+
         retryable_patterns = [
             'rate_limit',
             'rate limit',
@@ -237,11 +276,9 @@ class MotifWorker:
             'connection',
             'temporary',
             'overloaded',
-            'database is locked',  # SQLite contention
             '529',  # Anthropic overloaded
             '503',  # Service unavailable
         ]
-        error_str = str(error).lower()
         return any(pattern in error_str for pattern in retryable_patterns)
 
     def _mark_job_for_retry(self, job_id: str, retry_count: int, error: str):
