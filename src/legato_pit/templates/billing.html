@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block title %}Billing - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .billing-container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .billing-header {
+        margin-bottom: 2rem;
+    }
+
+    .billing-header h1 {
+        margin: 0 0 0.5rem 0;
+    }
+
+    .billing-description {
+        color: var(--text-secondary);
+    }
+
+    .current-plan {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .current-plan h2 {
+        margin: 0 0 1rem 0;
+        font-size: 1.1rem;
+    }
+
+    .plan-status {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .plan-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+    }
+
+    .plan-badge.trial {
+        background: var(--text-secondary);
+        color: var(--bg-primary);
+    }
+
+    .plan-badge.byok {
+        background: #6366f1;
+        color: white;
+    }
+
+    .plan-badge.managed {
+        background: #10b981;
+        color: white;
+    }
+
+    .plan-badge.beta {
+        background: #f59e0b;
+        color: black;
+    }
+
+    .trial-info {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 1rem;
+        margin-top: 1rem;
+    }
+
+    .trial-info.expired {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .trial-days {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent-color);
+    }
+
+    .trial-days.expired {
+        color: #ef4444;
+    }
+
+    .plans-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .plan-card {
+        background: var(--card-bg);
+        border: 2px solid var(--border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .plan-card.recommended {
+        border-color: var(--accent-color);
+    }
+
+    .plan-card.current {
+        border-color: #10b981;
+    }
+
+    .plan-name {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+
+    .plan-price {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+
+    .plan-price .cents {
+        font-size: 1rem;
+    }
+
+    .plan-price .period {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        font-weight: 400;
+    }
+
+    .plan-description {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+        flex: 1;
+    }
+
+    .plan-features {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 1.5rem 0;
+    }
+
+    .plan-features li {
+        padding: 0.5rem 0;
+        padding-left: 1.5rem;
+        position: relative;
+        color: var(--text-secondary);
+    }
+
+    .plan-features li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: #10b981;
+    }
+
+    .plan-button {
+        width: 100%;
+        padding: 0.75rem;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .plan-button.primary {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .plan-button.primary:hover {
+        filter: brightness(1.1);
+    }
+
+    .plan-button.secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .plan-button.secondary:hover {
+        background: var(--bg-secondary);
+    }
+
+    .plan-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .manage-section {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1.5rem;
+    }
+
+    .manage-section h2 {
+        margin: 0 0 1rem 0;
+        font-size: 1.1rem;
+    }
+
+    .stripe-disabled {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-secondary);
+    }
+
+    .beta-notice {
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="billing-container">
+    <div class="billing-header">
+        <h1>Billing & Subscription</h1>
+        <p class="billing-description">Manage your Legato subscription</p>
+    </div>
+
+    {% if is_beta %}
+    <div class="beta-notice">
+        <strong>Beta Tester</strong> - You have full access to all features during the beta period. Thank you for testing!
+    </div>
+    {% endif %}
+
+    <div class="current-plan">
+        <h2>Current Plan</h2>
+        <div class="plan-status">
+            {% if is_beta %}
+            <span class="plan-badge beta">Beta</span>
+            <span class="plan-badge managed">Managed Access</span>
+            {% elif tier == 'managed' %}
+            <span class="plan-badge managed">Managed</span>
+            {% elif tier == 'byok' %}
+            <span class="plan-badge byok">BYOK</span>
+            {% else %}
+            <span class="plan-badge trial">Trial</span>
+            {% endif %}
+        </div>
+
+        {% if trial_status.is_trial and not is_beta %}
+        <div class="trial-info {% if trial_status.is_expired %}expired{% endif %}">
+            {% if trial_status.is_expired %}
+            <div class="trial-days expired">Trial Expired</div>
+            <p>Your 14-day trial has ended. Upgrade to continue using all features.</p>
+            {% else %}
+            <div class="trial-days">{{ trial_status.days_remaining }} days left</div>
+            <p>Your free trial includes full access to all features with your own API keys.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if not stripe_enabled %}
+    <div class="stripe-disabled">
+        <p>Billing is not currently enabled. Contact support for subscription options.</p>
+    </div>
+    {% else %}
+
+    <h2>Available Plans</h2>
+    <div class="plans-grid">
+        <div class="plan-card {% if tier == 'byok' and not is_beta %}current{% endif %}">
+            <div class="plan-name">BYOK</div>
+            <div class="plan-price">
+                $0<span class="cents">.99</span>
+                <span class="period">/ month</span>
+            </div>
+            <p class="plan-description">Bring Your Own Keys - use your own API keys from Anthropic/OpenAI</p>
+            <ul class="plan-features">
+                <li>Full feature access</li>
+                <li>Use your own API keys</li>
+                <li>Unlimited notes & motifs</li>
+                <li>MCP integration</li>
+            </ul>
+            {% if tier == 'byok' and not is_beta %}
+            <button class="plan-button secondary" disabled>Current Plan</button>
+            {% elif is_beta %}
+            <button class="plan-button secondary" disabled>Beta Access Active</button>
+            {% else %}
+            <form action="{{ url_for('billing.checkout') }}" method="POST">
+                <input type="hidden" name="tier" value="byok">
+                <button type="submit" class="plan-button secondary">Subscribe</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <div class="plan-card recommended {% if tier == 'managed' and not is_beta %}current{% endif %}">
+            <div class="plan-name">Managed</div>
+            <div class="plan-price">
+                $10
+                <span class="period">/ month</span>
+            </div>
+            <p class="plan-description">We handle the API keys - just use Legato without any setup</p>
+            <ul class="plan-features">
+                <li>Full feature access</li>
+                <li>Platform API keys included</li>
+                <li>No API key setup needed</li>
+                <li>Priority support</li>
+            </ul>
+            {% if tier == 'managed' and not is_beta %}
+            <button class="plan-button primary" disabled>Current Plan</button>
+            {% elif is_beta %}
+            <button class="plan-button primary" disabled>Beta Access Active</button>
+            {% else %}
+            <form action="{{ url_for('billing.checkout') }}" method="POST">
+                <input type="hidden" name="tier" value="managed">
+                <button type="submit" class="plan-button primary">Subscribe</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if has_subscription %}
+    <div class="manage-section">
+        <h2>Manage Subscription</h2>
+        <p>Update your payment method, view invoices, or cancel your subscription.</p>
+        <form action="{{ url_for('billing.portal') }}" method="POST" style="margin-top: 1rem;">
+            <button type="submit" class="plan-button secondary" style="width: auto; padding: 0.5rem 1.5rem;">
+                Open Billing Portal
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}
