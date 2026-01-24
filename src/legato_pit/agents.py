@@ -818,6 +818,7 @@ def api_approve_agent(queue_id: str):
         # Only update Library entries if spawn succeeded
         # related_entry_id may be a single ID or comma-separated list for multi-note chords
         related_entry_id = agent.get('related_entry_id')
+        logger.info(f"Chord linking check: spawn_success={spawn_success}, related_entry_id={related_entry_id}")
         if spawn_success and related_entry_id:
             try:
                 import re
@@ -832,7 +833,8 @@ def api_approve_agent(queue_id: str):
 
                 for entry_id in entry_ids:
                     # Update local DB
-                    legato_db.execute(
+                    logger.info(f"Updating DB for entry_id={entry_id} with chord_repo={chord_repo_full}")
+                    result = legato_db.execute(
                         """
                         UPDATE knowledge_entries
                         SET chord_status = 'active',
@@ -843,6 +845,7 @@ def api_approve_agent(queue_id: str):
                         """,
                         (chord_repo_full, entry_id)
                     )
+                    logger.info(f"DB update affected {result.rowcount} rows for entry_id={entry_id}")
 
                     # Update GitHub frontmatter
                     try:
@@ -858,6 +861,7 @@ def api_approve_agent(queue_id: str):
                             library_repo = get_user_library_repo()
                             token = get_user_installation_token(user_id, 'library') if user_id else None
 
+                            logger.info(f"Got installation token for frontmatter update: {bool(token)}")
                             if not token:
                                 logger.warning(f"No token available to update frontmatter for {entry_id}")
                                 continue
