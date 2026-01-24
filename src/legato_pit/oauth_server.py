@@ -51,31 +51,43 @@ def _get_or_create_user_id(github_id: int, github_login: str) -> str:
 
     This is used to ensure every OAuth token has a valid user_id
     for database isolation.
+
+    Uses INSERT OR IGNORE + SELECT pattern to prevent race conditions
+    where concurrent requests could create duplicate users.
     """
     import uuid
-    db = get_db()
+    from datetime import datetime
 
-    # Check for existing user
+    db = get_db()
+    new_user_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+
+    # Try to insert - will be ignored if github_id already exists (UNIQUE constraint)
+    # This is atomic and prevents race conditions
+    db.execute(
+        """
+        INSERT OR IGNORE INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
+        VALUES (?, ?, ?, 'free', ?, ?)
+        """,
+        (new_user_id, github_id, github_login, now, now)
+    )
+    db.commit()
+
+    # Now fetch the actual user (either just inserted or pre-existing)
     row = db.execute(
-        "SELECT user_id FROM users WHERE github_id = ?",
+        "SELECT user_id, created_at FROM users WHERE github_id = ?",
         (github_id,)
     ).fetchone()
 
     if row:
+        # Log if this was a new user creation
+        if row['created_at'] == now:
+            logger.info(f"Created new user via MCP OAuth: {github_login} ({row['user_id']})")
         return row['user_id']
 
-    # Create new user
-    user_id = str(uuid.uuid4())
-    db.execute(
-        """
-        INSERT INTO users (user_id, github_id, github_login, tier, created_at, updated_at)
-        VALUES (?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """,
-        (user_id, github_id, github_login)
-    )
-    db.commit()
-    logger.info(f"Created new user via MCP OAuth: {github_login} ({user_id})")
-    return user_id
+    # This shouldn't happen given INSERT OR IGNORE, but handle gracefully
+    logger.warning(f"Unexpected: INSERT OR IGNORE succeeded but SELECT returned None for github_id={github_id}")
+    return new_user_id
 
 
 def get_jwt_secret() -> str:
