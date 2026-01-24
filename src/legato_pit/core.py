@@ -334,6 +334,39 @@ def create_app():
         if request.endpoint != 'health':
             touch_activity()
 
+    # Auto-refresh expired OAuth tokens
+    @app.before_request
+    def refresh_expired_tokens():
+        """Check and refresh OAuth tokens if expired.
+
+        Runs on each request for logged-in users. If token is expired,
+        attempts to refresh using the refresh token.
+        """
+        # Skip for static files, health checks, and auth endpoints
+        if request.endpoint in ('health', 'static', None):
+            return
+        if request.path.startswith('/auth/') or request.path.startswith('/admin/login'):
+            return
+
+        # Only check for logged-in users in multi-tenant mode
+        if app.config.get('LEGATO_MODE') != 'multi-tenant':
+            return
+        if 'user' not in session:
+            return
+
+        user_id = session['user'].get('user_id')
+        if not user_id:
+            return
+
+        try:
+            from .auth import _get_user_oauth_token
+            # This function handles expiration check and refresh internally
+            token = _get_user_oauth_token(user_id)
+            if not token:
+                logger.warning(f"Could not get/refresh OAuth token for user {user_id}")
+        except Exception as e:
+            logger.error(f"Token refresh check failed: {e}")
+
     # Context processor for templates
     @app.context_processor
     def inject_globals():

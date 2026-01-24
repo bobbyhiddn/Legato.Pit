@@ -603,14 +603,6 @@ def github_app_callback():
         # Trigger user-specific Library sync in background
         trigger_user_library_sync(user['user_id'], github_login)
 
-        # Process any pending repo additions (from failed adds due to expired token)
-        try:
-            added = process_pending_repo_additions(user['user_id'])
-            if added > 0:
-                logger.info(f"Processed {added} pending repo additions for {github_login}")
-        except Exception as e:
-            logger.warning(f"Error processing pending repo additions: {e}")
-
         # Check if user has any installations
         db = _get_db()
         installations = db.execute(
@@ -1816,11 +1808,12 @@ def _refresh_oauth_token(user_id: str, refresh_token: str) -> Optional[str]:
     from flask import current_app
     from .crypto import encrypt_for_user
 
-    client_id = current_app.config.get('GITHUB_CLIENT_ID')
-    client_secret = current_app.config.get('GITHUB_CLIENT_SECRET')
+    # Use GitHub App credentials (multi-tenant mode)
+    client_id = current_app.config.get('GITHUB_APP_CLIENT_ID')
+    client_secret = current_app.config.get('GITHUB_APP_CLIENT_SECRET')
 
     if not client_id or not client_secret:
-        logger.warning(f"Cannot refresh token: GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET not configured")
+        logger.warning(f"Cannot refresh token: GITHUB_APP_CLIENT_ID or GITHUB_APP_CLIENT_SECRET not configured")
         return None
 
     logger.info(f"Attempting to refresh OAuth token for user {user_id}")
@@ -1879,8 +1872,15 @@ def add_repo_to_installation(user_id: str, repo_id: int, repo_full_name: str = N
                               max_retries: int = 3) -> bool:
     """Add a repository to the user's GitHub App installation.
 
-    This is the primary method for ensuring Legato has access to spawned Chords.
-    Uses retry logic with exponential backoff and token refresh.
+    NOTE: This endpoint (PUT /user/installations/{id}/repositories/{repo_id})
+    only works with classic PATs with 'repo' scope. It does NOT work with:
+    - GitHub App OAuth tokens
+    - GitHub App installation tokens
+    - Fine-grained PATs
+
+    This function is kept for Library auto-add attempts but will likely fail.
+    For Chords, we use OAuth tokens directly for all operations instead of
+    trying to add repos to the installation.
 
     Args:
         user_id: The user's ID

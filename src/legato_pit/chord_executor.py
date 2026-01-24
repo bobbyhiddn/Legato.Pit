@@ -682,23 +682,7 @@ def spawn_chord(
     executor = get_executor(user_id)
     result = executor.spawn(spec, assign_copilot=assign_copilot)
 
-    # In multi-tenant mode, add the new repo to the user's GitHub App installation
-    if result.get("success") and user_id and result.get("repo_id"):
-        try:
-            from .auth import add_repo_to_installation
-            added = add_repo_to_installation(
-                user_id,
-                result["repo_id"],
-                result["repo_name"]
-            )
-            result["added_to_installation"] = True
-        except RuntimeError as e:
-            # Queued for later - chord spawn still succeeded
-            logger.info(f"Repo queued for installation addition: {e}")
-            result["added_to_installation"] = False
-            result["installation_queued"] = True
-        except Exception as e:
-            logger.error(f"Unexpected error adding repo to installation: {e}")
-            result["added_to_installation"] = False
+    # OAuth token is used for all chord operations - no need to add to GitHub App installation
+    # The user owns the repo, so OAuth gives us full access for management
 
     return result

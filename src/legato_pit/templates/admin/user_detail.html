@@ -103,6 +103,22 @@
     .tier-starter { background: #1f6feb; color: #fff; }
     .tier-pro { background: #8957e5; color: #fff; }
     .tier-founder { background: #da3633; color: #fff; }
+    .refresh-btn {
+        background: #238636;
+        color: #fff;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.875rem;
+    }
+    .refresh-btn:hover {
+        background: #2ea043;
+    }
+    .refresh-btn:disabled {
+        background: #6e7681;
+        cursor: not-allowed;
+    }
 </style>
 {% endblock %}
 
@@ -176,6 +192,14 @@
                 </span>
             </div>
         </div>
+        {% if profile.token_status.has_refresh_token %}
+        <div style="margin-top: 1rem;">
+            <button class="refresh-btn" onclick="refreshToken()" id="refresh-token-btn">
+                Refresh OAuth Token
+            </button>
+            <span id="refresh-status" style="margin-left: 1rem; font-size: 0.875rem;"></span>
+        </div>
+        {% endif %}
     </div>
 
     <div class="section">
@@ -256,6 +280,40 @@ async function deleteUser() {
         window.location.href = '/admin/';
     } catch (e) {
         alert('Error: ' + e.message);
+    }
+}
+
+async function refreshToken() {
+    const btn = document.getElementById('refresh-token-btn');
+    const status = document.getElementById('refresh-status');
+
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+    status.textContent = '';
+    status.className = '';
+
+    try {
+        const resp = await fetch('/admin/api/user/{{ profile.user_id }}/refresh-token', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            status.textContent = 'Failed: ' + (data.error || 'Unknown error');
+            status.className = 'status-error';
+        } else {
+            status.textContent = 'Token refreshed successfully!';
+            status.className = 'status-ok';
+            // Reload after a moment to show updated token status
+            setTimeout(() => window.location.reload(), 1500);
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'status-error';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Refresh OAuth Token';
     }
 }
 </script>

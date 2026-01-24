@@ -730,12 +730,25 @@ def api_approve_agent(queue_id: str):
     }
     """
     try:
+        # Check OAuth token is available (chord spawning requires OAuth)
+        user = session.get('user', {})
+        user_id = user.get('user_id')
+
+        if user_id:
+            from .auth import _get_user_oauth_token
+            oauth_token = _get_user_oauth_token(user_id)
+
+            if not oauth_token:
+                return jsonify({
+                    'error': 'GitHub authorization expired. Please re-authenticate to approve agents.',
+                    'needs_reauth': True,
+                    'reauth_url': '/auth/github-app'
+                }), 401
+
         agents_db = get_db()
         data = request.get_json() or {}
         additional_comments = data.get('additional_comments', '').strip()
 
-        user = session.get('user', {})
-        user_id = user.get('user_id')
         username = user.get('login', 'unknown')
         org = user.get('username')  # Use user's org, not hardcoded
 
@@ -898,10 +911,22 @@ def api_retry_spawn(queue_id: str):
     }
     """
     try:
-        agents_db = get_db()
-
         user = session.get('user', {})
         user_id = user.get('user_id')
+
+        # Check OAuth token is available (chord spawning requires OAuth)
+        if user_id:
+            from .auth import _get_user_oauth_token
+            oauth_token = _get_user_oauth_token(user_id)
+
+            if not oauth_token:
+                return jsonify({
+                    'error': 'GitHub authorization expired. Please re-authenticate to retry spawning.',
+                    'needs_reauth': True,
+                    'reauth_url': '/auth/github-app'
+                }), 401
+
+        agents_db = get_db()
         username = user.get('login', 'unknown')
         org = user.get('username')
 

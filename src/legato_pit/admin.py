@@ -311,6 +311,46 @@ def api_set_user_copilot(user_id: str):
     })
 
 
+@admin_bp.route('/api/user/<user_id>/refresh-token', methods=['POST'])
+@admin_required
+def api_refresh_user_token(user_id: str):
+    """Force refresh a user's OAuth token using their refresh token."""
+    from .rag.database import init_db
+    from .auth import _refresh_oauth_token
+    from .crypto import decrypt_for_user
+
+    db = init_db()
+
+    user = db.execute("""
+        SELECT github_login, refresh_token_encrypted
+        FROM users WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    if not user['refresh_token_encrypted']:
+        return jsonify({'error': 'No refresh token stored - user must re-authenticate'}), 400
+
+    # Decrypt and try to refresh
+    refresh_token = decrypt_for_user(user_id, user['refresh_token_encrypted'])
+    if not refresh_token:
+        return jsonify({'error': 'Could not decrypt refresh token'}), 500
+
+    new_token = _refresh_oauth_token(user_id, refresh_token)
+
+    if new_token:
+        logger.info(f"Admin force-refreshed token for {user['github_login']}")
+        return jsonify({
+            'status': 'success',
+            'message': 'Token refreshed successfully',
+        })
+    else:
+        return jsonify({
+            'error': 'Refresh failed - check logs for details. User may need to re-authenticate.',
+        }), 400
+
+
 @admin_bp.route('/api/user/<user_id>/delete', methods=['POST'])
 @admin_required
 def api_delete_user(user_id: str):
