@@ -186,7 +186,7 @@
         </header>
 
         <div class="month-list">
-            {% set current_month = now().strftime('%Y-%m') if now is defined else '' %}
+            {% set current_month = now.strftime('%Y-%m') if now is defined else '' %}
             {% for m in months %}
             {% set month_parts = m.month.split('-') %}
             {% set month_name = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month_parts[1]|int - 1] %}

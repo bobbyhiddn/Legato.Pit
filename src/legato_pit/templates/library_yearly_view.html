@@ -305,7 +305,7 @@
 
         <!-- Month Grid -->
         <div class="month-grid">
-            {% set current_month = now().strftime('%Y-%m') if now is defined else '' %}
+            {% set current_month = now.strftime('%Y-%m') if now is defined else '' %}
             {% for m in months %}
             <a href="{{ url_for('library.monthly_view', year_month=m.month) }}"
                class="month-tile {% if m.count > 0 %}has-notes{% endif %} {% if m.month == current_month %}current-month{% endif %}">

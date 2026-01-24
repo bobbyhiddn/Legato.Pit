@@ -181,7 +181,7 @@
         </header>
 
         <div class="year-list">
-            {% set current_year = now().strftime('%Y') if now is defined else '' %}
+            {% set current_year = now.strftime('%Y') if now is defined else '' %}
             {% for y in years %}
             <a href="{{ url_for('library.yearly_view', year=y.year) }}"
                class="year-card {% if y.year == current_year %}current-year{% endif %}">

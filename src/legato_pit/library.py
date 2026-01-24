@@ -657,6 +657,7 @@ def monthly_index():
         'library_monthly.html',
         months=[dict(m) for m in months],
         categories=categories,
+        now=datetime.now(),
     )
 
 
@@ -726,6 +727,7 @@ def monthly_view(year_month: str):
         next_month=next_month['month'] if next_month else None,
         categories=categories,
         today=datetime.now().strftime('%Y-%m-%d'),
+        now=datetime.now(),
     )
 
 
@@ -752,6 +754,7 @@ def yearly_index():
         'library_yearly.html',
         years=[dict(y) for y in years],
         categories=categories,
+        now=datetime.now(),
     )
 
 
@@ -816,6 +819,7 @@ def yearly_view(year: str):
         prev_year=prev_year['year'] if prev_year else None,
         next_year=next_year['year'] if next_year else None,
         categories=categories,
+        now=datetime.now(),
     )
 
 
