@@ -302,6 +302,37 @@
     </section>
     {% endif %}
 
+    {% if failed_agents %}
+    <section class="card">
+        <h2 style="color: #f85149;">Failed Spawns</h2>
+        <p style="color: var(--text-muted); margin-bottom: 1rem;">These chords failed to spawn. You may need to <a href="{{ url_for('auth.github_app') }}">re-authenticate with GitHub</a> if your token expired.</p>
+        <div class="agent-list">
+            {% for agent in failed_agents %}
+            <div class="agent-item agent-failed" style="border-left: 3px solid #f85149;">
+                <div class="agent-info">
+                    <span class="agent-title">{{ agent.title }}</span>
+                    <span class="agent-meta">
+                        <span class="badge" style="background: #f85149; color: white;">spawn_failed</span>
+                        <code>{{ agent.project_name }}</code>
+                    </span>
+                    <span class="agent-error" style="color: #f85149; font-size: 0.85rem;">
+                        Error: {{ agent.error }}
+                    </span>
+                </div>
+                <div class="agent-actions">
+                    <button class="btn btn-primary" onclick="retrySpawn('{{ agent.queue_id }}', this)">
+                        Retry Spawn
+                    </button>
+                    <button class="btn btn-secondary" onclick="rejectAgent('{{ agent.queue_id }}')">
+                        Dismiss
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     {% if recent_agents %}
     <section class="card">
         <h2>Recent Activity</h2>
@@ -545,6 +576,42 @@ async function rejectAgent(queueId) {
         showError(error.message);
         btn.disabled = false;
         btn.textContent = 'Reject';
+    }
+}
+
+async function retrySpawn(queueId, button) {
+    button.disabled = true;
+    button.textContent = 'Retrying...';
+
+    try {
+        const response = await fetch(`/agents/api/${queueId}/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'spawned') {
+            showSuccess('Chord spawned successfully!');
+            // Remove the failed item and reload
+            setTimeout(() => window.location.reload(), 1500);
+        } else if (data.needs_reauth) {
+            showError('GitHub token expired. Please re-authenticate.');
+            button.disabled = false;
+            button.textContent = 'Retry Spawn';
+            // Offer to re-auth
+            if (confirm('Your GitHub token has expired. Go to GitHub App settings to re-authenticate?')) {
+                window.location.href = '/auth/github-app';
+            }
+        } else {
+            showError(data.error || 'Spawn failed again');
+            button.disabled = false;
+            button.textContent = 'Retry Spawn';
+        }
+    } catch (error) {
+        showError(error.message);
+        button.disabled = false;
+        button.textContent = 'Retry Spawn';
     }
 }
 

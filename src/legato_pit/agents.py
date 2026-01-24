@@ -116,13 +116,35 @@ def index():
         else:
             agent['comments_list'] = []
 
+    # Get failed spawns (can be retried) for THIS USER only
+    failed_rows = db.execute(
+        """
+        SELECT queue_id, project_name, project_type, title, description,
+               spawn_result, created_at, updated_at
+        FROM agent_queue
+        WHERE status = 'spawn_failed' AND user_id = ?
+        ORDER BY updated_at DESC
+        """,
+        (user_id,)
+    ).fetchall()
+    failed_agents = [dict(row) for row in failed_rows]
+
+    # Parse spawn_result to get error message
+    for agent in failed_agents:
+        if agent.get('spawn_result'):
+            try:
+                result = json.loads(agent['spawn_result'])
+                agent['error'] = result.get('error', 'Unknown error')
+            except (json.JSONDecodeError, TypeError):
+                agent['error'] = 'Unknown error'
+
     # Get recent processed agents (last 20) for THIS USER only
     recent_rows = db.execute(
         """
         SELECT queue_id, project_name, project_type, title, status,
                approved_by, approved_at
         FROM agent_queue
-        WHERE status != 'pending' AND user_id = ?
+        WHERE status NOT IN ('pending', 'spawn_failed') AND user_id = ?
         ORDER BY updated_at DESC
         LIMIT 20
         """,
@@ -133,6 +155,7 @@ def index():
     return render_template(
         'agents.html',
         pending_agents=pending_agents,
+        failed_agents=failed_agents,
         recent_agents=recent_agents,
     )
 
@@ -746,25 +769,29 @@ def api_approve_agent(queue_id: str):
         # Spawn the project directly (replaces Conduct dispatch)
         dispatch_result = trigger_spawn_workflow(agent, user_id=user_id)
 
+        # Set status based on spawn result
+        spawn_success = dispatch_result.get('success', False)
+        new_status = 'spawned' if spawn_success else 'spawn_failed'
+
         # Update agent queue status
         agents_db.execute(
             """
             UPDATE agent_queue
-            SET status = 'approved',
+            SET status = ?,
                 approved_by = ?,
                 approved_at = CURRENT_TIMESTAMP,
                 spawn_result = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE queue_id = ?
             """,
-            (username, json.dumps(dispatch_result), queue_id)
+            (new_status, username, json.dumps(dispatch_result), queue_id)
         )
         agents_db.commit()
 
-        # Update linked Library entry's chord_status and chord_repo
+        # Only update Library entries if spawn succeeded
         # related_entry_id may be a single ID or comma-separated list for multi-note chords
         related_entry_id = agent.get('related_entry_id')
-        if related_entry_id:
+        if spawn_success and related_entry_id:
             try:
                 import re
                 from .rag.github_service import get_file_content, commit_file
@@ -851,6 +878,104 @@ def api_approve_agent(queue_id: str):
 
     except Exception as e:
         logger.error(f"Failed to approve agent: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@agents_bp.route('/api/<queue_id>/retry', methods=['POST'])
+@login_required
+@paid_required
+@copilot_required
+def api_retry_spawn(queue_id: str):
+    """Retry spawning a failed chord.
+
+    Only works for agents with status='spawn_failed'.
+
+    Response:
+    {
+        "status": "spawned" | "spawn_failed",
+        "queue_id": "aq-abc123",
+        "error": "..." (if failed)
+    }
+    """
+    try:
+        agents_db = get_db()
+
+        user = session.get('user', {})
+        user_id = user.get('user_id')
+        username = user.get('login', 'unknown')
+        org = user.get('username')
+
+        # Get the failed agent - MUST belong to current user
+        row = agents_db.execute(
+            "SELECT * FROM agent_queue WHERE queue_id = ? AND status = 'spawn_failed' AND user_id = ?",
+            (queue_id, user_id)
+        ).fetchone()
+
+        if not row:
+            return jsonify({'error': 'Agent not found or not in failed state'}), 404
+
+        agent = dict(row)
+
+        # Retry spawn
+        dispatch_result = trigger_spawn_workflow(agent, user_id=user_id)
+
+        spawn_success = dispatch_result.get('success', False)
+        new_status = 'spawned' if spawn_success else 'spawn_failed'
+
+        # Update status
+        agents_db.execute(
+            """
+            UPDATE agent_queue
+            SET status = ?,
+                spawn_result = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE queue_id = ?
+            """,
+            (new_status, json.dumps(dispatch_result), queue_id)
+        )
+        agents_db.commit()
+
+        # If successful, update Library entries
+        if spawn_success:
+            related_entry_id = agent.get('related_entry_id')
+            if related_entry_id:
+                try:
+                    legato_db = get_legato_db()
+                    chord_repo_name = f"{agent['project_name']}.Chord"
+                    chord_repo_full = f"{org}/{chord_repo_name}"
+
+                    entry_ids = [eid.strip() for eid in related_entry_id.split(',') if eid.strip()]
+                    for entry_id in entry_ids:
+                        legato_db.execute(
+                            """
+                            UPDATE knowledge_entries
+                            SET chord_status = 'active',
+                                chord_repo = ?,
+                                needs_chord = 0,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE entry_id = ?
+                            """,
+                            (chord_repo_full, entry_id)
+                        )
+                    legato_db.commit()
+                    logger.info(f"Updated {len(entry_ids)} Library entries on retry spawn")
+                except Exception as e:
+                    logger.error(f"Failed to update Library entries on retry: {e}")
+
+        logger.info(f"Retry spawn for {queue_id}: {new_status}")
+
+        response = {
+            'status': new_status,
+            'queue_id': queue_id,
+        }
+        if not spawn_success:
+            response['error'] = dispatch_result.get('error', 'Unknown error')
+            response['needs_reauth'] = 'Bad credentials' in str(dispatch_result.get('error', ''))
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Failed to retry spawn: {e}")
         return jsonify({'error': str(e)}), 500
 
 
