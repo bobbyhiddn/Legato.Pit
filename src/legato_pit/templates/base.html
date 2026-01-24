@@ -51,6 +51,10 @@
                                 <span class="user-menu-icon">&#9881;</span>
                                 Settings
                             </a>
+                            <a href="{{ url_for('billing.index') }}" class="user-menu-item">
+                                <span class="user-menu-icon">&#128179;</span>
+                                Billing
+                            </a>
                             <div class="user-menu-divider"></div>
                             <a href="{{ url_for('auth.logout') }}" class="user-menu-item user-menu-logout">
                                 <span class="user-menu-icon">&#10140;</span>
@@ -74,6 +78,13 @@
         </div>
         {% endif %}
         {% endwith %}
+
+        {% if trial_expired %}
+        <div class="trial-expired-banner">
+            Your 14-day trial has expired.
+            <a href="{{ url_for('billing.index') }}">Upgrade now</a> to continue using Legato.
+        </div>
+        {% endif %}
 
         {% block content %}{% endblock %}
     </main>

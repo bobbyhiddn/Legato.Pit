@@ -143,11 +143,12 @@ def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] 
 
     # Try to insert - will be ignored if github_id already exists (UNIQUE constraint)
     # This is atomic and prevents race conditions
+    # New users start with 'trial' tier and trial_started_at set
     db.execute("""
         INSERT OR IGNORE INTO users
-        (user_id, github_id, github_login, email, name, avatar_url, tier, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'free', ?, ?)
-    """, (new_user_id, github_id, github_login, email, name, avatar_url, now, now))
+        (user_id, github_id, github_login, email, name, avatar_url, tier, trial_started_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'trial', ?, ?, ?)
+    """, (new_user_id, github_id, github_login, email, name, avatar_url, now, now, now))
 
     # Now fetch the actual user (either just inserted or pre-existing)
     row = db.execute(
@@ -188,8 +189,10 @@ def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] 
         'email': email,
         'name': name,
         'avatar_url': avatar_url,
-        'tier': 'free',
+        'tier': 'trial',
+        'trial_started_at': now,
         'has_copilot': False,
+        'is_beta': False,
     }
 
 

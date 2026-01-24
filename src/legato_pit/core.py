@@ -114,6 +114,7 @@ def create_app():
     from .mcp_server import mcp_bp
     from .motif_api import motif_api_bp
     from .admin import admin_bp
+    from .stripe_billing import billing_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -128,6 +129,7 @@ def create_app():
     app.register_blueprint(mcp_bp)    # MCP protocol handler
     app.register_blueprint(motif_api_bp)  # Motif processing with job queue
     app.register_blueprint(admin_bp)  # Admin console
+    app.register_blueprint(billing_bp)  # Stripe billing
 
     # Initialize all databases on startup
     with app.app_context():
@@ -380,13 +382,21 @@ def create_app():
             admin_users = [u.strip() for u in admin_users if u.strip()]
             is_admin = username in admin_users
 
+        # Check trial expiration status
+        trial_expired = False
+        if 'user' in session and app.config.get('LEGATO_MODE') == 'multi-tenant':
+            user_id = session['user'].get('user_id')
+            if user_id:
+                trial_expired = is_trial_expired(user_id)
+
         return {
             'now': datetime.now(),
             'app_name': app.config['APP_NAME'],
             'app_description': app.config['APP_DESCRIPTION'],
             'user': session.get('user'),
             'is_authenticated': 'user' in session,
-            'is_admin': is_admin
+            'is_admin': is_admin,
+            'trial_expired': trial_expired
         }
 
     # Root redirect
@@ -467,7 +477,130 @@ def get_current_user_tier() -> str:
 
 
 def is_paid_tier(tier: str) -> bool:
-    return bool(tier) and tier != 'free'
+    """Check if tier is a paid tier (not free/trial)."""
+    return bool(tier) and tier not in ('free', 'trial')
+
+
+def get_trial_status(user_id: str) -> dict:
+    """Get trial status for a user.
+
+    Returns:
+        dict with is_trial, days_remaining, is_expired, trial_started_at
+    """
+    from datetime import datetime, timedelta
+    from .rag.database import init_db
+
+    TRIAL_DAYS = 14
+
+    if not user_id:
+        return {'is_trial': False, 'days_remaining': 0, 'is_expired': True}
+
+    db = init_db()
+    row = db.execute(
+        "SELECT tier, trial_started_at, is_beta FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not row:
+        return {'is_trial': False, 'days_remaining': 0, 'is_expired': True}
+
+    # Beta users are never in trial
+    if row['is_beta']:
+        return {'is_trial': False, 'days_remaining': 0, 'is_expired': False, 'is_beta': True}
+
+    # Paid users are not in trial
+    if row['tier'] in ('byok', 'managed'):
+        return {'is_trial': False, 'days_remaining': 0, 'is_expired': False}
+
+    # Check trial status
+    trial_started = row['trial_started_at']
+    if not trial_started:
+        # Legacy user without trial_started_at - treat as expired
+        return {'is_trial': True, 'days_remaining': 0, 'is_expired': True}
+
+    try:
+        start_date = datetime.fromisoformat(trial_started.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        start_date = datetime.now()
+
+    # Make start_date naive if it's timezone-aware
+    if start_date.tzinfo is not None:
+        start_date = start_date.replace(tzinfo=None)
+
+    expiry_date = start_date + timedelta(days=TRIAL_DAYS)
+    now = datetime.now()
+    days_remaining = (expiry_date - now).days
+
+    return {
+        'is_trial': True,
+        'days_remaining': max(0, days_remaining),
+        'is_expired': now > expiry_date,
+        'trial_started_at': trial_started
+    }
+
+
+def is_trial_expired(user_id: str) -> bool:
+    """Check if user's trial has expired."""
+    status = get_trial_status(user_id)
+    return status.get('is_expired', False) and status.get('is_trial', False)
+
+
+def get_effective_tier(user_id: str) -> str:
+    """Get effective tier considering beta status.
+
+    Beta users get 'managed' tier free.
+    Returns: 'trial', 'byok', or 'managed'
+    """
+    from .rag.database import init_db
+
+    if not user_id:
+        return 'trial'
+
+    db = init_db()
+    row = db.execute(
+        "SELECT tier, is_beta FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not row:
+        return 'trial'
+
+    # Beta users get managed tier free
+    if row['is_beta']:
+        return 'managed'
+
+    # Return actual tier
+    tier = row['tier'] or 'trial'
+    return tier if tier in ('trial', 'byok', 'managed') else 'trial'
+
+
+def can_use_platform_keys(user_id: str) -> bool:
+    """Check if user can use platform API keys (managed tier or beta)."""
+    return get_effective_tier(user_id) == 'managed'
+
+
+def get_api_key_for_user(user_id: str, provider: str) -> str:
+    """Get API key for user - platform key or their own BYOK key.
+
+    Args:
+        user_id: User's ID
+        provider: 'anthropic' or 'openai'
+
+    Returns:
+        API key string or None if not available
+    """
+    import os
+    from .auth import get_user_api_key
+
+    tier = get_effective_tier(user_id)
+
+    if tier == 'managed':
+        # Return platform key from environment
+        env_key = f'{provider.upper()}_API_KEY'
+        return os.environ.get(env_key)
+    else:
+        # Return user's BYOK key
+        return get_user_api_key(user_id, provider)
 
 
 def paid_required(f):

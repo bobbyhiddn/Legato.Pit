@@ -489,6 +489,18 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         )
     """)
 
+    # Migration: add name column to users
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add avatar_url column to users
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Migration: add refresh_token_encrypted to users if missing
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN refresh_token_encrypted BLOB")
@@ -516,6 +528,29 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     # Migration: add copilot_checked_at timestamp to users
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN copilot_checked_at DATETIME")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add Stripe billing columns
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add trial tracking
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN trial_started_at DATETIME")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add beta flag for beta testers (get managed tier free)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_beta INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # Column already exists
 
