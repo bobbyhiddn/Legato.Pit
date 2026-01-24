@@ -119,7 +119,10 @@ def _get_db():
 
 def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] = None,
                         name: Optional[str] = None, avatar_url: Optional[str] = None) -> dict:
-    """Get existing user or create a new one.
+    """Get or create user with atomic operation to prevent duplicates.
+
+    Uses INSERT OR IGNORE + SELECT pattern to prevent race conditions where
+    two concurrent requests could create duplicate users with the same github_id.
 
     Args:
         github_id: GitHub user ID
@@ -132,47 +135,61 @@ def _get_or_create_user(github_id: int, github_login: str, email: Optional[str] 
         User dict with user_id and other fields
     """
     import uuid
-    db = _get_db()
+    from datetime import datetime
 
-    # Check for existing user
+    db = _get_db()
+    new_user_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+
+    # Try to insert - will be ignored if github_id already exists (UNIQUE constraint)
+    # This is atomic and prevents race conditions
+    db.execute("""
+        INSERT OR IGNORE INTO users
+        (user_id, github_id, github_login, email, name, avatar_url, tier, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'free', ?, ?)
+    """, (new_user_id, github_id, github_login, email, name, avatar_url, now, now))
+
+    # Now fetch the actual user (either just inserted or pre-existing)
     row = db.execute(
         "SELECT * FROM users WHERE github_id = ?",
         (github_id,)
     ).fetchone()
 
     if row:
-        # Update login info
-        db.execute(
-            """
-            UPDATE users SET github_login = ?, email = COALESCE(?, email),
-                           updated_at = CURRENT_TIMESTAMP
+        # Update mutable fields (login/email/name/avatar may change on GitHub)
+        db.execute("""
+            UPDATE users SET
+                github_login = ?,
+                email = COALESCE(?, email),
+                name = COALESCE(?, name),
+                avatar_url = COALESCE(?, avatar_url),
+                updated_at = ?
             WHERE github_id = ?
-            """,
-            (github_login, email, github_id)
-        )
+        """, (github_login, email, name, avatar_url, now, github_id))
         db.commit()
-        return dict(row)
 
-    # Create new user
-    user_id = str(uuid.uuid4())
-    db.execute(
-        """
-        INSERT INTO users (user_id, github_id, github_login, email, tier, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'free', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """,
-        (user_id, github_id, github_login, email)
-    )
+        # Return fresh data after update
+        row = db.execute("SELECT * FROM users WHERE github_id = ?", (github_id,)).fetchone()
+        user_dict = dict(row)
+
+        # Log if this was a new user creation
+        if row['created_at'] == now:
+            logger.info(f"Created new user: {github_login} ({user_dict['user_id']})")
+
+        return user_dict
+
+    # This shouldn't happen given INSERT OR IGNORE, but handle gracefully
     db.commit()
-
-    logger.info(f"Created new user: {github_login} ({user_id})")
-
+    logger.warning(f"Unexpected: INSERT OR IGNORE succeeded but SELECT returned None for github_id={github_id}")
     return {
-        'user_id': user_id,
+        'user_id': new_user_id,
         'github_id': github_id,
         'github_login': github_login,
         'email': email,
+        'name': name,
+        'avatar_url': avatar_url,
         'tier': 'free',
-        'has_copilot': False,  # Will be checked when Library is configured
+        'has_copilot': False,
     }
 
 
@@ -188,6 +205,22 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
 
     db = _get_db()
     account = installation_data.get('account', {})
+
+    # CRITICAL: Verify user_id and get canonical user_id by github_id
+    # This prevents storing installation with stale/wrong user_id from session
+    github_id = session.get('user', {}).get('github_id')
+    if github_id:
+        canonical_user = db.execute(
+            "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
+        ).fetchone()
+        if canonical_user:
+            canonical_user_id = canonical_user['user_id']
+            # Fix session if it's out of sync
+            if user_id != canonical_user_id:
+                logger.warning(f"Fixing user_id mismatch: session={user_id}, canonical={canonical_user_id}")
+                user_id = canonical_user_id
+                session['user']['user_id'] = user_id
+                session.modified = True
 
     # Verify user exists (FK constraint requires it)
     user_exists = db.execute(

@@ -36,6 +36,8 @@ class ChordSpec:
     key_phrases: list[str]
     source_entry_id: Optional[str] = None
     tasker_body: Optional[str] = None
+    source_note_content: Optional[str] = None  # Full markdown content of source note
+    source_note_title: Optional[str] = None    # Note title for filename
 
     def get_repo_name(self, org: str) -> str:
         """Get the full repository name."""
@@ -93,6 +95,9 @@ class ChordExecutor:
             # Step 2: Push template files
             self._push_templates(repo_name, spec)
             logger.info(f"Pushed templates to {repo_name}")
+
+            # Step 2.5: Push source note if available (for context)
+            self._push_source_note(repo_name, spec)
 
             # Step 3: Create initial issue
             issue_url, issue_number = self._create_issue(repo_name, spec)
@@ -441,6 +446,38 @@ This project was spawned from a Legato knowledge entry.
             logger.warning(f"Failed to assign to Copilot: {e}")
             return False
 
+    def _push_source_note(self, repo_name: str, spec: ChordSpec):
+        """Push the source note to notes/ directory if available.
+
+        This provides the spawned chord with direct context from the
+        Library entry that triggered it.
+
+        Args:
+            repo_name: Full repository name (org/repo)
+            spec: ChordSpec containing source note content and title
+        """
+        if not spec.source_note_content or not spec.source_note_title:
+            return
+
+        # Sanitize filename - remove special chars, replace spaces with dashes
+        safe_title = re.sub(r'[^\w\s-]', '', spec.source_note_title)
+        safe_title = re.sub(r'\s+', '-', safe_title).strip('-')
+        if not safe_title:
+            safe_title = "source-note"
+
+        filename = f"notes/{safe_title}.md"
+
+        try:
+            self._create_or_update_file(
+                repo_name,
+                filename,
+                spec.source_note_content,
+                f"Add source note: {spec.source_note_title}"
+            )
+            logger.info(f"Pushed source note to {repo_name}/{filename}")
+        except Exception as e:
+            logger.warning(f"Failed to push source note to {repo_name}: {e}")
+
 
 def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
     """
@@ -669,6 +706,8 @@ def spawn_chord(
     tasker_body: str = None,
     user_id: str = None,
     assign_copilot: bool = True,
+    source_note_content: str = None,
+    source_note_title: str = None,
 ) -> dict:
     """
     Convenience function to spawn a chord.
@@ -684,6 +723,8 @@ def spawn_chord(
         tasker_body: Custom tasker body (auto-generated if not provided)
         user_id: User ID for multi-tenant mode
         assign_copilot: Whether to assign to Copilot
+        source_note_content: Full markdown content of the source Library note
+        source_note_title: Title of the source note (used for filename)
 
     Returns:
         Result dict with success status, URLs, etc.
@@ -697,6 +738,8 @@ def spawn_chord(
         key_phrases=key_phrases or [],
         source_entry_id=source_entry_id,
         tasker_body=tasker_body,
+        source_note_content=source_note_content,
+        source_note_title=source_note_title,
     )
 
     executor = get_executor(user_id)

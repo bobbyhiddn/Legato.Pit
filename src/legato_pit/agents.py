@@ -752,7 +752,7 @@ def api_approve_agent(queue_id: str):
         data = request.get_json() or {}
         additional_comments = data.get('additional_comments', '').strip()
 
-        username = user.get('login', 'unknown')
+        username = user.get('username', 'unknown')
         org = user.get('username')  # Use user's org, not hardcoded
 
         # Get the queued agent - MUST belong to current user
@@ -945,7 +945,7 @@ def api_retry_spawn(queue_id: str):
                 }), 401
 
         agents_db = get_db()
-        username = user.get('login', 'unknown')
+        username = user.get('username', 'unknown')
         org = user.get('username')
 
         # Get the failed agent - MUST belong to current user
@@ -1054,7 +1054,7 @@ def api_reject_all():
         db = get_db()
         user = session.get('user', {})
         user_id = user.get('user_id')
-        username = user.get('login', 'unknown')
+        username = user.get('username', 'unknown')
 
         # Get user token for GitHub operations
         token = get_user_installation_token(user_id, 'library') if user_id else None
@@ -1917,6 +1917,27 @@ def trigger_spawn_workflow(agent: dict, user_id: str = None) -> dict:
         except json.JSONDecodeError:
             signal_json = {}
 
+    # Fetch source note content if we have a related entry
+    # This provides the chord with direct context from the Library note
+    source_note_content = None
+    source_note_title = None
+    related_entry_id = agent.get('related_entry_id')
+    if related_entry_id:
+        try:
+            legato_db = get_legato_db()
+            # Handle comma-separated entry IDs (take first one for source note)
+            entry_id = related_entry_id.split(',')[0].strip()
+            entry = legato_db.execute(
+                "SELECT title, content FROM knowledge_entries WHERE entry_id = ?",
+                (entry_id,)
+            ).fetchone()
+            if entry:
+                source_note_title = entry['title']
+                source_note_content = entry['content']
+                logger.info(f"Fetched source note for chord: {source_note_title}")
+        except Exception as e:
+            logger.warning(f"Could not fetch source note for chord: {e}")
+
     try:
         result = spawn_chord(
             name=agent['project_name'],
@@ -1929,6 +1950,8 @@ def trigger_spawn_workflow(agent: dict, user_id: str = None) -> dict:
             tasker_body=agent.get('tasker_body'),
             user_id=user_id,
             assign_copilot=True,
+            source_note_content=source_note_content,
+            source_note_title=source_note_title,
         )
 
         if result.get('success'):
