@@ -151,9 +151,9 @@
         <ul class="item-list">
             {% for inst in user.installations %}
             <li>
-                Installation #{{ inst.installation_id }}
+                Installation #{{ inst.get('installation_id', 'N/A') }}
                 <span style="color: var(--text-secondary); font-size: 0.875rem;">
-                    - Added {{ inst.created_at[:10] if inst.created_at else 'unknown' }}
+                    - Added {{ inst.get('created_at', '')[:10] if inst.get('created_at') else 'unknown' }}
                 </span>
             </li>
             {% endfor %}

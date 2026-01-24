@@ -161,46 +161,61 @@ def user_detail(user_id: str):
     """View detailed info for a specific user."""
     from .rag.database import init_db
 
-    db = init_db()
-
-    user = db.execute("""
-        SELECT * FROM users WHERE user_id = ?
-    """, (user_id,)).fetchone()
-
-    if not user:
-        flash('User not found.', 'error')
-        return redirect(url_for('admin.index'))
-
-    user = dict(user)
-
-    # Get user's installations
-    installations = db.execute("""
-        SELECT * FROM github_app_installations WHERE user_id = ?
-    """, (user_id,)).fetchall()
-    user['installations'] = [dict(i) for i in installations]
-
-    # Get user's repos
-    repos = db.execute("""
-        SELECT * FROM user_repos WHERE user_id = ?
-    """, (user_id,)).fetchall()
-    user['repos'] = [dict(r) for r in repos]
-
-    # Get user's agents
     try:
-        from .rag.database import init_agents_db
-        agents_db = init_agents_db()
-        agents = agents_db.execute("""
-            SELECT queue_id, project_name, status, created_at, approved_at
-            FROM agent_queue
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT 20
-        """, (user_id,)).fetchall()
-        user['agents'] = [dict(a) for a in agents]
-    except Exception:
-        user['agents'] = []
+        db = init_db()
 
-    return render_template('admin/user_detail.html', user=user)
+        user = db.execute("""
+            SELECT * FROM users WHERE user_id = ?
+        """, (user_id,)).fetchone()
+
+        if not user:
+            flash('User not found.', 'error')
+            return redirect(url_for('admin.index'))
+
+        user = dict(user)
+
+        # Get user's installations
+        try:
+            installations = db.execute("""
+                SELECT * FROM github_app_installations WHERE user_id = ?
+            """, (user_id,)).fetchall()
+            user['installations'] = [dict(i) for i in installations]
+        except Exception as e:
+            logger.error(f"Failed to get installations: {e}")
+            user['installations'] = []
+
+        # Get user's repos
+        try:
+            repos = db.execute("""
+                SELECT * FROM user_repos WHERE user_id = ?
+            """, (user_id,)).fetchall()
+            user['repos'] = [dict(r) for r in repos]
+        except Exception as e:
+            logger.error(f"Failed to get repos: {e}")
+            user['repos'] = []
+
+        # Get user's agents
+        try:
+            from .rag.database import init_agents_db
+            agents_db = init_agents_db()
+            agents = agents_db.execute("""
+                SELECT queue_id, project_name, status, created_at, approved_at
+                FROM agent_queue
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+            """, (user_id,)).fetchall()
+            user['agents'] = [dict(a) for a in agents]
+        except Exception as e:
+            logger.error(f"Failed to get agents: {e}")
+            user['agents'] = []
+
+        return render_template('admin/user_detail.html', user=user)
+
+    except Exception as e:
+        logger.error(f"User detail view failed: {e}")
+        flash(f'Error loading user: {e}', 'error')
+        return redirect(url_for('admin.index'))
 
 
 @admin_bp.route('/api/user/<user_id>/tier', methods=['POST'])
