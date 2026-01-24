@@ -33,3 +33,6 @@ PyJWT>=2.8.0
 
 # Cryptography for token encryption
 cryptography>=41.0.0
+
+# Stripe for subscription billing
+stripe>=7.0.0
