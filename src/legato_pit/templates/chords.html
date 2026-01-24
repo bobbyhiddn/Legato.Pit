@@ -189,6 +189,26 @@
         cursor: not-allowed;
     }
 
+    .chord-linked-notes {
+        margin-top: 0.5rem;
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+    }
+
+    .linked-label {
+        color: var(--text-muted);
+        margin-right: 0.25rem;
+    }
+
+    .linked-note {
+        color: var(--accent-color);
+        text-decoration: none;
+    }
+
+    .linked-note:hover {
+        text-decoration: underline;
+    }
+
     .target-chord-name {
         color: var(--accent-color);
         font-weight: 500;
@@ -232,6 +252,15 @@
                     <span class="badge badge-topic">{{ topic }}</span>
                     {% endfor %}
                 </div>
+
+                {% if repo.linked_notes %}
+                <div class="chord-linked-notes">
+                    <span class="linked-label">Linked notes:</span>
+                    {% for note in repo.linked_notes %}
+                    <a href="{{ url_for('library.view_entry', entry_id=note.entry_id) }}" class="linked-note">{{ note.title }}</a>{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                </div>
+                {% endif %}
 
                 <div class="chord-details" id="details-{{ loop.index }}" style="display: none;">
                     <div class="chord-loading">Loading...</div>

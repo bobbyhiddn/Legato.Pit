@@ -57,8 +57,15 @@ def fetch_chord_repos(token: str, org: str) -> list[dict]:
         response.raise_for_status()
         data = response.json()
 
+        # Get linked notes from database
+        from .rag.database import get_user_legato_db
+        try:
+            legato_db = get_user_legato_db()
+        except Exception:
+            legato_db = None
+
         for repo in data.get("items", []):
-            repos.append({
+            repo_data = {
                 "name": repo["name"],
                 "full_name": repo["full_name"],
                 "description": repo["description"],
@@ -68,7 +75,25 @@ def fetch_chord_repos(token: str, org: str) -> list[dict]:
                 "open_issues_count": repo["open_issues_count"],
                 "topics": repo.get("topics", []),
                 "default_branch": repo.get("default_branch", "main"),
-            })
+                "linked_notes": [],
+            }
+
+            # Look up linked notes from knowledge_entries
+            if legato_db:
+                try:
+                    linked = legato_db.execute(
+                        """
+                        SELECT entry_id, title, category
+                        FROM knowledge_entries
+                        WHERE chord_repo = ? OR chord_repo LIKE ?
+                        """,
+                        (repo["full_name"], f"%/{repo['name']}"),
+                    ).fetchall()
+                    repo_data["linked_notes"] = [dict(n) for n in linked]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch linked notes for {repo['full_name']}: {e}")
+
+            repos.append(repo_data)
 
     except requests.RequestException as e:
         logger.error(f"Failed to fetch chord repos: {e}")

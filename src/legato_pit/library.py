@@ -440,29 +440,48 @@ def view_entry(entry_id: str):
         entry_dict['key_phrases'] = []
 
     # Check if a Chord was spawned from this Note (agent_queue is in agents.db)
-    agents_db = get_agents_db()
-    chord_info = agents_db.execute(
-        """
-        SELECT queue_id, project_name, status, approved_at
-        FROM agent_queue
-        WHERE source_transcript = ?
-        AND status = 'approved'
-        ORDER BY approved_at DESC
-        LIMIT 1
-        """,
-        (f"library:{entry_id}",),
-    ).fetchone()
+    # Also check chord_repo in knowledge_entries for direct linking
+    chord_info = None
 
-    if chord_info:
-        # Use user's org for chord URL
+    # First check if chord_repo is set directly on the entry
+    if entry_dict.get('chord_repo') and entry_dict.get('chord_status') == 'active':
+        chord_repo = entry_dict['chord_repo']
+        # chord_repo is like "bobbyhiddn/tangora_card_generator.Chord"
+        repo_name = chord_repo.split('/')[-1] if '/' in chord_repo else chord_repo
+        project_name = repo_name.replace('.Chord', '')
         user = session.get('user', {})
         org = user.get('username') or current_app.config.get('LEGATO_ORG')
         entry_dict['chord'] = {
-            'name': chord_info['project_name'],
-            'repo': f"{chord_info['project_name']}.Chord",
-            'url': f"https://github.com/{org}/{chord_info['project_name']}.Chord" if org else None,
-            'approved_at': chord_info['approved_at'],
+            'name': project_name,
+            'repo': repo_name,
+            'url': f"https://github.com/{chord_repo}",
+            'approved_at': None,
         }
+    else:
+        # Fall back to checking agent_queue for legacy entries
+        agents_db = get_agents_db()
+        chord_info = agents_db.execute(
+            """
+            SELECT queue_id, project_name, status, approved_at
+            FROM agent_queue
+            WHERE (related_entry_id = ? OR related_entry_id LIKE ?)
+            AND status = 'spawned'
+            ORDER BY approved_at DESC
+            LIMIT 1
+            """,
+            (entry_id, f"%{entry_id}%"),
+        ).fetchone()
+
+        if chord_info:
+            # Use user's org for chord URL
+            user = session.get('user', {})
+            org = user.get('username') or current_app.config.get('LEGATO_ORG')
+            entry_dict['chord'] = {
+                'name': chord_info['project_name'],
+                'repo': f"{chord_info['project_name']}.Chord",
+                'url': f"https://github.com/{org}/{chord_info['project_name']}.Chord" if org else None,
+                'approved_at': chord_info['approved_at'],
+            }
 
     # Get categories for sidebar (from user_categories with counts)
     categories = get_categories_with_counts()
