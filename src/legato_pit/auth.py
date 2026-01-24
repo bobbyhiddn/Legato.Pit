@@ -1753,15 +1753,15 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
     """
     from datetime import datetime
 
-    logger.debug(f"_get_user_oauth_token called for user_id={user_id}")
+    logger.info(f"_get_user_oauth_token called for user_id={user_id}")
 
     # Try session first
     oauth_token = session.get('github_token')
     if oauth_token:
-        logger.debug(f"Found OAuth token in session for user {user_id} (len={len(oauth_token)})")
+        logger.info(f"Found OAuth token in session for user {user_id} (len={len(oauth_token)}, prefix={oauth_token[:10] if len(oauth_token) > 10 else 'N/A'}...)")
         return oauth_token
 
-    logger.debug(f"No session token, checking database for user {user_id}")
+    logger.info(f"No session token, checking database for user {user_id}")
 
     # Try database
     from .crypto import decrypt_for_user, encrypt_for_user
@@ -1776,7 +1776,7 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
         logger.warning(f"No user row found in database for user_id={user_id}")
         return None
 
-    logger.debug(f"Found user row: has_oauth={bool(row['oauth_token_encrypted'])}, expires_at={row['oauth_token_expires_at']}, has_refresh={bool(row['refresh_token_encrypted'])}")
+    logger.info(f"Found user row: has_oauth={bool(row['oauth_token_encrypted'])}, expires_at={row['oauth_token_expires_at']}, has_refresh={bool(row['refresh_token_encrypted'])}")
 
     # Check if stored token is still valid
     if row['oauth_token_encrypted']:

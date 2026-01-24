@@ -489,6 +489,20 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
         if not token:
             raise RuntimeError("No OAuth token available for user - please re-authenticate")
 
+        # Validate token before creating executor
+        import requests
+        test_resp = requests.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            timeout=10
+        )
+        if test_resp.status_code != 200:
+            logger.error(f"Token validation failed: {test_resp.status_code} - {test_resp.text[:200]}")
+            raise RuntimeError(f"OAuth token is invalid (status {test_resp.status_code}). Please re-authenticate.")
+        else:
+            user_data = test_resp.json()
+            logger.info(f"Token validated for GitHub user: {user_data.get('login')}")
+
         return ChordExecutor(token, org)
 
     else:
