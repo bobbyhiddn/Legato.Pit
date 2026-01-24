@@ -122,11 +122,11 @@ def index():
             u.tier,
             u.has_copilot,
             u.created_at,
-            u.last_login,
+            u.updated_at,
             (SELECT COUNT(*) FROM github_app_installations WHERE user_id = u.user_id) as installation_count,
             (SELECT COUNT(*) FROM user_repos WHERE user_id = u.user_id) as repo_count
         FROM users u
-        ORDER BY u.last_login DESC NULLS LAST
+        ORDER BY u.updated_at DESC NULLS LAST
     """).fetchall()
 
     users = [dict(u) for u in users]

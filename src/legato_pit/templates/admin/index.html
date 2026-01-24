@@ -176,7 +176,7 @@
                 <th>Tier</th>
                 <th>Copilot</th>
                 <th>Repos</th>
-                <th>Last Login</th>
+                <th>Updated</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -205,7 +205,7 @@
                     </button>
                 </td>
                 <td>{{ user.repo_count }}</td>
-                <td>{{ user.last_login[:10] if user.last_login else '-' }}</td>
+                <td>{{ user.updated_at[:10] if user.updated_at else '-' }}</td>
                 <td>
                     <a href="{{ url_for('admin.user_detail', user_id=user.user_id) }}" class="action-btn">View</a>
                 </td>
