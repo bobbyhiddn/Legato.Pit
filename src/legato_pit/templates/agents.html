@@ -515,7 +515,7 @@ async function approveAgent(queueId) {
             // OAuth token expired - swap Approve button with Re-authenticate button
             showError('GitHub authorization expired. Please re-authenticate to continue.');
             const actionsDiv = item.querySelector('.agent-actions');
-            const reauthUrl = (data.reauth_url || '/auth/github-app') + '?next=/agents/';
+            const reauthUrl = (data.reauth_url || '/auth/github-app-login') + '?next=/agents/';
             actionsDiv.innerHTML = `
                 <a href="${reauthUrl}" class="btn btn-warning">Re-authenticate</a>
                 <button class="btn btn-secondary" onclick="rejectAgent('${queueId}')">Reject</button>
@@ -614,7 +614,7 @@ async function retrySpawn(queueId, button) {
         } else if (data.needs_reauth) {
             // OAuth token expired - swap Retry button with Re-authenticate button
             showError('GitHub authorization expired. Please re-authenticate to continue.');
-            const reauthUrl = (data.reauth_url || '/auth/github-app') + '?next=/agents/';
+            const reauthUrl = (data.reauth_url || '/auth/github-app-login') + '?next=/agents/';
             button.outerHTML = `<a href="${reauthUrl}" class="btn btn-warning">Re-authenticate</a>`;
         } else {
             showError(data.error || 'Spawn failed again');

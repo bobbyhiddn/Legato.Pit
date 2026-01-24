@@ -742,7 +742,7 @@ def api_approve_agent(queue_id: str):
                 return jsonify({
                     'error': 'GitHub authorization expired. Please re-authenticate to approve agents.',
                     'needs_reauth': True,
-                    'reauth_url': '/auth/github-app'
+                    'reauth_url': '/auth/github-app-login'
                 }), 401
 
         agents_db = get_db()
@@ -923,7 +923,7 @@ def api_retry_spawn(queue_id: str):
                 return jsonify({
                     'error': 'GitHub authorization expired. Please re-authenticate to retry spawning.',
                     'needs_reauth': True,
-                    'reauth_url': '/auth/github-app'
+                    'reauth_url': '/auth/github-app-login'
                 }), 401
 
         agents_db = get_db()

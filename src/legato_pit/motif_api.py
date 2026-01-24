@@ -106,7 +106,7 @@ def submit_job():
             return jsonify({
                 'error': 'GitHub authorization expired. Please re-authenticate.',
                 'needs_reauth': True,
-                'reauth_url': '/auth/github-app'
+                'reauth_url': '/auth/github-app-login'
             }), 401
 
     else:
