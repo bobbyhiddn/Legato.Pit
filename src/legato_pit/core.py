@@ -466,9 +466,10 @@ def get_user_tier(user_id: str) -> str:
 
 
 def get_current_user_tier() -> str:
-    """Get the current session user's tier.
+    """Get the current session user's effective tier.
 
     In single-tenant mode, this returns a non-free value so SaaS gating is bypassed.
+    Uses get_effective_tier() which properly handles beta users (they get 'managed' tier).
     """
     from flask import current_app
 
@@ -476,7 +477,7 @@ def get_current_user_tier() -> str:
         return 'single-tenant'
 
     user_id = session.get('user', {}).get('user_id')
-    return get_user_tier(user_id)
+    return get_effective_tier(user_id)
 
 
 def is_paid_tier(tier: str) -> bool:
