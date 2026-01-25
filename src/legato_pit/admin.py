@@ -120,6 +120,7 @@ def index():
             u.github_login,
             u.email,
             u.tier,
+            u.is_beta,
             u.has_copilot,
             u.created_at,
             u.updated_at,
@@ -257,7 +258,7 @@ def api_set_user_tier(user_id: str):
         return jsonify({'error': 'No data provided'}), 400
 
     tier = data.get('tier', '').strip()
-    valid_tiers = ['trial', 'byok', 'managed', 'free', 'beta', 'starter', 'pro', 'founder']
+    valid_tiers = ['trial', 'byok', 'managed']  # Beta is a separate flag (is_beta), not a tier
 
     if tier not in valid_tiers:
         return jsonify({'error': f'Invalid tier. Must be one of: {", ".join(valid_tiers)}'}), 400

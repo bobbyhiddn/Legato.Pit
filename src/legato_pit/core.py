@@ -507,8 +507,8 @@ def get_trial_status(user_id: str) -> dict:
     if not row:
         return {'is_trial': False, 'days_remaining': 0, 'is_expired': True}
 
-    # Beta users are never in trial
-    if row['is_beta']:
+    # Beta users are never in trial (check both is_beta flag and legacy tier='beta')
+    if row['is_beta'] or row['tier'] == 'beta':
         return {'is_trial': False, 'days_remaining': 0, 'is_expired': False, 'is_beta': True}
 
     # Paid users are not in trial
@@ -569,7 +569,8 @@ def get_effective_tier(user_id: str) -> str:
         return 'trial'
 
     # Beta users get managed tier free
-    if row['is_beta']:
+    # Check both is_beta flag AND legacy tier='beta' for backwards compatibility
+    if row['is_beta'] or row['tier'] == 'beta':
         return 'managed'
 
     # Return actual tier

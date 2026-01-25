@@ -174,6 +174,7 @@
                 <th>User</th>
                 <th>Email</th>
                 <th>Tier</th>
+                <th>Beta</th>
                 <th>Copilot</th>
                 <th>Repos</th>
                 <th>Updated</th>
@@ -190,13 +191,17 @@
                 </td>
                 <td>{{ user.email or '-' }}</td>
                 <td>
-                    <select class="tier-select" onchange="setTier('{{ user.user_id }}', this.value)" data-current="{{ user.tier or 'free' }}">
-                        <option value="free" {% if user.tier == 'free' or not user.tier %}selected{% endif %}>Free</option>
-                        <option value="beta" {% if user.tier == 'beta' %}selected{% endif %}>Beta</option>
-                        <option value="starter" {% if user.tier == 'starter' %}selected{% endif %}>Starter</option>
-                        <option value="pro" {% if user.tier == 'pro' %}selected{% endif %}>Pro</option>
-                        <option value="founder" {% if user.tier == 'founder' %}selected{% endif %}>Founder</option>
+                    <select class="tier-select" onchange="setTier('{{ user.user_id }}', this.value)" data-current="{{ user.tier or 'trial' }}">
+                        <option value="trial" {% if user.tier == 'trial' or not user.tier %}selected{% endif %}>Trial</option>
+                        <option value="byok" {% if user.tier == 'byok' %}selected{% endif %}>BYOK</option>
+                        <option value="managed" {% if user.tier == 'managed' %}selected{% endif %}>Managed</option>
                     </select>
+                </td>
+                <td>
+                    <button class="copilot-badge {% if user.is_beta %}copilot-yes{% else %}copilot-no{% endif %}"
+                            onclick="toggleBeta('{{ user.user_id }}', {{ 'false' if user.is_beta else 'true' }})">
+                        {{ 'Yes' if user.is_beta else 'No' }}
+                    </button>
                 </td>
                 <td>
                     <button class="copilot-badge {% if user.has_copilot %}copilot-yes{% else %}copilot-no{% endif %}"
@@ -242,6 +247,25 @@ async function toggleCopilot(userId, enable) {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({has_copilot: enable})
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        // Reload to show updated state
+        location.reload();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function toggleBeta(userId, enable) {
+    try {
+        const resp = await fetch(`/admin/api/user/${userId}/beta`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({is_beta: enable})
         });
         const data = await resp.json();
         if (!resp.ok) {
