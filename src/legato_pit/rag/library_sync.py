@@ -443,27 +443,34 @@ class LibrarySync:
                 (path,)
             ).fetchone()
 
-            if needs_chord:
-                # Entry needs a chord
-                if chord_status:
-                    # Frontmatter explicitly sets chord_status - use it
-                    final_chord_status = chord_status
-                    final_chord_repo = chord_repo
-                    final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
-                    # Preserve 'pending', 'active', or 'rejected' status from DB
-                    # (GitHub frontmatter may not have propagated yet after agent approval/rejection)
-                    final_chord_status = existing_data['chord_status']
-                    final_chord_repo = existing_data['chord_repo']
-                    final_chord_id = existing_data['chord_id']
-                else:
-                    # No frontmatter chord_status, not pending/active/rejected in DB
-                    # Reset to null so it can be queued
-                    final_chord_status = None
-                    final_chord_repo = None
-                    final_chord_id = None
+            # Chord status logic:
+            # 1. Frontmatter has explicit chord_status/chord_repo → use it
+            # 2. DB has active/pending chord → preserve it (frontmatter may lag behind)
+            # 3. needs_chord=true but no status → ready to be queued
+            # 4. needs_chord=false and no chord → nothing needed
+            if chord_status or chord_repo:
+                # Frontmatter explicitly sets chord info - use it
+                final_chord_status = chord_status
+                final_chord_repo = chord_repo
+                final_chord_id = chord_id
+            elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+                # Preserve existing chord status from DB
+                # (GitHub frontmatter may not have propagated yet after agent approval/rejection)
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif existing_data and existing_data['chord_repo']:
+                # Has a chord_repo but no status - keep it
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif needs_chord:
+                # Needs a chord but doesn't have one yet - ready to be queued
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
             else:
-                # Entry doesn't need a chord - clear chord fields
+                # No chord needed and no existing chord - clear fields
                 final_chord_status = None
                 final_chord_repo = None
                 final_chord_id = None
@@ -650,21 +657,29 @@ class LibrarySync:
                 (relative_path,)
             ).fetchone()
 
-            if needs_chord:
-                if chord_status:
-                    final_chord_status = chord_status
-                    final_chord_repo = chord_repo
-                    final_chord_id = chord_id
-                elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
-                    # Preserve 'pending', 'active', or 'rejected' status from DB
-                    final_chord_status = existing_data['chord_status']
-                    final_chord_repo = existing_data['chord_repo']
-                    final_chord_id = existing_data['chord_id']
-                else:
-                    final_chord_status = None
-                    final_chord_repo = None
-                    final_chord_id = None
+            # Chord status logic - preserve existing chord relationships
+            if chord_status or chord_repo:
+                # Frontmatter explicitly sets chord info - use it
+                final_chord_status = chord_status
+                final_chord_repo = chord_repo
+                final_chord_id = chord_id
+            elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+                # Preserve existing chord status from DB
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif existing_data and existing_data['chord_repo']:
+                # Has a chord_repo but no status - keep it
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif needs_chord:
+                # Needs a chord but doesn't have one yet
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
             else:
+                # No chord needed and no existing chord
                 final_chord_status = None
                 final_chord_repo = None
                 final_chord_id = None
