@@ -510,16 +510,18 @@ def handle_mcp_github_callback():
             callback += f"&state={oauth_request['state']}"
         return redirect(callback)
 
-    # Verify user is in allowlist
-    allowed_users = current_app.config.get('GITHUB_ALLOWED_USERS', [])
-    allowed_users = [u.strip() for u in allowed_users if u.strip()]
+    # Verify user is in allowlist (only in single-tenant mode)
+    # In multi-tenant mode, access control is handled by payment tier and GitHub App installation
+    if current_app.config.get('LEGATO_MODE') != 'multi-tenant':
+        allowed_users = current_app.config.get('GITHUB_ALLOWED_USERS', [])
+        allowed_users = [u.strip() for u in allowed_users if u.strip()]
 
-    if allowed_users and github_user.get('login') not in allowed_users:
-        logger.warning(f"MCP OAuth: Unauthorized user: {github_user.get('login')}")
-        callback = f"{oauth_request['redirect_uri']}?error=access_denied&error_description=User+not+authorized"
-        if oauth_request.get('state'):
-            callback += f"&state={oauth_request['state']}"
-        return redirect(callback)
+        if allowed_users and github_user.get('login') not in allowed_users:
+            logger.warning(f"MCP OAuth: Unauthorized user: {github_user.get('login')}")
+            callback = f"{oauth_request['redirect_uri']}?error=access_denied&error_description=User+not+authorized"
+            if oauth_request.get('state'):
+                callback += f"&state={oauth_request['state']}"
+            return redirect(callback)
 
     # Generate our own authorization code
     auth_code = secrets.token_urlsafe(32)
