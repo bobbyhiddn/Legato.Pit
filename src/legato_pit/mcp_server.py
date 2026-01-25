@@ -1753,19 +1753,20 @@ def tool_get_note_context(args: dict) -> dict:
             except Exception as e:
                 logger.warning(f"Could not get semantic neighbors: {e}")
 
-    # Get related projects from agent queue
+    # Get related projects from agent queue (filtered by user for multi-tenant)
     from .rag.database import get_db_path, get_connection
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
     try:
         agents_db = get_connection(get_db_path("agents.db"))
         projects = agents_db.execute(
             """
             SELECT queue_id, project_name, project_type, status, title
             FROM agent_queue
-            WHERE related_entry_id LIKE ?
+            WHERE related_entry_id LIKE ? AND user_id = ?
             ORDER BY created_at DESC
             LIMIT 5
             """,
-            (f'%{entry_id}%',)
+            (f'%{entry_id}%', user_id)
         ).fetchall()
     except Exception:
         projects = []

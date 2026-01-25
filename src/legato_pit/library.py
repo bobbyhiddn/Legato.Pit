@@ -464,7 +464,9 @@ def view_entry(entry_id: str):
             'approved_at': None,
         }
     else:
-        # Fall back to checking agent_queue for legacy entries
+        # Fall back to checking agent_queue for legacy entries (filtered by user_id)
+        user = session.get('user', {})
+        user_id = user.get('user_id')
         agents_db = get_agents_db()
         chord_info = agents_db.execute(
             """
@@ -472,15 +474,15 @@ def view_entry(entry_id: str):
             FROM agent_queue
             WHERE (related_entry_id = ? OR related_entry_id LIKE ?)
             AND status = 'spawned'
+            AND user_id = ?
             ORDER BY approved_at DESC
             LIMIT 1
             """,
-            (entry_id, f"%{entry_id}%"),
+            (entry_id, f"%{entry_id}%", user_id),
         ).fetchone()
 
         if chord_info:
             # Use user's org for chord URL
-            user = session.get('user', {})
             org = user.get('username') or current_app.config.get('LEGATO_ORG')
             entry_dict['chord'] = {
                 'name': chord_info['project_name'],
@@ -2134,7 +2136,7 @@ def api_delete_entry(entry_id: str):
         )
         db.commit()
 
-        # Delete any linked pending agents
+        # Delete any linked pending agents (filtered by user_id for multi-tenant)
         try:
             from .rag.database import init_agents_db
             agents_db = init_agents_db()
@@ -2143,9 +2145,10 @@ def api_delete_entry(entry_id: str):
                 """
                 DELETE FROM agent_queue
                 WHERE status = 'pending'
+                AND user_id = ?
                 AND (related_entry_id = ? OR related_entry_id LIKE ? OR related_entry_id LIKE ? OR related_entry_id LIKE ?)
                 """,
-                (entry_id, f"{entry_id},%", f"%,{entry_id},%", f"%,{entry_id}")
+                (user_id, entry_id, f"{entry_id},%", f"%,{entry_id},%", f"%,{entry_id}")
             )
             agents_db.commit()
             logger.info(f"Cleaned up any pending agents linked to {entry_id}")
