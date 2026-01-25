@@ -173,7 +173,7 @@ def index():
 @login_required
 def upload():
     """Handle transcript upload using Pit-native motif processing."""
-    from .motif_processor import MotifProcessor
+    from .motif_processor import process_motif_sync
     from .auth import get_user_api_key
 
     user = session.get('user', {})
@@ -233,8 +233,7 @@ def upload():
 
     # Process using Pit-native motif processor
     try:
-        processor = MotifProcessor(user_id=user_id)
-        result = processor.process_transcript(transcript_text, source_id)
+        result = process_motif_sync(transcript_text, user_id, source_id)
 
         if result.get('success'):
             entry_count = len(result.get('entry_ids', []))
