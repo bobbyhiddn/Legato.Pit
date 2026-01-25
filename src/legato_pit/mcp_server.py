@@ -1137,11 +1137,12 @@ def tool_spawn_agent(args: dict) -> dict:
     # Use first note as primary
     primary = notes[0]
 
+    # Get user context from MCP auth (needed for both incident and queue flows)
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    github_login = g.mcp_user.get('sub') if hasattr(g, 'mcp_user') else None
+
     # If targeting an existing chord, create an incident issue instead of queuing
     if target_chord_repo:
-        # Get user context from MCP auth
-        user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
-        github_login = g.mcp_user.get('sub') if hasattr(g, 'mcp_user') else None
         return _create_incident_on_chord(target_chord_repo, notes, additional_comments, user_id, github_login)
 
     # Generate project name if not provided
@@ -1204,8 +1205,8 @@ def tool_spawn_agent(args: dict) -> dict:
             """
             INSERT INTO agent_queue
             (queue_id, project_name, project_type, title, description,
-             signal_json, tasker_body, source_transcript, related_entry_id, comments, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+             signal_json, tasker_body, source_transcript, related_entry_id, comments, status, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             """,
             (
                 queue_id,
@@ -1218,6 +1219,7 @@ def tool_spawn_agent(args: dict) -> dict:
                 'mcp-claude',
                 ','.join(n['entry_id'] for n in notes),
                 json.dumps(initial_comments),
+                user_id,  # Multi-tenant: isolate by user
             )
         )
         agents_db.commit()
