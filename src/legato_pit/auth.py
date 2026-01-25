@@ -659,11 +659,22 @@ def github_app_callback():
         # Check if user has any installations
         db = _get_db()
         installations = db.execute(
-            "SELECT COUNT(*) as count FROM github_app_installations WHERE user_id = ?",
+            "SELECT installation_id, account_login FROM github_app_installations WHERE user_id = ?",
             (user['user_id'],)
-        ).fetchone()
+        ).fetchall()
 
-        if installations and installations['count'] > 0:
+        if installations and len(installations) > 0:
+            # User has installations - verify user_repos is also set up
+            library_exists = db.execute(
+                "SELECT 1 FROM user_repos WHERE user_id = ? AND repo_type = 'library'",
+                (user['user_id'],)
+            ).fetchone()
+
+            if not library_exists:
+                # Repair: try to auto-detect and configure library from installation
+                logger.warning(f"User {github_login} has installation but no library configured - attempting repair")
+                _repair_user_repos(user['user_id'], installations[0]['installation_id'], access_token, db)
+
             # User has installations
             flash(f'Welcome back, {name or github_login}!', 'success')
             # Redirect to stored next URL or dashboard
@@ -1559,6 +1570,99 @@ def _clear_stale_installation(user_id: str, installation_id: int, db):
         logger.info(f"Cleared stale installation {installation_id} for user {user_id}")
     except Exception as e:
         logger.error(f"Failed to clear stale installation: {e}")
+
+
+def _repair_user_repos(user_id: str, installation_id: int, token: str, db):
+    """Attempt to repair missing user_repos entries (called during login).
+
+    Called during login when user has an installation but no library configured.
+    Tries to auto-detect Library repo from the installation's accessible repos.
+    """
+    return _do_repair_user_repos(user_id, installation_id, db)
+
+
+def _repair_user_repos_from_installation(user_id: str, db) -> bool:
+    """Attempt to repair missing user_repos entries (called from decorator).
+
+    Looks up user's installation and tries to auto-detect Library repo.
+    Returns True if repair succeeded, False otherwise.
+    """
+    try:
+        # Find user's installation
+        installation = db.execute(
+            "SELECT installation_id FROM github_app_installations WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if not installation:
+            logger.debug(f"No installation found for user {user_id} during repair")
+            return False
+
+        return _do_repair_user_repos(user_id, installation['installation_id'], db)
+
+    except Exception as e:
+        logger.error(f"Failed to repair user_repos from installation: {e}")
+        return False
+
+
+def _do_repair_user_repos(user_id: str, installation_id: int, db) -> bool:
+    """Core repair logic - auto-detect and configure Library repo.
+
+    Returns True if repair succeeded, False otherwise.
+    """
+    try:
+        # Get accessible repos for this installation
+        from .github_app import get_installation_access_token
+        inst_token = get_installation_access_token(installation_id)
+
+        if not inst_token:
+            logger.warning(f"Could not get installation token for repair")
+            return False
+
+        # List repos accessible to the installation
+        resp = requests.get(
+            'https://api.github.com/installation/repositories',
+            headers={
+                'Authorization': f'Bearer {inst_token["token"]}',
+                'Accept': 'application/vnd.github+json',
+            },
+            timeout=15
+        )
+
+        if not resp.ok:
+            logger.warning(f"Could not list installation repos: {resp.status_code}")
+            return False
+
+        repos = resp.json().get('repositories', [])
+
+        # Look for Library repo
+        for repo in repos:
+            repo_name = repo.get('name', '')
+            if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
+                repo_full_name = repo['full_name']
+                logger.info(f"Repair: Found Library repo {repo_full_name} for user {user_id}")
+
+                db.execute(
+                    """
+                    INSERT INTO user_repos (user_id, repo_type, repo_full_name, installation_id, created_at, updated_at)
+                    VALUES (?, 'library', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, repo_type) DO UPDATE SET
+                        repo_full_name = excluded.repo_full_name,
+                        installation_id = excluded.installation_id,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, repo_full_name, installation_id)
+                )
+                db.commit()
+                logger.info(f"Repair: Configured {repo_full_name} as library for user {user_id}")
+                return True
+
+        logger.info(f"Repair: No Library repo found in installation for user {user_id}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Failed to repair user_repos: {e}")
+        return False
 
 
 def check_user_copilot_access(user_id: str, token: str = None, repo_name: str = None) -> bool:

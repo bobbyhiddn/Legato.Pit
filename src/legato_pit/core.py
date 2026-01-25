@@ -642,7 +642,8 @@ def library_required(f):
     """Decorator to require Library setup before accessing features.
 
     Must be used after @login_required. Checks if user has configured
-    their Library repo. If not, redirects to setup page.
+    their Library repo. If not, attempts to auto-repair from installation,
+    then redirects to setup page if repair fails.
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -665,8 +666,14 @@ def library_required(f):
                 ).fetchone()
 
                 if not library:
-                    flash('Please set up your Library first.', 'info')
-                    return redirect(url_for('auth.setup'))
+                    # Attempt auto-repair before redirecting to setup
+                    from .auth import _repair_user_repos_from_installation
+                    if _repair_user_repos_from_installation(user_id, db):
+                        # Repair succeeded, continue to page
+                        pass
+                    else:
+                        flash('Please set up your Library first.', 'info')
+                        return redirect(url_for('auth.setup'))
 
         return f(*args, **kwargs)
     return decorated_function
