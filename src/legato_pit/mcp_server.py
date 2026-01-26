@@ -710,6 +710,26 @@ def generate_slug(title: str) -> str:
     return slug or 'untitled'
 
 
+def generate_entry_id(category: str, title: str, content_hash: str = None) -> str:
+    """Generate a canonical entry ID in the standard format.
+
+    Args:
+        category: Entry category (singular form like 'concept')
+        title: Entry title
+        content_hash: Optional content hash to append for disambiguation
+
+    Returns:
+        Entry ID like "library.concept.my-note-title" or
+        "library.concept.my-note-title-abc123" if disambiguated
+    """
+    slug = generate_slug(title)
+    base_id = f"library.{category}.{slug}"
+    if content_hash:
+        # Append first 6 chars of hash to disambiguate
+        return f"{base_id}-{content_hash[:6]}"
+    return base_id
+
+
 def tool_create_note(args: dict) -> dict:
     """Create a new note in the library."""
     from .rag.database import get_user_categories
@@ -742,15 +762,25 @@ def tool_create_note(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
+    # Compute content hash for integrity/deduplication
+    content_hash = compute_content_hash(content)
+
     # Generate slug and canonical entry_id
     slug = generate_slug(title)
 
     # Canonical ID format: library.{category}.{slug}
     # This matches what library_sync expects from frontmatter
-    entry_id = f"library.{category}.{slug}"
+    entry_id = generate_entry_id(category, title)
 
-    # Compute content hash for integrity/deduplication
-    content_hash = compute_content_hash(content)
+    # Check for entry_id collision with existing entry
+    # This handles long titles that truncate to the same slug
+    collision = db.execute(
+        "SELECT entry_id FROM knowledge_entries WHERE entry_id = ?",
+        (entry_id,)
+    ).fetchone()
+    if collision:
+        logger.info(f"Entry ID collision detected for '{title}', disambiguating with content hash")
+        entry_id = generate_entry_id(category, title, content_hash)
 
     # Build file path
     date_str = datetime.utcnow().strftime('%Y-%m-%d')

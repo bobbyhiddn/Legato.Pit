@@ -211,19 +211,25 @@ def generate_slug(title: str) -> str:
     return slug or 'untitled'
 
 
-def generate_entry_id(category: str, title: str) -> str:
+def generate_entry_id(category: str, title: str, content_hash: str = None) -> str:
     """Generate a canonical entry ID in the standard format.
 
     Args:
         category: Entry category (singular form like 'concept')
         title: Entry title
+        content_hash: Optional content hash to append for disambiguation
 
     Returns:
-        Entry ID like "library.concept.my-note-title"
+        Entry ID like "library.concept.my-note-title" or
+        "library.concept.my-note-title-abc123" if disambiguated
     """
     slug = generate_slug(title)
     # Use singular category form for consistency
-    return f"library.{category}.{slug}"
+    base_id = f"library.{category}.{slug}"
+    if content_hash:
+        # Append first 6 chars of hash to disambiguate
+        return f"{base_id}-{content_hash[:6]}"
+    return base_id
 
 
 class LibrarySync:
@@ -369,6 +375,16 @@ class LibrarySync:
         # Always generate canonical entry_id from normalized category
         # Don't trust frontmatter ID as it may have bad category (e.g., research-topicss)
         entry_id = generate_entry_id(category, title)
+
+        # Check for entry_id collision with different file_path
+        # This handles long titles that truncate to the same slug
+        collision = self.conn.execute(
+            "SELECT file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
+            (entry_id, path)
+        ).fetchone()
+        if collision:
+            logger.info(f"Entry ID collision detected for {path}, disambiguating with content hash")
+            entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -589,6 +605,16 @@ class LibrarySync:
         # Always generate canonical entry_id from normalized category
         # Don't trust frontmatter ID as it may have bad category (e.g., research-topicss)
         entry_id = generate_entry_id(category, title)
+
+        # Check for entry_id collision with different file_path
+        # This handles long titles that truncate to the same slug
+        collision = self.conn.execute(
+            "SELECT file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
+            (entry_id, relative_path)
+        ).fetchone()
+        if collision:
+            logger.info(f"Entry ID collision detected for {relative_path}, disambiguating with content hash")
+            entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
