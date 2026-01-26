@@ -845,6 +845,27 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_run ON sync_history(run_id)")
 
+    # Background jobs for async operations (reset, bulk sync, etc.)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS background_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT UNIQUE NOT NULL,
+            job_type TEXT NOT NULL,
+            user_id TEXT,
+            status TEXT DEFAULT 'pending',
+            progress_current INTEGER DEFAULT 0,
+            progress_total INTEGER DEFAULT 0,
+            progress_message TEXT,
+            result_json TEXT,
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_at DATETIME,
+            completed_at DATETIME
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_jobs_user ON background_jobs(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status)")
+
     conn.commit()
     logger.debug(f"Agents database initialized at {path}")
 

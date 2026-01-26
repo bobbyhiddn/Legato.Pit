@@ -5,7 +5,9 @@ Provides web UI for browsing and searching the knowledge base.
 """
 
 import os
+import json
 import logging
+import secrets
 import threading
 from datetime import datetime
 from typing import Optional
@@ -39,6 +41,99 @@ def get_agents_db():
         from .rag.database import init_agents_db
         g.agents_db_conn = init_agents_db()
     return g.agents_db_conn
+
+
+# ============ Background Job Helpers ============
+
+def create_background_job(job_type: str, user_id: str = None) -> str:
+    """Create a new background job and return its ID.
+
+    Args:
+        job_type: Type of job (e.g., 'reset', 'sync', 'bulk_embed')
+        user_id: User who initiated the job
+
+    Returns:
+        job_id: Unique identifier for the job
+    """
+    from .rag.database import init_agents_db
+
+    job_id = f"job-{secrets.token_hex(8)}"
+    agents_db = init_agents_db()
+
+    agents_db.execute(
+        """
+        INSERT INTO background_jobs (job_id, job_type, user_id, status)
+        VALUES (?, ?, ?, 'pending')
+        """,
+        (job_id, job_type, user_id)
+    )
+    agents_db.commit()
+
+    return job_id
+
+
+def update_job_progress(job_id: str, current: int, total: int, message: str = None):
+    """Update job progress."""
+    from .rag.database import init_agents_db
+
+    agents_db = init_agents_db()
+    agents_db.execute(
+        """
+        UPDATE background_jobs
+        SET progress_current = ?, progress_total = ?, progress_message = ?,
+            status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+        WHERE job_id = ?
+        """,
+        (current, total, message, job_id)
+    )
+    agents_db.commit()
+
+
+def complete_job(job_id: str, result: dict = None, error: str = None):
+    """Mark job as completed (success or failure)."""
+    from .rag.database import init_agents_db
+
+    agents_db = init_agents_db()
+    status = 'failed' if error else 'completed'
+    result_json = json.dumps(result) if result else None
+
+    agents_db.execute(
+        """
+        UPDATE background_jobs
+        SET status = ?, result_json = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP
+        WHERE job_id = ?
+        """,
+        (status, result_json, error, job_id)
+    )
+    agents_db.commit()
+
+
+def get_job_status(job_id: str) -> Optional[dict]:
+    """Get the current status of a job."""
+    from .rag.database import init_agents_db
+
+    agents_db = init_agents_db()
+    row = agents_db.execute(
+        """
+        SELECT job_id, job_type, user_id, status, progress_current, progress_total,
+               progress_message, result_json, error_message, created_at, started_at, completed_at
+        FROM background_jobs WHERE job_id = ?
+        """,
+        (job_id,)
+    ).fetchone()
+
+    if not row:
+        return None
+
+    result = dict(row)
+    if result.get('result_json'):
+        try:
+            result['result'] = json.loads(result['result_json'])
+        except json.JSONDecodeError:
+            result['result'] = None
+    del result['result_json']
+
+    return result
 
 
 def get_categories_with_counts():
@@ -973,27 +1068,40 @@ def api_sync():
 @library_bp.route('/api/reset', methods=['POST'])
 @login_required
 def api_reset():
-    """Clear all entries and re-sync from configured Library.
+    """Clear all entries and re-sync from configured Library (async).
 
     Use this when you've connected a new Library repo and need to
-    clear old data.
+    clear old data. The operation runs in the background.
 
     Response:
     {
-        "status": "success",
-        "entries_deleted": 110,
-        "sync_stats": {...}
+        "status": "started",
+        "job_id": "job-abc123",
+        "message": "Reset started. Poll /api/job/<job_id> for progress."
     }
     """
     from flask import session
-    from .rag.database import get_user_legato_db
-    from .rag.library_sync import LibrarySync
+    from .rag.database import get_user_legato_db, init_db
     from .core import get_user_library_repo
+    from .auth import get_user_installation_token
+
+    # Capture context before background thread
+    user = session.get('user', {})
+    user_id = user.get('user_id')
+    mode = current_app.config.get('LEGATO_MODE', 'single-tenant')
+
+    # Validate token synchronously - fail fast if not authorized
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        logger.warning(f"No installation token for user {user_id}")
+        return jsonify({'error': 'GitHub authorization required'}), 401
+
+    library_repo = get_user_library_repo()
 
     try:
         db = get_user_legato_db()
 
-        # Count and delete all entries
+        # Count and delete all entries (synchronous - fast)
         count = db.execute("SELECT COUNT(*) as cnt FROM knowledge_entries").fetchone()
         entries_deleted = count['cnt'] if count else 0
 
@@ -1004,39 +1112,55 @@ def api_reset():
 
         logger.info(f"Cleared {entries_deleted} entries for reset")
 
-        # Re-sync from configured Library
-        library_repo = get_user_library_repo()
+        # Create background job
+        job_id = create_background_job('reset', user_id)
 
-        # Get user's installation token - required in multi-tenant mode
-        from .auth import get_user_installation_token
-        user_id = session.get('user', {}).get('user_id')
-        token = None
-        if user_id:
-            token = get_user_installation_token(user_id, 'library')
-
-        # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
-        if not token:
-            logger.warning(f"No installation token for user {user_id}")
-            return jsonify({'error': 'GitHub authorization required'}), 401
-
-        embedding_service = None
-        if os.environ.get('OPENAI_API_KEY'):
+        def do_reset_sync():
+            """Background worker for reset sync."""
             try:
-                from .rag.openai_provider import OpenAIEmbeddingProvider
+                from .rag.library_sync import LibrarySync
                 from .rag.embedding_service import EmbeddingService
-                provider = OpenAIEmbeddingProvider()
-                embedding_service = EmbeddingService(provider, db)
-            except Exception as e:
-                logger.warning(f"Could not create embedding service: {e}")
+                from .rag.openai_provider import OpenAIEmbeddingProvider
 
-        sync = LibrarySync(db, embedding_service)
-        stats = sync.sync_from_github(library_repo, token=token)
+                # Get user-specific database
+                if mode == 'multi-tenant':
+                    sync_db = init_db(user_id=user_id) if user_id else init_db()
+                else:
+                    sync_db = init_db()
+
+                update_job_progress(job_id, 0, 1, "Starting sync from GitHub...")
+
+                embedding_service = None
+                if os.environ.get('OPENAI_API_KEY'):
+                    try:
+                        provider = OpenAIEmbeddingProvider()
+                        embedding_service = EmbeddingService(provider, sync_db)
+                    except Exception as e:
+                        logger.warning(f"Could not create embedding service: {e}")
+
+                sync = LibrarySync(sync_db, embedding_service)
+                stats = sync.sync_from_github(library_repo, token=token)
+
+                complete_job(job_id, result={
+                    'entries_deleted': entries_deleted,
+                    'library_repo': library_repo,
+                    'sync_stats': stats,
+                })
+                logger.info(f"Reset job {job_id} completed: {stats}")
+
+            except Exception as e:
+                logger.error(f"Reset job {job_id} failed: {e}")
+                complete_job(job_id, error=str(e))
+
+        # Start background thread
+        thread = threading.Thread(target=do_reset_sync, daemon=True)
+        thread.start()
 
         return jsonify({
-            'status': 'success',
+            'status': 'started',
+            'job_id': job_id,
             'entries_deleted': entries_deleted,
-            'library_repo': library_repo,
-            'sync_stats': stats,
+            'message': f'Reset started. Poll /api/job/{job_id} for progress.',
         })
 
     except Exception as e:
@@ -1045,6 +1169,47 @@ def api_reset():
             'status': 'error',
             'error': str(e),
         }), 500
+
+
+@library_bp.route('/api/job/<job_id>', methods=['GET'])
+@login_required
+def api_job_status(job_id: str):
+    """Get the status of a background job.
+
+    Response (pending/running):
+    {
+        "job_id": "job-abc123",
+        "status": "running",
+        "progress_current": 50,
+        "progress_total": 100,
+        "progress_message": "Processing entries..."
+    }
+
+    Response (completed):
+    {
+        "job_id": "job-abc123",
+        "status": "completed",
+        "result": {...}
+    }
+
+    Response (failed):
+    {
+        "job_id": "job-abc123",
+        "status": "failed",
+        "error_message": "Something went wrong"
+    }
+    """
+    status = get_job_status(job_id)
+
+    if not status:
+        return jsonify({'error': 'Job not found'}), 404
+
+    # Verify user owns this job (multi-tenant security)
+    user_id = session.get('user', {}).get('user_id')
+    if status.get('user_id') and status['user_id'] != user_id:
+        return jsonify({'error': 'Job not found'}), 404
+
+    return jsonify(status)
 
 
 @library_bp.route('/api/dedupe', methods=['POST'])
