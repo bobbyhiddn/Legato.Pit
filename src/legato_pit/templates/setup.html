@@ -531,6 +531,45 @@ document.addEventListener('DOMContentLoaded', function() {
     const resetBtn = document.getElementById('reset-sync-btn');
     const statusEl = document.getElementById('reset-status');
 
+    // Poll job status until complete
+    async function pollJobStatus(jobId, entriesDeleted) {
+        const maxPolls = 120; // 2 minutes max
+        let polls = 0;
+
+        while (polls < maxPolls) {
+            await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
+            polls++;
+
+            try {
+                const response = await fetch(`/library/api/job/${jobId}`);
+                const job = await response.json();
+
+                if (job.status === 'completed') {
+                    statusEl.className = 'reset-status success';
+                    const result = job.result || {};
+                    const synced = result.sync_stats?.entries_created || 0;
+                    statusEl.textContent = `Done! Cleared ${entriesDeleted} old entries, synced ${synced} entries.`;
+                    return true;
+                } else if (job.status === 'failed') {
+                    statusEl.className = 'reset-status error';
+                    statusEl.textContent = job.error_message || 'Reset failed';
+                    return false;
+                } else {
+                    // Still running - show progress
+                    const msg = job.progress_message || 'Syncing...';
+                    statusEl.textContent = `${msg} (${polls}s)`;
+                }
+            } catch (err) {
+                console.error('Poll error:', err);
+                // Continue polling on transient errors
+            }
+        }
+
+        statusEl.className = 'reset-status error';
+        statusEl.textContent = 'Sync is taking longer than expected. Check back later.';
+        return false;
+    }
+
     if (resetBtn) {
         resetBtn.addEventListener('click', async function() {
             if (!confirm('This will clear all local data and re-sync from your Library repo. Continue?')) {
@@ -539,13 +578,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
             resetBtn.disabled = true;
             statusEl.className = 'reset-status loading';
-            statusEl.textContent = 'Clearing data and syncing...';
+            statusEl.textContent = 'Clearing data and starting sync...';
 
             try {
                 const response = await fetch('/library/api/reset', { method: 'POST' });
                 const data = await response.json();
 
-                if (data.status === 'success') {
+                if (data.status === 'started' && data.job_id) {
+                    // Async job started - poll for completion
+                    statusEl.textContent = `Cleared ${data.entries_deleted} entries. Syncing from GitHub...`;
+                    await pollJobStatus(data.job_id, data.entries_deleted);
+                } else if (data.status === 'success') {
+                    // Legacy sync response (shouldn't happen but handle it)
                     statusEl.className = 'reset-status success';
                     const synced = data.sync_stats?.entries_created || 0;
                     statusEl.textContent = `Done! Cleared ${data.entries_deleted} old entries, synced ${synced} from ${data.library_repo}`;
