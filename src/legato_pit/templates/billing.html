@@ -223,6 +223,45 @@
         padding: 1rem;
         margin-bottom: 1.5rem;
     }
+
+    .cancel-notice {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .cancel-notice strong {
+        color: #ef4444;
+    }
+
+    .manage-actions {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+
+    .btn-danger {
+        background: transparent;
+        border: 1px solid #ef4444;
+        color: #ef4444;
+    }
+
+    .btn-danger:hover {
+        background: rgba(239, 68, 68, 0.1);
+    }
+
+    .btn-success {
+        background: #10b981;
+        color: white;
+        border: none;
+    }
+
+    .btn-success:hover {
+        filter: brightness(1.1);
+    }
 </style>
 {% endblock %}
 
@@ -327,14 +366,56 @@
     </div>
 
     {% if has_subscription %}
-    <div class="manage-section">
-        <h2>Manage Subscription</h2>
-        <p>Update your payment method, view invoices, or cancel your subscription.</p>
-        <form action="{{ url_for('billing.portal') }}" method="POST" style="margin-top: 1rem;">
-            <button type="submit" class="plan-button secondary" style="width: auto; padding: 0.5rem 1.5rem;">
-                Open Billing Portal
+    {% if cancel_at_period_end %}
+    <div class="cancel-notice">
+        <strong>Subscription Cancelling</strong>
+        <p>Your subscription is scheduled to cancel at the end of the current billing period{% if period_end_date %} ({{ period_end_date }}){% endif %}. You'll retain access until then.</p>
+        <form action="{{ url_for('billing.reactivate') }}" method="POST" style="margin-top: 0.5rem;">
+            <button type="submit" class="plan-button btn-success" style="width: auto; padding: 0.5rem 1.5rem;">
+                Keep My Subscription
             </button>
         </form>
+    </div>
+    {% endif %}
+
+    <div class="manage-section">
+        <h2>Manage Subscription</h2>
+
+        {% if not cancel_at_period_end %}
+        <p>Switch plans, update payment method, or cancel your subscription.</p>
+
+        <div class="manage-actions">
+            {% if tier == 'managed' %}
+            <form action="{{ url_for('billing.switch') }}" method="POST">
+                <input type="hidden" name="tier" value="byok">
+                <button type="submit" class="plan-button secondary" style="width: auto; padding: 0.5rem 1.5rem;">
+                    Switch to BYOK ($0.99/mo)
+                </button>
+            </form>
+            {% elif tier == 'byok' %}
+            <form action="{{ url_for('billing.switch') }}" method="POST">
+                <input type="hidden" name="tier" value="managed">
+                <button type="submit" class="plan-button primary" style="width: auto; padding: 0.5rem 1.5rem;">
+                    Upgrade to Managed ($10/mo)
+                </button>
+            </form>
+            {% endif %}
+
+            <form action="{{ url_for('billing.portal') }}" method="POST">
+                <button type="submit" class="plan-button secondary" style="width: auto; padding: 0.5rem 1.5rem;">
+                    Update Payment Method
+                </button>
+            </form>
+
+            <form action="{{ url_for('billing.cancel') }}" method="POST" onsubmit="return confirm('Are you sure you want to cancel? You will retain access until the end of your billing period.');">
+                <button type="submit" class="plan-button btn-danger" style="width: auto; padding: 0.5rem 1.5rem;">
+                    Cancel Subscription
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <p>Your subscription is scheduled to cancel. Reactivate above to keep your plan.</p>
+        {% endif %}
     </div>
     {% endif %}
 

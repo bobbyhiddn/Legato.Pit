@@ -230,6 +230,133 @@ def create_portal_session(user_id: str) -> str:
     return session.url
 
 
+def switch_subscription_tier(user_id: str, new_tier: str) -> dict:
+    """Switch an existing subscription to a different tier.
+
+    Args:
+        user_id: User's ID
+        new_tier: 'byok' or 'managed'
+
+    Returns:
+        Dict with status and message
+    """
+    if new_tier not in STRIPE_PRODUCTS:
+        raise ValueError(f"Invalid tier: {new_tier}")
+
+    db = _get_db()
+    user = db.execute(
+        "SELECT stripe_subscription_id, tier FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not user or not user['stripe_subscription_id']:
+        raise ValueError("No active subscription to switch")
+
+    if user['tier'] == new_tier:
+        raise ValueError(f"Already on {new_tier} tier")
+
+    # Get price IDs
+    price_ids = get_or_create_stripe_products()
+    new_price_id = price_ids.get(new_tier)
+
+    if not new_price_id:
+        raise ValueError(f"No price found for tier: {new_tier}")
+
+    # Get the subscription
+    subscription = stripe.Subscription.retrieve(user['stripe_subscription_id'])
+
+    # Update the subscription with the new price
+    # This will prorate by default
+    updated_subscription = stripe.Subscription.modify(
+        user['stripe_subscription_id'],
+        items=[{
+            'id': subscription['items']['data'][0]['id'],
+            'price': new_price_id,
+        }],
+        proration_behavior='create_prorations'
+    )
+
+    # Update local tier immediately (webhook will also update, but this is faster for UX)
+    db.execute(
+        "UPDATE users SET tier = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+        (new_tier, user_id)
+    )
+    db.commit()
+
+    logger.info(f"Switched user {user_id} from {user['tier']} to {new_tier}")
+
+    return {
+        'success': True,
+        'message': f'Switched to {new_tier} plan',
+        'new_tier': new_tier
+    }
+
+
+def cancel_subscription(user_id: str) -> dict:
+    """Cancel a user's subscription at period end.
+
+    Args:
+        user_id: User's ID
+
+    Returns:
+        Dict with status and message
+    """
+    db = _get_db()
+    user = db.execute(
+        "SELECT stripe_subscription_id, tier FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not user or not user['stripe_subscription_id']:
+        raise ValueError("No active subscription to cancel")
+
+    # Cancel at period end (user keeps access until billing period ends)
+    subscription = stripe.Subscription.modify(
+        user['stripe_subscription_id'],
+        cancel_at_period_end=True
+    )
+
+    logger.info(f"Scheduled cancellation for user {user_id} subscription")
+
+    return {
+        'success': True,
+        'message': 'Subscription will be cancelled at the end of the billing period',
+        'cancel_at': subscription.get('cancel_at')
+    }
+
+
+def reactivate_subscription(user_id: str) -> dict:
+    """Reactivate a subscription that was scheduled for cancellation.
+
+    Args:
+        user_id: User's ID
+
+    Returns:
+        Dict with status and message
+    """
+    db = _get_db()
+    user = db.execute(
+        "SELECT stripe_subscription_id FROM users WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not user or not user['stripe_subscription_id']:
+        raise ValueError("No subscription to reactivate")
+
+    # Remove the cancellation
+    subscription = stripe.Subscription.modify(
+        user['stripe_subscription_id'],
+        cancel_at_period_end=False
+    )
+
+    logger.info(f"Reactivated subscription for user {user_id}")
+
+    return {
+        'success': True,
+        'message': 'Subscription reactivated'
+    }
+
+
 # ============ Webhook Handlers ============
 
 def handle_checkout_completed(session_data: dict):
@@ -372,6 +499,20 @@ def index():
         (user_id,)
     ).fetchone()
 
+    # Check if subscription is scheduled for cancellation
+    cancel_at_period_end = False
+    period_end_date = None
+    if user and user['stripe_subscription_id'] and _init_stripe():
+        try:
+            subscription = stripe.Subscription.retrieve(user['stripe_subscription_id'])
+            cancel_at_period_end = subscription.get('cancel_at_period_end', False)
+            current_period_end = subscription.get('current_period_end')
+            if current_period_end:
+                from datetime import datetime
+                period_end_date = datetime.fromtimestamp(current_period_end).strftime('%B %d, %Y')
+        except Exception as e:
+            logger.warning(f"Could not fetch subscription details: {e}")
+
     return render_template('billing.html',
         title='Billing',
         tier=tier,
@@ -379,6 +520,8 @@ def index():
         is_beta=user['is_beta'] if user else False,
         trial_status=trial_status,
         has_subscription=bool(user['stripe_subscription_id']) if user else False,
+        cancel_at_period_end=cancel_at_period_end,
+        period_end_date=period_end_date,
         stripe_enabled=bool(os.environ.get('STRIPE_SECRET_KEY')),
         products=STRIPE_PRODUCTS
     )
@@ -433,6 +576,91 @@ def portal():
     except Exception as e:
         logger.error(f"Portal error: {e}")
         flash(f'Error accessing billing portal: {e}', 'error')
+        return redirect(url_for('billing.index'))
+
+
+@billing_bp.route('/switch', methods=['POST'])
+@login_required
+@stripe_required
+def switch_tier():
+    """Switch subscription to a different tier."""
+    user_id = session['user']['user_id']
+    new_tier = request.form.get('tier') or request.json.get('tier')
+
+    if new_tier not in ('byok', 'managed'):
+        if request.is_json:
+            return jsonify({'error': 'Invalid tier'}), 400
+        flash('Invalid subscription tier.', 'error')
+        return redirect(url_for('billing.index'))
+
+    try:
+        result = switch_subscription_tier(user_id, new_tier)
+        if request.is_json:
+            return jsonify(result)
+        flash(f'Successfully switched to {new_tier.upper()} plan!', 'success')
+        return redirect(url_for('billing.index'))
+    except ValueError as e:
+        if request.is_json:
+            return jsonify({'error': str(e)}), 400
+        flash(str(e), 'error')
+        return redirect(url_for('billing.index'))
+    except Exception as e:
+        logger.error(f"Switch tier error: {e}")
+        if request.is_json:
+            return jsonify({'error': str(e)}), 500
+        flash(f'Error switching plan: {e}', 'error')
+        return redirect(url_for('billing.index'))
+
+
+@billing_bp.route('/cancel', methods=['POST'])
+@login_required
+@stripe_required
+def cancel():
+    """Cancel subscription at end of billing period."""
+    user_id = session['user']['user_id']
+
+    try:
+        result = cancel_subscription(user_id)
+        if request.is_json:
+            return jsonify(result)
+        flash('Your subscription will be cancelled at the end of the billing period.', 'info')
+        return redirect(url_for('billing.index'))
+    except ValueError as e:
+        if request.is_json:
+            return jsonify({'error': str(e)}), 400
+        flash(str(e), 'error')
+        return redirect(url_for('billing.index'))
+    except Exception as e:
+        logger.error(f"Cancel error: {e}")
+        if request.is_json:
+            return jsonify({'error': str(e)}), 500
+        flash(f'Error cancelling subscription: {e}', 'error')
+        return redirect(url_for('billing.index'))
+
+
+@billing_bp.route('/reactivate', methods=['POST'])
+@login_required
+@stripe_required
+def reactivate():
+    """Reactivate a subscription scheduled for cancellation."""
+    user_id = session['user']['user_id']
+
+    try:
+        result = reactivate_subscription(user_id)
+        if request.is_json:
+            return jsonify(result)
+        flash('Your subscription has been reactivated!', 'success')
+        return redirect(url_for('billing.index'))
+    except ValueError as e:
+        if request.is_json:
+            return jsonify({'error': str(e)}), 400
+        flash(str(e), 'error')
+        return redirect(url_for('billing.index'))
+    except Exception as e:
+        logger.error(f"Reactivate error: {e}")
+        if request.is_json:
+            return jsonify({'error': str(e)}), 500
+        flash(f'Error reactivating subscription: {e}', 'error')
         return redirect(url_for('billing.index'))
 
 
