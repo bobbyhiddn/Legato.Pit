@@ -49,7 +49,7 @@ def submit_job():
     }
     """
     from .rag.database import init_db
-    from .auth import get_user_api_key
+    from .core import get_api_key_for_user
 
     user = session.get('user', {})
     user_id = user.get('user_id')
@@ -57,8 +57,8 @@ def submit_job():
     if not user_id:
         return jsonify({'error': 'User not authenticated'}), 401
 
-    # Check if user has API key configured
-    api_key = get_user_api_key(user_id, 'anthropic')
+    # Check if user has API key configured (platform key for managed tier, or BYOK)
+    api_key = get_api_key_for_user(user_id, 'anthropic')
     if not api_key:
         return jsonify({
             'error': 'No Anthropic API key configured. Please add your API key in Settings.',
@@ -290,13 +290,13 @@ def cancel_job(job_id: str):
 def index():
     """Motif processing page with job submission and status tracking."""
     from flask import render_template
-    from .auth import get_user_api_key
+    from .core import get_api_key_for_user
 
     user = session.get('user', {})
     user_id = user.get('user_id')
 
-    # Check if user has API key
-    has_api_key = get_user_api_key(user_id, 'anthropic') is not None
+    # Check if user has API key (platform key for managed tier, or BYOK)
+    has_api_key = get_api_key_for_user(user_id, 'anthropic') is not None
 
     return render_template(
         'motif.html',

@@ -672,10 +672,10 @@ Generate the complete markdown artifact with frontmatter."""
         ))
 
     def _get_user_api_key(self) -> str:
-        """Get user's Anthropic API key (decrypted)."""
-        from .auth import get_user_api_key
+        """Get user's Anthropic API key (platform key for managed tier, or BYOK)."""
+        from .core import get_api_key_for_user
 
-        api_key = get_user_api_key(self.user_id, 'anthropic')
+        api_key = get_api_key_for_user(self.user_id, 'anthropic')
         if not api_key:
             raise ValueError("User has no Anthropic API key configured. Please add your API key in Settings.")
         return api_key
