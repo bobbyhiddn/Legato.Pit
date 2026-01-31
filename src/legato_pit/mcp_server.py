@@ -396,6 +396,24 @@ TOOLS = [
         }
     },
     {
+        "name": "move_category",
+        "description": "Move a note to a different category. Updates the note's category, moves the file to the new folder in GitHub, and updates the entry ID to reflect the new category.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to move (e.g., 'library.concept.my-note')"
+                },
+                "new_category": {
+                    "type": "string",
+                    "description": "The target category to move the note to"
+                }
+            },
+            "required": ["entry_id", "new_category"]
+        }
+    },
+    {
         "name": "delete_note",
         "description": "Delete a note from the Legato library. Removes from both GitHub and local database. Requires confirmation flag.",
         "inputSchema": {
@@ -588,6 +606,7 @@ def handle_tool_call(params: dict) -> dict:
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
         'update_note': tool_update_note,
+        'move_category': tool_move_category,
         'delete_note': tool_delete_note,
         'list_tasks': tool_list_tasks,
         'update_task_status': tool_update_task_status,
@@ -753,11 +772,12 @@ def generate_entry_id(category: str, title: str, content_hash: str = None) -> st
     return base_id
 
 
-def _generate_embedding_for_entry(entry_id: str, content: str):
-    """Generate embedding for a newly created entry.
+def _generate_embedding_for_entry(entry_db_id: int, entry_id: str, content: str):
+    """Generate embedding for a newly created or updated entry.
 
     Args:
-        entry_id: The entry's ID
+        entry_db_id: The entry's database primary key (integer)
+        entry_id: The entry's semantic ID (for logging)
         content: The entry's content text
     """
     import os
@@ -789,9 +809,9 @@ def _generate_embedding_for_entry(entry_id: str, content: str):
         provider = OpenAIEmbeddingProvider(api_key=openai_key)
         embedding_service = EmbeddingService(provider, db)
 
-        # Generate embedding synchronously
-        if embedding_service.generate_and_store(entry_id, 'knowledge', content):
-            logger.info(f"Generated embedding for {entry_id}")
+        # Generate embedding synchronously using integer database ID
+        if embedding_service.generate_and_store(entry_db_id, 'knowledge', content):
+            logger.info(f"Generated embedding for {entry_id} (db_id={entry_db_id})")
 
     except Exception as e:
         logger.error(f"Failed to generate embedding for {entry_id}: {e}")
@@ -906,27 +926,31 @@ def tool_create_note(args: dict) -> dict:
 
     # Insert into local database with task fields and content_hash
     if task_status:
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO knowledge_entries
             (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
             (entry_id, title, category, content, file_path, task_status, due_date, content_hash)
         )
     else:
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO knowledge_entries
             (entry_id, title, category, content, file_path, source_transcript, content_hash, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
             (entry_id, title, category, content, file_path, content_hash)
         )
+    row = cursor.fetchone()
+    entry_db_id = row[0]
     db.commit()
 
-    # Generate embedding for the new entry
-    _generate_embedding_for_entry(entry_id, content)
+    # Generate embedding for the new entry using integer database ID
+    _generate_embedding_for_entry(entry_db_id, entry_id, content)
 
     logger.info(f"MCP created note: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
 
@@ -1454,10 +1478,10 @@ def tool_update_note(args: dict) -> dict:
 
     db = get_db()
 
-    # Get existing note
+    # Get existing note (include id for embedding generation)
     entry = db.execute(
         """
-        SELECT entry_id, title, category, content, file_path
+        SELECT id, entry_id, title, category, content, file_path
         FROM knowledge_entries
         WHERE entry_id = ?
         """,
@@ -1591,10 +1615,10 @@ key_phrases: []
             )
         db.commit()
 
-        # Regenerate embedding if content changed
+        # Regenerate embedding if content changed (use integer database ID)
         if content_changed:
             try:
-                _generate_embedding_for_entry(entry_id, content)
+                _generate_embedding_for_entry(entry['id'], entry_id, content)
             except Exception as emb_err:
                 logger.warning(f"Failed to regenerate embedding for {entry_id}: {emb_err}")
 
@@ -1626,6 +1650,185 @@ key_phrases: []
     except Exception as e:
         logger.error(f"Failed to update note: {e}")
         return {"error": f"Failed to update note: {str(e)}"}
+
+
+def tool_move_category(args: dict) -> dict:
+    """Move a note to a different category.
+
+    This operation:
+    1. Validates the new category exists
+    2. Creates the file in the new category folder
+    3. Deletes the file from the old location
+    4. Updates the database with new category and entry_id
+    5. Regenerates the embedding
+    """
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file, delete_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    new_category = args.get('new_category', '').lower().strip()
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+    if not new_category:
+        return {"error": "new_category is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate new category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if new_category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path, content_hash
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    old_category = entry['category']
+    if old_category == new_category:
+        return {"error": f"Note is already in category '{new_category}'"}
+
+    title = entry['title']
+    content = entry['content']
+    old_file_path = entry['file_path']
+    content_hash = entry['content_hash'] or compute_content_hash(content)
+    entry_db_id = entry['id']
+
+    # Generate new entry_id for the new category
+    new_entry_id = generate_entry_id(new_category, title)
+
+    # Check for collision with existing entry
+    collision = db.execute(
+        "SELECT entry_id FROM knowledge_entries WHERE entry_id = ? AND entry_id != ?",
+        (new_entry_id, entry_id)
+    ).fetchone()
+    if collision:
+        new_entry_id = generate_entry_id(new_category, title, content_hash)
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Get current file content from GitHub to preserve frontmatter structure
+        current_content = get_file_content(repo, old_file_path, token)
+
+        if current_content:
+            # Update frontmatter with new category and entry_id
+            if current_content.startswith('---'):
+                parts = current_content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter_lines = parts[1].strip().split('\n')
+                    new_frontmatter_lines = []
+                    for line in frontmatter_lines:
+                        if line.startswith('id:'):
+                            new_frontmatter_lines.append(f'id: {new_entry_id}')
+                        elif line.startswith('category:'):
+                            new_frontmatter_lines.append(f'category: {new_category}')
+                        else:
+                            new_frontmatter_lines.append(line)
+                    full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+                else:
+                    full_content = current_content
+            else:
+                full_content = current_content
+        else:
+            # If file doesn't exist in GitHub, build from database content
+            timestamp = datetime.utcnow().isoformat() + 'Z'
+            slug = generate_slug(title)
+            full_content = f"""---
+id: {new_entry_id}
+title: "{title}"
+category: {new_category}
+created: {timestamp}
+content_hash: {content_hash}
+source: mcp-claude
+domain_tags: []
+key_phrases: []
+---
+
+{content}"""
+
+        # Build new file path
+        filename = old_file_path.split('/')[-1]  # Preserve the date-slug filename
+        new_folder = category_folders.get(new_category, f'{new_category}s')
+        new_file_path = f'{new_folder}/{filename}'
+
+        # Create new file in GitHub
+        create_file(
+            repo=repo,
+            path=new_file_path,
+            content=full_content,
+            message=f'Move note to {new_category}: {title}',
+            token=token
+        )
+
+        # Delete old file from GitHub
+        try:
+            delete_file(
+                repo=repo,
+                path=old_file_path,
+                message=f'Move note from {old_category} to {new_category}: {title}',
+                token=token
+            )
+        except Exception as del_err:
+            logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+            # Continue anyway - the new file was created
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET entry_id = ?, category = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_entry_id, new_category, new_file_path, entry_db_id)
+        )
+        db.commit()
+
+        # Regenerate embedding (category change might affect semantic meaning)
+        try:
+            _generate_embedding_for_entry(entry_db_id, new_entry_id, content)
+        except Exception as emb_err:
+            logger.warning(f"Failed to regenerate embedding for {new_entry_id}: {emb_err}")
+
+        logger.info(f"MCP moved note: {entry_id} -> {new_entry_id} ({old_category} -> {new_category})")
+
+        return {
+            "success": True,
+            "old_entry_id": entry_id,
+            "new_entry_id": new_entry_id,
+            "old_category": old_category,
+            "new_category": new_category,
+            "old_file_path": old_file_path,
+            "new_file_path": new_file_path,
+            "title": title
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to move note: {e}")
+        return {"error": f"Failed to move note: {str(e)}"}
 
 
 def tool_delete_note(args: dict) -> dict:
