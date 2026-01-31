@@ -25,6 +25,7 @@
                 {% endif %}
                 <a href="{{ url_for('chat.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('chat.') %}active{% endif %}">Chat</a>
                 <a href="{{ url_for('motif_api.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('motif_api.') %}active{% endif %}">Motif</a>
+                <a href="{{ url_for('import_api.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('import_api.') %}active{% endif %}">Import</a>
                 <a href="{{ url_for('categories.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('categories.') %}active{% endif %}">Categories</a>
                 <div class="nav-user">
                     <div class="user-menu">

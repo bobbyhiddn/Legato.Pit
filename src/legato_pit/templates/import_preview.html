@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+
+{% block title %}Review Import - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+.preview-page {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 1.75rem;
+}
+
+.header-info {
+    flex: 1;
+}
+
+.job-meta {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.header-actions {
+    display: flex;
+    gap: 0.75rem;
+}
+
+/* Stats Bar */
+.stats-bar {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.stat-item.success .stat-value {
+    color: var(--success-color);
+}
+
+.stat-item.warning .stat-value {
+    color: var(--warning-color);
+}
+
+.stat-item.error .stat-value {
+    color: var(--danger-color);
+}
+
+/* File List */
+.file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.file-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.file-card.error {
+    border-color: var(--danger-color);
+}
+
+.file-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.file-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.file-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.file-path {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+}
+
+.file-category {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.file-category.concept { background: var(--indigo-bg, #6366f1); color: #fff; }
+.file-category.epiphany { background: var(--amber-bg, #f59e0b); color: #000; }
+.file-category.reflection { background: var(--violet-bg, #8b5cf6); color: #fff; }
+.file-category.glimmer { background: var(--pink-bg, #ec4899); color: #fff; }
+.file-category.reminder { background: var(--teal-bg, #14b8a6); color: #fff; }
+.file-category.worklog { background: var(--slate-bg, #64748b); color: #fff; }
+
+.file-details {
+    display: none;
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.file-card.expanded .file-details {
+    display: block;
+}
+
+.detail-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    min-width: 100px;
+}
+
+.detail-value {
+    flex: 1;
+    font-size: 0.875rem;
+}
+
+.tag-list {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.tag {
+    padding: 0.125rem 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.content-preview {
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: var(--bg-tertiary);
+    padding: 0.75rem;
+    border-radius: 4px;
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.edit-form {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.edit-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    align-items: center;
+}
+
+.edit-row label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    min-width: 100px;
+}
+
+.edit-row input,
+.edit-row select {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Error State */
+.error-message {
+    color: var(--danger-color);
+    font-size: 0.875rem;
+    padding: 0.75rem;
+    background: rgba(248, 81, 73, 0.1);
+    border-radius: 4px;
+}
+
+/* Confirm Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 200;
+}
+
+.modal-overlay.visible {
+    display: flex;
+}
+
+.modal {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 90%;
+}
+
+.modal h3 {
+    margin: 0 0 1rem 0;
+}
+
+.modal p {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+/* Checkbox for bulk selection */
+.file-select {
+    margin-right: 0.75rem;
+}
+
+.select-all-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 600px) {
+    .page-header {
+        flex-direction: column;
+    }
+
+    .header-actions {
+        width: 100%;
+    }
+
+    .header-actions .btn {
+        flex: 1;
+    }
+
+    .stats-bar {
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        flex: 1;
+        min-width: 80px;
+    }
+
+    .detail-row {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .edit-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+
+    .edit-row input,
+    .edit-row select {
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="preview-page">
+    <header class="page-header">
+        <div class="header-info">
+            <h1>Review Import</h1>
+            <p class="job-meta">Job: {{ job.job_id }} | {{ job.file_count }} files</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('import_api.index') }}" class="btn btn-secondary">Back</a>
+            <button class="btn btn-primary" id="confirmBtn" onclick="showConfirmModal()">
+                Confirm Import
+            </button>
+        </div>
+    </header>
+
+    <div class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-value">{{ job.file_count }}</span>
+            <span class="stat-label">Total Files</span>
+        </div>
+        <div class="stat-item success">
+            <span class="stat-value" id="classifiedCount">{{ job.classified_count }}</span>
+            <span class="stat-label">Classified</span>
+        </div>
+        {% if job.written_count > 0 %}
+        <div class="stat-item">
+            <span class="stat-value">{{ job.written_count }}</span>
+            <span class="stat-label">Written</span>
+        </div>
+        {% endif %}
+        {% if job.error_count > 0 %}
+        <div class="stat-item error">
+            <span class="stat-value">{{ job.error_count }}</span>
+            <span class="stat-label">Errors</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="file-list" id="fileList">
+        {% for file in job.files %}
+        <div class="file-card {% if file.status == 'error' %}error{% endif %}" data-file-idx="{{ loop.index0 }}">
+            <div class="file-header" onclick="toggleFileDetails({{ loop.index0 }})">
+                <div>
+                    <div class="file-title">{{ file.title or file.original_path }}</div>
+                    <div class="file-path">{{ file.original_path }} &#8594; {{ file.target_path or '(pending)' }}</div>
+                </div>
+                <span class="file-category {{ file.category }}">{{ file.category or 'pending' }}</span>
+            </div>
+            <div class="file-details">
+                {% if file.status == 'error' %}
+                <div class="error-message">{{ file.error }}</div>
+                {% else %}
+                <div class="detail-row">
+                    <span class="detail-label">Description</span>
+                    <span class="detail-value">{{ file.description or '(none)' }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Tags</span>
+                    <div class="detail-value tag-list">
+                        {% for tag in file.domain_tags %}
+                        <span class="tag">{{ tag }}</span>
+                        {% else %}
+                        <span class="detail-value">(none)</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Key Phrases</span>
+                    <div class="detail-value tag-list">
+                        {% for phrase in file.key_phrases %}
+                        <span class="tag">{{ phrase }}</span>
+                        {% else %}
+                        <span class="detail-value">(none)</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% if file.needs_chord %}
+                <div class="detail-row">
+                    <span class="detail-label">Chord</span>
+                    <span class="detail-value">{{ file.chord_name }} ({{ file.chord_scope }})</span>
+                </div>
+                {% endif %}
+                <div class="detail-row">
+                    <span class="detail-label">Preview</span>
+                    <div class="content-preview">{{ file.content_preview }}</div>
+                </div>
+
+                <!-- Edit Form -->
+                <div class="edit-form">
+                    <div class="edit-row">
+                        <label>Category</label>
+                        <select id="category-{{ loop.index0 }}" onchange="markEdited({{ loop.index0 }})">
+                            <option value="concept" {% if file.category == 'concept' %}selected{% endif %}>Concept</option>
+                            <option value="epiphany" {% if file.category == 'epiphany' %}selected{% endif %}>Epiphany</option>
+                            <option value="reflection" {% if file.category == 'reflection' %}selected{% endif %}>Reflection</option>
+                            <option value="glimmer" {% if file.category == 'glimmer' %}selected{% endif %}>Glimmer</option>
+                            <option value="reminder" {% if file.category == 'reminder' %}selected{% endif %}>Reminder</option>
+                            <option value="worklog" {% if file.category == 'worklog' %}selected{% endif %}>Worklog</option>
+                        </select>
+                    </div>
+                    <div class="edit-row">
+                        <label>Title</label>
+                        <input type="text" id="title-{{ loop.index0 }}" value="{{ file.title }}" onchange="markEdited({{ loop.index0 }})">
+                    </div>
+                    <div class="edit-row">
+                        <label>Tags</label>
+                        <input type="text" id="tags-{{ loop.index0 }}" value="{{ file.domain_tags | join(', ') }}" placeholder="tag1, tag2, tag3" onchange="markEdited({{ loop.index0 }})">
+                    </div>
+                    <div class="edit-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="resetEdit({{ loop.index0 }})">Reset</button>
+                        <button class="btn btn-primary btn-sm" onclick="saveEdit({{ loop.index0 }})">Save Changes</button>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal">
+        <h3>Confirm Import</h3>
+        <p>
+            This will write <strong id="modalFileCount">{{ job.classified_count }}</strong> files
+            to your Library with updated frontmatter. This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="hideConfirmModal()">Cancel</button>
+            <button class="btn btn-primary" id="modalConfirmBtn" onclick="confirmImport()">Import Files</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const jobId = '{{ job.job_id }}';
+const originalData = {{ job | tojson | safe }};
+const editedFiles = new Set();
+
+function toggleFileDetails(idx) {
+    const card = document.querySelector(`[data-file-idx="${idx}"]`);
+    card.classList.toggle('expanded');
+}
+
+function markEdited(idx) {
+    editedFiles.add(idx);
+}
+
+function resetEdit(idx) {
+    const file = originalData.files[idx];
+    document.getElementById(`category-${idx}`).value = file.category;
+    document.getElementById(`title-${idx}`).value = file.title;
+    document.getElementById(`tags-${idx}`).value = file.domain_tags.join(', ');
+    editedFiles.delete(idx);
+}
+
+async function saveEdit(idx) {
+    const category = document.getElementById(`category-${idx}`).value;
+    const title = document.getElementById(`title-${idx}`).value;
+    const tagsStr = document.getElementById(`tags-${idx}`).value;
+    const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+
+    try {
+        const response = await fetch(`/import/api/jobs/${jobId}/files/${idx}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: category,
+                title: title,
+                domain_tags: tags
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            // Update display
+            const card = document.querySelector(`[data-file-idx="${idx}"]`);
+            card.querySelector('.file-title').textContent = data.file.title;
+            card.querySelector('.file-category').textContent = data.file.category;
+            card.querySelector('.file-category').className = `file-category ${data.file.category}`;
+            card.querySelector('.file-path').innerHTML = `${data.file.original_path} &#8594; ${data.file.target_path}`;
+
+            editedFiles.delete(idx);
+            showSuccess('Changes saved');
+        } else {
+            showError(data.error || 'Save failed');
+        }
+    } catch (error) {
+        showError('Save failed: ' + error.message);
+    }
+}
+
+function showConfirmModal() {
+    document.getElementById('confirmModal').classList.add('visible');
+}
+
+function hideConfirmModal() {
+    document.getElementById('confirmModal').classList.remove('visible');
+}
+
+async function confirmImport() {
+    const btn = document.getElementById('modalConfirmBtn');
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+
+    try {
+        const response = await fetch(`/import/api/jobs/${jobId}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showSuccess(`Imported ${data.written_count} files!`);
+            setTimeout(() => {
+                window.location.href = '/library/';
+            }, 1500);
+        } else {
+            hideConfirmModal();
+            showError(data.error || 'Import failed');
+            btn.disabled = false;
+            btn.textContent = 'Import Files';
+        }
+    } catch (error) {
+        hideConfirmModal();
+        showError('Import failed: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Import Files';
+    }
+}
+
+// Close modal on escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideConfirmModal();
+});
+
+// Close modal on overlay click
+document.getElementById('confirmModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        hideConfirmModal();
+    }
+});
+
+// Warn before leaving with unsaved edits
+window.addEventListener('beforeunload', (e) => {
+    if (editedFiles.size > 0) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+    }
+});
+</script>
+{% endblock %}
