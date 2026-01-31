@@ -73,8 +73,11 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Enable foreign keys and WAL mode for better concurrency
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    # Ensure writes are synced to disk (important for Fly.io)
-    conn.execute("PRAGMA synchronous = NORMAL")
+    # CRITICAL: Use FULL sync to ensure data is durably written to disk
+    # before commit returns. This is essential for multi-worker deployments
+    # on Fly.io where workers need to see each other's writes immediately.
+    # NORMAL can leave data in OS buffers, causing visibility issues.
+    conn.execute("PRAGMA synchronous = FULL")
     # Wait up to 30 seconds for locks instead of failing immediately
     conn.execute("PRAGMA busy_timeout = 30000")
 
@@ -1064,8 +1067,16 @@ def get_user_legato_db():
 
     g.user_legato_db = init_db(user_id=user_id)
 
-    # Force WAL checkpoint to see latest writes
-    g.user_legato_db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    # CRITICAL: Ensure visibility of recent writes from other connections
+    # In WAL mode, committed changes should be visible, but we need to ensure
+    # no stale transaction is holding an old snapshot.
+    # 1. Rollback any implicit transaction that might have started
+    # 2. Use RESTART checkpoint which waits for readers and checkpoints all frames
+    try:
+        g.user_legato_db.rollback()  # Clear any implicit transaction
+    except Exception:
+        pass  # Ignore if no transaction active
+    g.user_legato_db.execute("PRAGMA wal_checkpoint(RESTART)")
 
     return g.user_legato_db
 

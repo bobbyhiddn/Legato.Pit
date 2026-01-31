@@ -36,6 +36,26 @@ def get_db():
     return get_user_legato_db()
 
 
+def commit_and_checkpoint(db):
+    """Commit transaction and force WAL checkpoint for cross-worker visibility.
+
+    In multi-worker deployments (gunicorn with workers > 1), SQLite WAL mode
+    can have visibility issues where commits in one worker aren't immediately
+    visible to connections in other workers. This helper ensures data is
+    durably committed and visible by:
+    1. Committing the transaction
+    2. Forcing a WAL RESTART checkpoint to merge WAL into main database
+
+    Args:
+        db: SQLite database connection
+    """
+    db.commit()
+    try:
+        db.execute("PRAGMA wal_checkpoint(RESTART)")
+    except Exception as e:
+        logger.warning(f"WAL checkpoint failed: {e}")
+
+
 def get_embedding_service():
     """Get embedding service for semantic search."""
     if 'mcp_embedding_service' not in g:
@@ -1014,7 +1034,7 @@ def tool_create_note(args: dict) -> dict:
         )
     row = cursor.fetchone()
     entry_db_id = row[0]
-    db.commit()
+    commit_and_checkpoint(db)
 
     # Generate embedding for the new entry using integer database ID
     _generate_embedding_for_entry(entry_db_id, entry_id, content)
@@ -1417,7 +1437,7 @@ def tool_spawn_agent(args: dict) -> dict:
                 user_id,  # Multi-tenant: isolate by user
             )
         )
-        agents_db.commit()
+        commit_and_checkpoint(agents_db)
 
         logger.info(f"MCP queued agent: {queue_id} - {project_name} ({len(notes)} notes)")
 
@@ -1682,7 +1702,7 @@ key_phrases: []
                 """,
                 (title, category, content, entry_id)
             )
-        db.commit()
+        commit_and_checkpoint(db)
 
         # Regenerate embedding if content changed (use integer database ID)
         if content_changed:
@@ -1874,7 +1894,7 @@ key_phrases: []
             """,
             (new_entry_id, new_category, new_file_path, entry_db_id)
         )
-        db.commit()
+        commit_and_checkpoint(db)
 
         # Regenerate embedding (category change might affect semantic meaning)
         try:
@@ -2176,7 +2196,7 @@ def tool_move_to_subfolder(args: dict) -> dict:
             """,
             (new_file_path, new_subfolder, entry_db_id)
         )
-        db.commit()
+        commit_and_checkpoint(db)
 
         logger.info(f"MCP moved note to subfolder: {entry_id} ({old_subfolder or '(root)'} -> {new_subfolder or '(root)'})")
 
@@ -2260,10 +2280,10 @@ def tool_delete_note(args: dict) -> dict:
         # Also delete any links involving this note
         db.execute("DELETE FROM note_links WHERE source_entry_id = ? OR target_entry_id = ?", (entry_id, entry_id))
 
-        # Delete embeddings
-        db.execute("DELETE FROM embeddings WHERE entry_id = (SELECT id FROM knowledge_entries WHERE entry_id = ?)", (entry_id,))
+        # Delete embeddings (using the integer id we fetched earlier)
+        db.execute("DELETE FROM embeddings WHERE entry_id = ?", (entry['id'],))
 
-        db.commit()
+        commit_and_checkpoint(db)
 
         logger.info(f"MCP deleted note: {entry_id} - {title}")
 
@@ -2394,7 +2414,7 @@ def tool_update_task_status(args: dict) -> dict:
             """,
             (status, entry_id)
         )
-    db.commit()
+    commit_and_checkpoint(db)
 
     logger.info(f"MCP updated task status: {entry_id} {old_status} -> {status}")
 
@@ -2457,7 +2477,7 @@ def tool_link_notes(args: dict) -> dict:
                 (target_id, source_id, link_type, description)
             )
 
-        db.commit()
+        commit_and_checkpoint(db)
 
         logger.info(f"MCP linked notes: {source_id} --[{link_type}]--> {target_id}")
 
