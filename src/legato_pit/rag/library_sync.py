@@ -310,11 +310,15 @@ class LibrarySync:
             stats['files_found'] = len(md_files)
             logger.info(f"Found {len(md_files)} markdown files in {repo}")
 
+            # Build set of current file paths for move detection
+            current_github_paths = {item['path'] for item in md_files}
+
             # Process each file
             for item in md_files:
                 try:
                     result = self._process_github_file(
-                        repo, item['path'], item['sha'], headers
+                        repo, item['path'], item['sha'], headers,
+                        current_github_paths=current_github_paths
                     )
                     if result == 'created':
                         stats['entries_created'] += 1
@@ -372,8 +376,16 @@ class LibrarySync:
         path: str,
         sha: str,
         headers: Dict,
+        current_github_paths: Optional[set] = None,
     ) -> str:
         """Process a single file from GitHub.
+
+        Args:
+            repo: GitHub repo in "owner/repo" format
+            path: Path to the file in the repo
+            sha: Git SHA of the file
+            headers: HTTP headers for GitHub API
+            current_github_paths: Set of all current file paths in GitHub (for move detection)
 
         Returns:
             'created', 'updated', or 'skipped'
@@ -406,12 +418,22 @@ class LibrarySync:
         # Check for entry_id collision with different file_path
         # This handles long titles that truncate to the same slug
         collision = self.conn.execute(
-            "SELECT file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
+            "SELECT id, file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
             (entry_id, path)
         ).fetchone()
+        moved_from_entry_id = None  # Track if this is a file move
         if collision:
-            logger.info(f"Entry ID collision detected for {path}, disambiguating with content hash")
-            entry_id = generate_entry_id(category, title, content_hash)
+            old_file_path = collision['file_path']
+            # Check if this is a file move: old path no longer exists in GitHub
+            if current_github_paths and old_file_path not in current_github_paths:
+                # This is a file move! The old file doesn't exist in GitHub anymore.
+                # Update the existing entry's file_path instead of creating a duplicate.
+                logger.info(f"File move detected: {old_file_path} -> {path}")
+                moved_from_entry_id = collision['id']
+            else:
+                # True collision: both paths exist, disambiguate with content hash
+                logger.info(f"Entry ID collision detected for {path}, disambiguating with content hash")
+                entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -474,6 +496,10 @@ class LibrarySync:
             (path,)
         ).fetchone()
 
+        # Handle file move: if we detected a move, treat it as an update to the existing entry
+        if moved_from_entry_id and not existing:
+            existing = {'id': moved_from_entry_id, 'entry_id': entry_id}
+
         if existing:
             # Update existing entry (including entry_id if changed)
             # Chord status logic:
@@ -481,10 +507,17 @@ class LibrarySync:
             # - If frontmatter sets needs_chord: true AND has explicit chord_status → use frontmatter
             # - If frontmatter sets needs_chord: true AND no chord_status → check DB, preserve 'pending' or 'active'
             #   (GitHub frontmatter update may not have propagated yet after agent approval)
-            existing_data = self.conn.execute(
-                "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
-                (path,)
-            ).fetchone()
+            # For file moves, query by id; for normal updates, query by file_path
+            if moved_from_entry_id:
+                existing_data = self.conn.execute(
+                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE id = ?",
+                    (moved_from_entry_id,)
+                ).fetchone()
+            else:
+                existing_data = self.conn.execute(
+                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE file_path = ?",
+                    (path,)
+                ).fetchone()
 
             # Chord status logic:
             # 1. Frontmatter has explicit chord_status/chord_repo → use it
@@ -518,26 +551,59 @@ class LibrarySync:
                 final_chord_repo = None
                 final_chord_id = None
 
-            self.conn.execute(
-                """
-                UPDATE knowledge_entries
-                SET entry_id = ?, title = ?, category = ?, content = ?,
-                    needs_chord = ?, chord_name = ?, chord_scope = ?,
-                    chord_id = ?, chord_status = ?, chord_repo = ?,
-                    domain_tags = ?, key_phrases = ?, source_transcript = ?,
-                    task_status = ?, due_date = ?, content_hash = ?,
-                    updated_at = COALESCE(?, CURRENT_TIMESTAMP)
-                WHERE file_path = ?
-                """,
-                (entry_id, title, category, body,
-                 needs_chord, chord_name, chord_scope,
-                 final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, updated_at, path)
-            )
-            self.conn.commit()
-            logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
-            return 'updated'
+            # For file moves, update file_path and subfolder; otherwise just update by file_path
+            if moved_from_entry_id:
+                # Extract subfolder from new path
+                path_parts = path.split('/')
+                if len(path_parts) >= 3:  # folder/subfolder/file.md
+                    # Check if the middle part is actually a subfolder (not just the category folder)
+                    new_subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
+                else:
+                    new_subfolder = None
+
+                self.conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET entry_id = ?, title = ?, category = ?, content = ?,
+                        file_path = ?, subfolder = ?,
+                        needs_chord = ?, chord_name = ?, chord_scope = ?,
+                        chord_id = ?, chord_status = ?, chord_repo = ?,
+                        domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                        task_status = ?, due_date = ?, content_hash = ?,
+                        updated_at = COALESCE(?, CURRENT_TIMESTAMP)
+                    WHERE id = ?
+                    """,
+                    (entry_id, title, category, body,
+                     path, new_subfolder,
+                     needs_chord, chord_name, chord_scope,
+                     final_chord_id, final_chord_status, final_chord_repo,
+                     domain_tags, key_phrases, source_transcript,
+                     task_status, due_date, content_hash, updated_at, moved_from_entry_id)
+                )
+                self.conn.commit()
+                logger.info(f"Updated (file moved): {entry_id} - {title}")
+                return 'updated'
+            else:
+                self.conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET entry_id = ?, title = ?, category = ?, content = ?,
+                        needs_chord = ?, chord_name = ?, chord_scope = ?,
+                        chord_id = ?, chord_status = ?, chord_repo = ?,
+                        domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                        task_status = ?, due_date = ?, content_hash = ?,
+                        updated_at = COALESCE(?, CURRENT_TIMESTAMP)
+                    WHERE file_path = ?
+                    """,
+                    (entry_id, title, category, body,
+                     needs_chord, chord_name, chord_scope,
+                     final_chord_id, final_chord_status, final_chord_repo,
+                     domain_tags, key_phrases, source_transcript,
+                     task_status, due_date, content_hash, updated_at, path)
+                )
+                self.conn.commit()
+                logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
+                return 'updated'
         else:
             # Create new entry - use frontmatter dates if available
             self.conn.execute(
@@ -586,9 +652,15 @@ class LibrarySync:
         stats['files_found'] = len(md_files)
         logger.info(f"Found {len(md_files)} markdown files in {library_path}")
 
+        # Build set of current file paths for move detection
+        current_local_paths = {str(f.relative_to(library_path)) for f in md_files}
+
         for file_path in md_files:
             try:
-                result = self._process_local_file(file_path, library_path)
+                result = self._process_local_file(
+                    file_path, library_path,
+                    current_local_paths=current_local_paths
+                )
                 if result == 'created':
                     stats['entries_created'] += 1
                 elif result == 'updated':
@@ -608,8 +680,18 @@ class LibrarySync:
 
         return stats
 
-    def _process_local_file(self, file_path: Path, base_path: Path) -> str:
+    def _process_local_file(
+        self,
+        file_path: Path,
+        base_path: Path,
+        current_local_paths: Optional[set] = None,
+    ) -> str:
         """Process a single local file.
+
+        Args:
+            file_path: Path to the file
+            base_path: Base path of the library
+            current_local_paths: Set of all current file paths in the library (for move detection)
 
         Returns:
             'created', 'updated', or 'skipped'
@@ -636,12 +718,22 @@ class LibrarySync:
         # Check for entry_id collision with different file_path
         # This handles long titles that truncate to the same slug
         collision = self.conn.execute(
-            "SELECT file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
+            "SELECT id, file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
             (entry_id, relative_path)
         ).fetchone()
+        moved_from_entry_id = None  # Track if this is a file move
         if collision:
-            logger.info(f"Entry ID collision detected for {relative_path}, disambiguating with content hash")
-            entry_id = generate_entry_id(category, title, content_hash)
+            old_file_path = collision['file_path']
+            # Check if this is a file move: old path no longer exists in filesystem
+            if current_local_paths and old_file_path not in current_local_paths:
+                # This is a file move! The old file doesn't exist anymore.
+                # Update the existing entry's file_path instead of creating a duplicate.
+                logger.info(f"File move detected: {old_file_path} -> {relative_path}")
+                moved_from_entry_id = collision['id']
+            else:
+                # True collision: both paths exist, disambiguate with content hash
+                logger.info(f"Entry ID collision detected for {relative_path}, disambiguating with content hash")
+                entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
         needs_chord = 1 if frontmatter.get('needs_chord') else 0
@@ -703,12 +795,23 @@ class LibrarySync:
             (relative_path,)
         ).fetchone()
 
+        # Handle file move: if we detected a move, treat it as an update to the existing entry
+        if moved_from_entry_id and not existing:
+            existing = {'id': moved_from_entry_id, 'entry_id': entry_id}
+
         if existing:
             # Same chord status logic as GitHub sync
-            existing_data = self.conn.execute(
-                "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
-                (relative_path,)
-            ).fetchone()
+            # For file moves, query by id; for normal updates, query by file_path
+            if moved_from_entry_id:
+                existing_data = self.conn.execute(
+                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE id = ?",
+                    (moved_from_entry_id,)
+                ).fetchone()
+            else:
+                existing_data = self.conn.execute(
+                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE file_path = ?",
+                    (relative_path,)
+                ).fetchone()
 
             # Chord status logic - preserve existing chord relationships
             if chord_status or chord_repo:
@@ -737,26 +840,59 @@ class LibrarySync:
                 final_chord_repo = None
                 final_chord_id = None
 
-            self.conn.execute(
-                """
-                UPDATE knowledge_entries
-                SET entry_id = ?, title = ?, category = ?, content = ?,
-                    needs_chord = ?, chord_name = ?, chord_scope = ?,
-                    chord_id = ?, chord_status = ?, chord_repo = ?,
-                    domain_tags = ?, key_phrases = ?, source_transcript = ?,
-                    task_status = ?, due_date = ?, content_hash = ?,
-                    updated_at = COALESCE(?, CURRENT_TIMESTAMP)
-                WHERE file_path = ?
-                """,
-                (entry_id, title, category, body,
-                 needs_chord, chord_name, chord_scope,
-                 final_chord_id, final_chord_status, final_chord_repo,
-                 domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, updated_at, relative_path)
-            )
-            self.conn.commit()
-            logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
-            return 'updated'
+            # For file moves, update file_path and subfolder; otherwise just update by file_path
+            if moved_from_entry_id:
+                # Extract subfolder from new path
+                path_parts = relative_path.split('/')
+                if len(path_parts) >= 3:  # folder/subfolder/file.md
+                    # Check if the middle part is actually a subfolder (not just the category folder)
+                    new_subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
+                else:
+                    new_subfolder = None
+
+                self.conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET entry_id = ?, title = ?, category = ?, content = ?,
+                        file_path = ?, subfolder = ?,
+                        needs_chord = ?, chord_name = ?, chord_scope = ?,
+                        chord_id = ?, chord_status = ?, chord_repo = ?,
+                        domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                        task_status = ?, due_date = ?, content_hash = ?,
+                        updated_at = COALESCE(?, CURRENT_TIMESTAMP)
+                    WHERE id = ?
+                    """,
+                    (entry_id, title, category, body,
+                     relative_path, new_subfolder,
+                     needs_chord, chord_name, chord_scope,
+                     final_chord_id, final_chord_status, final_chord_repo,
+                     domain_tags, key_phrases, source_transcript,
+                     task_status, due_date, content_hash, updated_at, moved_from_entry_id)
+                )
+                self.conn.commit()
+                logger.info(f"Updated (file moved): {entry_id} - {title}")
+                return 'updated'
+            else:
+                self.conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET entry_id = ?, title = ?, category = ?, content = ?,
+                        needs_chord = ?, chord_name = ?, chord_scope = ?,
+                        chord_id = ?, chord_status = ?, chord_repo = ?,
+                        domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                        task_status = ?, due_date = ?, content_hash = ?,
+                        updated_at = COALESCE(?, CURRENT_TIMESTAMP)
+                    WHERE file_path = ?
+                    """,
+                    (entry_id, title, category, body,
+                     needs_chord, chord_name, chord_scope,
+                     final_chord_id, final_chord_status, final_chord_repo,
+                     domain_tags, key_phrases, source_transcript,
+                     task_status, due_date, content_hash, updated_at, relative_path)
+                )
+                self.conn.commit()
+                logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
+                return 'updated'
         else:
             # Create new entry - use frontmatter dates if available
             self.conn.execute(
