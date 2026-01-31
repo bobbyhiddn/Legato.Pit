@@ -3648,7 +3648,8 @@ def tool_create_category(args: dict) -> dict:
             }
 
     # Folder name convention: category name + 's' (matching categories.py)
-    folder_name = f"{name}s"
+    # Avoid double 's' for names ending in 's' (e.g., 'ethics' -> 'ethics', not 'ethicss')
+    folder_name = name if name.endswith('s') else f"{name}s"
 
     # Determine sort order (after existing categories)
     max_order = db.execute(

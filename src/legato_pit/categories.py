@@ -32,7 +32,7 @@ def create_category_folder(folder_name: str, token: str = None, user_id: str = N
     if not token:
         return {'created': False, 'error': 'GitHub authorization required'}
 
-    library_repo = get_user_library_repo()
+    library_repo = get_user_library_repo(user_id)
 
     try:
         result = commit_file(
@@ -137,9 +137,9 @@ def api_create_category():
     if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
         return jsonify({'error': 'color must be a valid hex color (e.g., #6366f1)'}), 400
 
-    # Default folder_name
+    # Default folder_name - avoid double 's' for names ending in 's'
     if not folder_name:
-        folder_name = f"{name}s"
+        folder_name = name if name.endswith('s') else f"{name}s"
 
     from flask import session
     from .auth import get_user_installation_token
@@ -232,7 +232,7 @@ def api_adopt_category():
 
     folder_name = data.get('folder_name', '').strip()
     if not folder_name:
-        folder_name = f"{name}s"
+        folder_name = name if name.endswith('s') else f"{name}s"
 
     description = data.get('description', '').strip()
     color = data.get('color', '#6366f1').strip()
