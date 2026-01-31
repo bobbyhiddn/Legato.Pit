@@ -256,6 +256,10 @@ TOOLS = [
                 "due_date": {
                     "type": "string",
                     "description": "Optional: Due date for tasks in ISO format (YYYY-MM-DD)"
+                },
+                "subfolder": {
+                    "type": "string",
+                    "description": "Optional: Subfolder within the category to place the note (e.g., 'projects', 'backlog', 'research')"
                 }
             },
             "required": ["title", "content", "category"]
@@ -390,6 +394,74 @@ TOOLS = [
                 "category": {
                     "type": "string",
                     "description": "New category for the note (optional)"
+                }
+            },
+            "required": ["entry_id"]
+        }
+    },
+    {
+        "name": "move_category",
+        "description": "Move a note to a different category. Updates the note's category, moves the file to the new folder in GitHub, and updates the entry ID to reflect the new category.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to move (e.g., 'library.concept.my-note')"
+                },
+                "new_category": {
+                    "type": "string",
+                    "description": "The target category to move the note to"
+                }
+            },
+            "required": ["entry_id", "new_category"]
+        }
+    },
+    {
+        "name": "create_subfolder",
+        "description": "Create a subfolder under a category. The subfolder will be created in GitHub with a .gitkeep file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The category under which to create the subfolder"
+                },
+                "subfolder_name": {
+                    "type": "string",
+                    "description": "Name of the subfolder to create (e.g., 'projects', 'backlog', 'research')"
+                }
+            },
+            "required": ["category", "subfolder_name"]
+        }
+    },
+    {
+        "name": "list_subfolders",
+        "description": "List all subfolders under a category.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The category to list subfolders for"
+                }
+            },
+            "required": ["category"]
+        }
+    },
+    {
+        "name": "move_to_subfolder",
+        "description": "Move a note to a different subfolder within its current category. Use null or empty string for subfolder to move to the category root.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to move"
+                },
+                "subfolder": {
+                    "type": ["string", "null"],
+                    "description": "The target subfolder name, or null/empty to move to category root"
                 }
             },
             "required": ["entry_id"]
@@ -588,6 +660,10 @@ def handle_tool_call(params: dict) -> dict:
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
         'update_note': tool_update_note,
+        'move_category': tool_move_category,
+        'create_subfolder': tool_create_subfolder,
+        'list_subfolders': tool_list_subfolders,
+        'move_to_subfolder': tool_move_to_subfolder,
         'delete_note': tool_delete_note,
         'list_tasks': tool_list_tasks,
         'update_task_status': tool_update_task_status,
@@ -753,11 +829,12 @@ def generate_entry_id(category: str, title: str, content_hash: str = None) -> st
     return base_id
 
 
-def _generate_embedding_for_entry(entry_id: str, content: str):
-    """Generate embedding for a newly created entry.
+def _generate_embedding_for_entry(entry_db_id: int, entry_id: str, content: str):
+    """Generate embedding for a newly created or updated entry.
 
     Args:
-        entry_id: The entry's ID
+        entry_db_id: The entry's database primary key (integer)
+        entry_id: The entry's semantic ID (for logging)
         content: The entry's content text
     """
     import os
@@ -789,9 +866,9 @@ def _generate_embedding_for_entry(entry_id: str, content: str):
         provider = OpenAIEmbeddingProvider(api_key=openai_key)
         embedding_service = EmbeddingService(provider, db)
 
-        # Generate embedding synchronously
-        if embedding_service.generate_and_store(entry_id, 'knowledge', content):
-            logger.info(f"Generated embedding for {entry_id}")
+        # Generate embedding synchronously using integer database ID
+        if embedding_service.generate_and_store(entry_db_id, 'knowledge', content):
+            logger.info(f"Generated embedding for {entry_id} (db_id={entry_db_id})")
 
     except Exception as e:
         logger.error(f"Failed to generate embedding for {entry_id}: {e}")
@@ -807,11 +884,16 @@ def tool_create_note(args: dict) -> dict:
     category = args.get('category', '').lower().strip()
     task_status = args.get('task_status', '').strip() if args.get('task_status') else None
     due_date = args.get('due_date', '').strip() if args.get('due_date') else None
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
 
     if not title:
         return {"error": "Title is required"}
     if not category:
         return {"error": "Category is required"}
+
+    # Validate subfolder name if provided (no slashes, reasonable characters)
+    if subfolder and ('/' in subfolder or '\\' in subfolder):
+        return {"error": "Subfolder name cannot contain slashes. Use a simple name like 'projects' or 'backlog'."}
 
     # Validate task_status if provided
     valid_statuses = {'pending', 'in_progress', 'blocked', 'done'}
@@ -850,10 +932,13 @@ def tool_create_note(args: dict) -> dict:
         logger.info(f"Entry ID collision detected for '{title}', disambiguating with content hash")
         entry_id = generate_entry_id(category, title, content_hash)
 
-    # Build file path
+    # Build file path (including subfolder if provided)
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
     folder = category_folders.get(category, f'{category}s')
-    file_path = f'{folder}/{date_str}-{slug}.md'
+    if subfolder:
+        file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
+    else:
+        file_path = f'{folder}/{date_str}-{slug}.md'
 
     # Build frontmatter - include task fields if provided
     timestamp = datetime.utcnow().isoformat() + 'Z'
@@ -869,7 +954,9 @@ def tool_create_note(args: dict) -> dict:
         'key_phrases: []',
     ]
 
-    # Add task fields to frontmatter if this is a task
+    # Add optional fields to frontmatter
+    if subfolder:
+        frontmatter_lines.append(f'subfolder: {subfolder}')
     if task_status:
         frontmatter_lines.append(f'task_status: {task_status}')
     if due_date:
@@ -904,29 +991,33 @@ def tool_create_note(args: dict) -> dict:
         token=token
     )
 
-    # Insert into local database with task fields and content_hash
+    # Insert into local database with task fields, subfolder, and content_hash
     if task_status:
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, subfolder, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
-            (entry_id, title, category, content, file_path, task_status, due_date, content_hash)
+            (entry_id, title, category, content, file_path, task_status, due_date, content_hash, subfolder)
         )
     else:
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, content_hash, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (entry_id, title, category, content, file_path, source_transcript, content_hash, subfolder, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
-            (entry_id, title, category, content, file_path, content_hash)
+            (entry_id, title, category, content, file_path, content_hash, subfolder)
         )
+    row = cursor.fetchone()
+    entry_db_id = row[0]
     db.commit()
 
-    # Generate embedding for the new entry
-    _generate_embedding_for_entry(entry_id, content)
+    # Generate embedding for the new entry using integer database ID
+    _generate_embedding_for_entry(entry_db_id, entry_id, content)
 
     logger.info(f"MCP created note: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
 
@@ -939,7 +1030,9 @@ def tool_create_note(args: dict) -> dict:
         "available_categories": sorted(valid_categories)
     }
 
-    # Include task fields in response if set
+    # Include optional fields in response if set
+    if subfolder:
+        result["subfolder"] = subfolder
     if task_status:
         result["task_status"] = task_status
     if due_date:
@@ -1454,10 +1547,10 @@ def tool_update_note(args: dict) -> dict:
 
     db = get_db()
 
-    # Get existing note
+    # Get existing note (include id for embedding generation)
     entry = db.execute(
         """
-        SELECT entry_id, title, category, content, file_path
+        SELECT id, entry_id, title, category, content, file_path
         FROM knowledge_entries
         WHERE entry_id = ?
         """,
@@ -1591,10 +1684,10 @@ key_phrases: []
             )
         db.commit()
 
-        # Regenerate embedding if content changed
+        # Regenerate embedding if content changed (use integer database ID)
         if content_changed:
             try:
-                _generate_embedding_for_entry(entry_id, content)
+                _generate_embedding_for_entry(entry['id'], entry_id, content)
             except Exception as emb_err:
                 logger.warning(f"Failed to regenerate embedding for {entry_id}: {emb_err}")
 
@@ -1626,6 +1719,481 @@ key_phrases: []
     except Exception as e:
         logger.error(f"Failed to update note: {e}")
         return {"error": f"Failed to update note: {str(e)}"}
+
+
+def tool_move_category(args: dict) -> dict:
+    """Move a note to a different category.
+
+    This operation:
+    1. Validates the new category exists
+    2. Creates the file in the new category folder
+    3. Deletes the file from the old location
+    4. Updates the database with new category and entry_id
+    5. Regenerates the embedding
+    """
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file, delete_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    new_category = args.get('new_category', '').lower().strip()
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+    if not new_category:
+        return {"error": "new_category is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate new category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if new_category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path, content_hash
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    old_category = entry['category']
+    if old_category == new_category:
+        return {"error": f"Note is already in category '{new_category}'"}
+
+    title = entry['title']
+    content = entry['content']
+    old_file_path = entry['file_path']
+    content_hash = entry['content_hash'] or compute_content_hash(content)
+    entry_db_id = entry['id']
+
+    # Generate new entry_id for the new category
+    new_entry_id = generate_entry_id(new_category, title)
+
+    # Check for collision with existing entry
+    collision = db.execute(
+        "SELECT entry_id FROM knowledge_entries WHERE entry_id = ? AND entry_id != ?",
+        (new_entry_id, entry_id)
+    ).fetchone()
+    if collision:
+        new_entry_id = generate_entry_id(new_category, title, content_hash)
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Get current file content from GitHub to preserve frontmatter structure
+        current_content = get_file_content(repo, old_file_path, token)
+
+        if current_content:
+            # Update frontmatter with new category and entry_id
+            if current_content.startswith('---'):
+                parts = current_content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter_lines = parts[1].strip().split('\n')
+                    new_frontmatter_lines = []
+                    for line in frontmatter_lines:
+                        if line.startswith('id:'):
+                            new_frontmatter_lines.append(f'id: {new_entry_id}')
+                        elif line.startswith('category:'):
+                            new_frontmatter_lines.append(f'category: {new_category}')
+                        else:
+                            new_frontmatter_lines.append(line)
+                    full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+                else:
+                    full_content = current_content
+            else:
+                full_content = current_content
+        else:
+            # If file doesn't exist in GitHub, build from database content
+            timestamp = datetime.utcnow().isoformat() + 'Z'
+            slug = generate_slug(title)
+            full_content = f"""---
+id: {new_entry_id}
+title: "{title}"
+category: {new_category}
+created: {timestamp}
+content_hash: {content_hash}
+source: mcp-claude
+domain_tags: []
+key_phrases: []
+---
+
+{content}"""
+
+        # Build new file path
+        filename = old_file_path.split('/')[-1]  # Preserve the date-slug filename
+        new_folder = category_folders.get(new_category, f'{new_category}s')
+        new_file_path = f'{new_folder}/{filename}'
+
+        # Create new file in GitHub
+        create_file(
+            repo=repo,
+            path=new_file_path,
+            content=full_content,
+            message=f'Move note to {new_category}: {title}',
+            token=token
+        )
+
+        # Delete old file from GitHub
+        try:
+            delete_file(
+                repo=repo,
+                path=old_file_path,
+                message=f'Move note from {old_category} to {new_category}: {title}',
+                token=token
+            )
+        except Exception as del_err:
+            logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+            # Continue anyway - the new file was created
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET entry_id = ?, category = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_entry_id, new_category, new_file_path, entry_db_id)
+        )
+        db.commit()
+
+        # Regenerate embedding (category change might affect semantic meaning)
+        try:
+            _generate_embedding_for_entry(entry_db_id, new_entry_id, content)
+        except Exception as emb_err:
+            logger.warning(f"Failed to regenerate embedding for {new_entry_id}: {emb_err}")
+
+        logger.info(f"MCP moved note: {entry_id} -> {new_entry_id} ({old_category} -> {new_category})")
+
+        return {
+            "success": True,
+            "old_entry_id": entry_id,
+            "new_entry_id": new_entry_id,
+            "old_category": old_category,
+            "new_category": new_category,
+            "old_file_path": old_file_path,
+            "new_file_path": new_file_path,
+            "title": title
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to move note: {e}")
+        return {"error": f"Failed to move note: {str(e)}"}
+
+
+def tool_create_subfolder(args: dict) -> dict:
+    """Create a subfolder under a category."""
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file
+
+    category = args.get('category', '').lower().strip()
+    subfolder_name = args.get('subfolder_name', '').strip()
+
+    if not category:
+        return {"error": "category is required"}
+    if not subfolder_name:
+        return {"error": "subfolder_name is required"}
+
+    # Validate subfolder name (no slashes, reasonable characters)
+    if '/' in subfolder_name or '\\' in subfolder_name:
+        return {"error": "Subfolder name cannot contain slashes"}
+    if not re.match(r'^[a-zA-Z0-9_-]+$', subfolder_name):
+        return {"error": "Subfolder name can only contain letters, numbers, underscores, and hyphens"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    folder = category_folders.get(category, f'{category}s')
+    subfolder_path = f'{folder}/{subfolder_name}/.gitkeep'
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Create .gitkeep file to establish the subfolder
+        create_file(
+            repo=repo,
+            path=subfolder_path,
+            content='',
+            message=f'Create subfolder: {folder}/{subfolder_name}',
+            token=token
+        )
+
+        logger.info(f"MCP created subfolder: {folder}/{subfolder_name}")
+
+        return {
+            "success": True,
+            "category": category,
+            "subfolder": subfolder_name,
+            "path": f'{folder}/{subfolder_name}'
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create subfolder: {e}")
+        return {"error": f"Failed to create subfolder: {str(e)}"}
+
+
+def tool_list_subfolders(args: dict) -> dict:
+    """List all subfolders under a category."""
+    from .rag.database import get_user_categories
+    from .rag.github_service import list_folder
+
+    category = args.get('category', '').lower().strip()
+
+    if not category:
+        return {"error": "category is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    folder = category_folders.get(category, f'{category}s')
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # List contents of the category folder
+        items = list_folder(repo, folder, token)
+
+        # Filter to only directories (subfolders)
+        subfolders = [item['name'] for item in items if item.get('type') == 'dir']
+
+        # Also get count of notes per subfolder from database
+        subfolder_counts = {}
+        rows = db.execute(
+            """
+            SELECT subfolder, COUNT(*) as count
+            FROM knowledge_entries
+            WHERE category = ? AND subfolder IS NOT NULL
+            GROUP BY subfolder
+            """,
+            (category,)
+        ).fetchall()
+        for row in rows:
+            subfolder_counts[row['subfolder']] = row['count']
+
+        # Get root count (notes without subfolder)
+        root_count = db.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM knowledge_entries
+            WHERE category = ? AND (subfolder IS NULL OR subfolder = '')
+            """,
+            (category,)
+        ).fetchone()['count']
+
+        return {
+            "category": category,
+            "folder": folder,
+            "subfolders": [
+                {
+                    "name": sf,
+                    "path": f'{folder}/{sf}',
+                    "note_count": subfolder_counts.get(sf, 0)
+                }
+                for sf in subfolders
+            ],
+            "root_note_count": root_count
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list subfolders: {e}")
+        return {"error": f"Failed to list subfolders: {str(e)}"}
+
+
+def tool_move_to_subfolder(args: dict) -> dict:
+    """Move a note to a different subfolder within its current category."""
+    from .rag.github_service import create_file, delete_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    new_subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    # Validate subfolder name if provided
+    if new_subfolder and ('/' in new_subfolder or '\\' in new_subfolder):
+        return {"error": "Subfolder name cannot contain slashes"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path, subfolder
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    old_subfolder = entry['subfolder']
+    if old_subfolder == new_subfolder:
+        return {"error": f"Note is already in subfolder '{new_subfolder or '(root)'}"}
+
+    title = entry['title']
+    category = entry['category']
+    old_file_path = entry['file_path']
+    entry_db_id = entry['id']
+
+    # Get category folder
+    from .rag.database import get_user_categories
+    categories = get_user_categories(db, user_id or 'default')
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+    folder = category_folders.get(category, f'{category}s')
+
+    # Build new file path
+    filename = old_file_path.split('/')[-1]  # Preserve the filename
+    if new_subfolder:
+        new_file_path = f'{folder}/{new_subfolder}/{filename}'
+    else:
+        new_file_path = f'{folder}/{filename}'
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Get current file content from GitHub
+        current_content = get_file_content(repo, old_file_path, token)
+
+        if current_content:
+            # Update subfolder in frontmatter
+            if current_content.startswith('---'):
+                parts = current_content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter_lines = parts[1].strip().split('\n')
+                    new_frontmatter_lines = []
+                    has_subfolder = False
+                    for line in frontmatter_lines:
+                        if line.startswith('subfolder:'):
+                            has_subfolder = True
+                            if new_subfolder:
+                                new_frontmatter_lines.append(f'subfolder: {new_subfolder}')
+                            # Else skip the line (remove subfolder field)
+                        else:
+                            new_frontmatter_lines.append(line)
+                    # Add subfolder if it wasn't in frontmatter
+                    if new_subfolder and not has_subfolder:
+                        new_frontmatter_lines.append(f'subfolder: {new_subfolder}')
+                    full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+                else:
+                    full_content = current_content
+            else:
+                full_content = current_content
+        else:
+            return {"error": f"File not found in GitHub: {old_file_path}"}
+
+        # Create new file
+        create_file(
+            repo=repo,
+            path=new_file_path,
+            content=full_content,
+            message=f'Move note to subfolder: {title}',
+            token=token
+        )
+
+        # Delete old file
+        try:
+            delete_file(
+                repo=repo,
+                path=old_file_path,
+                message=f'Move note from {old_subfolder or "(root)"} to {new_subfolder or "(root)"}',
+                token=token
+            )
+        except Exception as del_err:
+            logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET file_path = ?, subfolder = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_file_path, new_subfolder, entry_db_id)
+        )
+        db.commit()
+
+        logger.info(f"MCP moved note to subfolder: {entry_id} ({old_subfolder or '(root)'} -> {new_subfolder or '(root)'})")
+
+        return {
+            "success": True,
+            "entry_id": entry_id,
+            "title": title,
+            "category": category,
+            "old_subfolder": old_subfolder,
+            "new_subfolder": new_subfolder,
+            "old_file_path": old_file_path,
+            "new_file_path": new_file_path
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to move note to subfolder: {e}")
+        return {"error": f"Failed to move note to subfolder: {str(e)}"}
 
 
 def tool_delete_note(args: dict) -> dict:

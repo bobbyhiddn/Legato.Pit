@@ -368,6 +368,109 @@
         background: var(--warning-color);
     }
 
+    /* Folder styles */
+    .header-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+    }
+
+    .breadcrumb a {
+        color: var(--accent-color);
+        text-decoration: none;
+    }
+
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
+
+    .breadcrumb .separator {
+        color: var(--text-secondary);
+    }
+
+    .subfolders-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .section-title {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin: 0 0 0.75rem 0;
+        letter-spacing: 0.05em;
+    }
+
+    .subfolder-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .subfolder-card {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        text-decoration: none;
+        color: var(--text-primary);
+        transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .subfolder-card:hover {
+        border-color: var(--accent-color);
+        transform: translateY(-1px);
+    }
+
+    .folder-icon {
+        display: flex;
+        color: var(--text-secondary);
+    }
+
+    .folder-icon svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .folder-name {
+        flex: 1;
+        font-weight: 500;
+    }
+
+    .folder-count {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+    }
+
+    .btn-folder {
+        color: var(--text-secondary);
+    }
+
+    .btn-folder:hover {
+        color: var(--accent-color);
+    }
+
+    .move-note-title {
+        font-weight: 500;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+    }
+
     @media (max-width: 768px) {
         .library-layout {
             flex-direction: column;
@@ -383,6 +486,10 @@
             flex-direction: row;
             flex-wrap: wrap;
             gap: 0.5rem;
+        }
+
+        .subfolder-list {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         }
     }
 </style>
@@ -431,12 +538,42 @@
         <header class="category-header">
             <div class="category-header-row">
                 <div>
-                    <h1>{{ category }}</h1>
+                    <h1>{{ category }}{% if current_subfolder %} / {{ current_subfolder }}{% endif %}</h1>
                     <p class="subtitle">{{ entries|length }} entries</p>
                 </div>
-                <button class="btn btn-primary" onclick="showCreateNoteModal()">+ New Note</button>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="showCreateFolderModal()">+ Folder</button>
+                    <button class="btn btn-primary" onclick="showCreateNoteModal()">+ Note</button>
+                </div>
             </div>
+
+            <!-- Breadcrumb navigation -->
+            {% if current_subfolder %}
+            <nav class="breadcrumb">
+                <a href="{{ url_for('library.view_category', category=category) }}">{{ category }}</a>
+                <span class="separator">/</span>
+                <span>{{ current_subfolder }}</span>
+            </nav>
+            {% endif %}
         </header>
+
+        <!-- Subfolders section -->
+        {% if subfolders and not current_subfolder %}
+        <div class="subfolders-section">
+            <h3 class="section-title">Folders</h3>
+            <div class="subfolder-list">
+                {% for sf in subfolders %}
+                <a href="{{ url_for('library.view_category', category=category, subfolder=sf) }}" class="subfolder-card">
+                    <span class="folder-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                    </span>
+                    <span class="folder-name">{{ sf }}</span>
+                    <span class="folder-count">{{ subfolder_counts.get(sf, 0) }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <div class="entry-list">
             {% for entry in entries %}
@@ -461,6 +598,9 @@
                         </select>
                     </span>
                     <div class="action-group">
+                        <button class="action-btn btn-folder" onclick="showMoveToFolderModal('{{ entry.entry_id }}', '{{ entry.title|e }}', '{{ entry.subfolder or '' }}')" title="Move to folder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                        </button>
                         {% if user.has_copilot %}
                         <button class="action-btn btn-chord" onclick="addToChordQueueLocal('{{ entry.entry_id }}', '{{ entry.title|e }}')" title="Add to chord queue">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -482,7 +622,7 @@
 <!-- Create Note Modal -->
 <div class="note-modal" id="createNoteModal">
     <div class="note-modal-content">
-        <h3>New Note in {{ category }}</h3>
+        <h3>New Note in {{ category }}{% if current_subfolder %}/{{ current_subfolder }}{% endif %}</h3>
         <form id="createNoteForm" onsubmit="submitCreateNote(event)">
             <div class="form-group">
                 <label for="noteTitle">Title</label>
@@ -497,6 +637,50 @@
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeCreateNoteModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary" id="createNoteBtn">Create Note</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create Folder Modal -->
+<div class="note-modal" id="createFolderModal">
+    <div class="note-modal-content">
+        <h3>New Folder in {{ category }}</h3>
+        <form id="createFolderForm" onsubmit="submitCreateFolder(event)">
+            <div class="form-group">
+                <label for="folderName">Folder Name</label>
+                <input type="text" id="folderName" required placeholder="e.g., projects, backlog, research" pattern="[a-zA-Z0-9_-]+">
+                <small>Only letters, numbers, underscores, and hyphens</small>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeCreateFolderModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="createFolderBtn">Create Folder</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Move to Folder Modal -->
+<div class="note-modal" id="moveToFolderModal">
+    <div class="note-modal-content">
+        <h3>Move Note to Folder</h3>
+        <p id="moveNoteTitle" class="move-note-title"></p>
+        <form id="moveToFolderForm" onsubmit="submitMoveToFolder(event)">
+            <input type="hidden" id="moveEntryId">
+            <div class="form-group">
+                <label for="targetSubfolder">Target Folder</label>
+                <select id="targetSubfolder">
+                    <option value="">(Root - no folder)</option>
+                    {% for sf in subfolders %}
+                    <option value="{{ sf }}">{{ sf }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeMoveToFolderModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="moveToFolderBtn">Move</button>
             </div>
         </form>
     </div>
@@ -674,5 +858,124 @@
             deleteBtn.textContent = '✕';
         }
     }
+
+    // Folder management functions
+    const currentSubfolder = {{ current_subfolder|tojson if current_subfolder else 'null' }};
+
+    function showCreateFolderModal() {
+        document.getElementById('createFolderModal').classList.add('visible');
+        document.getElementById('folderName').focus();
+    }
+
+    function closeCreateFolderModal() {
+        document.getElementById('createFolderModal').classList.remove('visible');
+        document.getElementById('createFolderForm').reset();
+    }
+
+    async function submitCreateFolder(event) {
+        event.preventDefault();
+
+        const folderName = document.getElementById('folderName').value.trim();
+        const createBtn = document.getElementById('createFolderBtn');
+
+        if (!folderName) {
+            showWarning('Folder name is required');
+            document.getElementById('folderName').focus();
+            return;
+        }
+
+        createBtn.disabled = true;
+        createBtn.textContent = 'Creating...';
+
+        try {
+            const response = await fetch('/library/api/create-folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    category: currentCategory,
+                    subfolder_name: folderName
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess('Folder created');
+                window.location.reload();
+            } else {
+                showError(data.error || 'Failed to create folder');
+                createBtn.disabled = false;
+                createBtn.textContent = 'Create Folder';
+            }
+        } catch (error) {
+            showError(error.message);
+            createBtn.disabled = false;
+            createBtn.textContent = 'Create Folder';
+        }
+    }
+
+    function showMoveToFolderModal(entryId, title, currentFolder) {
+        document.getElementById('moveEntryId').value = entryId;
+        document.getElementById('moveNoteTitle').textContent = title;
+        document.getElementById('targetSubfolder').value = currentFolder || '';
+        document.getElementById('moveToFolderModal').classList.add('visible');
+    }
+
+    function closeMoveToFolderModal() {
+        document.getElementById('moveToFolderModal').classList.remove('visible');
+        document.getElementById('moveToFolderForm').reset();
+    }
+
+    async function submitMoveToFolder(event) {
+        event.preventDefault();
+
+        const entryId = document.getElementById('moveEntryId').value;
+        const targetSubfolder = document.getElementById('targetSubfolder').value;
+        const moveBtn = document.getElementById('moveToFolderBtn');
+
+        moveBtn.disabled = true;
+        moveBtn.textContent = 'Moving...';
+
+        try {
+            const response = await fetch(`/library/api/entry/${entryId}/subfolder`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    subfolder: targetSubfolder || null
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                showSuccess('Note moved');
+                window.location.reload();
+            } else {
+                showError(data.error || 'Failed to move note');
+                moveBtn.disabled = false;
+                moveBtn.textContent = 'Move';
+            }
+        } catch (error) {
+            showError(error.message);
+            moveBtn.disabled = false;
+            moveBtn.textContent = 'Move';
+        }
+    }
+
+    // Close modals on escape or clicking outside
+    document.getElementById('createFolderModal').addEventListener('click', (e) => {
+        if (e.target.id === 'createFolderModal') closeCreateFolderModal();
+    });
+
+    document.getElementById('moveToFolderModal').addEventListener('click', (e) => {
+        if (e.target.id === 'moveToFolderModal') closeMoveToFolderModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeCreateFolderModal();
+            closeMoveToFolderModal();
+        }
+    });
 </script>
 {% endblock %}

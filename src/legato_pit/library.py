@@ -632,20 +632,71 @@ def view_entry(entry_id: str):
 
 
 @library_bp.route('/category/<category>')
+@library_bp.route('/category/<category>/<path:subfolder>')
 @login_required
-def view_category(category: str):
-    """View entries in a category."""
-    db = get_db()
+def view_category(category: str, subfolder: str = None):
+    """View entries in a category, optionally filtered by subfolder."""
+    from flask import session
+    from .rag.database import get_user_categories
+    from .rag.github_service import list_folder
 
-    entries = db.execute(
+    db = get_db()
+    user_id = session.get('user', {}).get('user_id') or 'default'
+
+    # Get category folder info
+    categories_list = get_user_categories(db, user_id)
+    category_folders = {c['name']: c['folder_name'] for c in categories_list}
+    folder = category_folders.get(category, f'{category}s')
+
+    # Get subfolders from GitHub
+    subfolders = []
+    try:
+        from .auth import get_user_installation_token
+        from .core import get_user_library_repo
+        token = get_user_installation_token(user_id, 'library')
+        repo = get_user_library_repo(user_id)
+        if token and repo:
+            items = list_folder(repo, folder, token)
+            subfolders = [item['name'] for item in items if item.get('type') == 'dir']
+    except Exception as e:
+        logger.warning(f"Could not list subfolders: {e}")
+
+    # Query entries - filter by subfolder if provided
+    if subfolder:
+        entries = db.execute(
+            """
+            SELECT entry_id, title, created_at, needs_chord, chord_status, subfolder
+            FROM knowledge_entries
+            WHERE category = ? AND subfolder = ?
+            ORDER BY title
+            """,
+            (category, subfolder),
+        ).fetchall()
+    else:
+        # Get entries at root level (no subfolder) when viewing category root
+        entries = db.execute(
+            """
+            SELECT entry_id, title, created_at, needs_chord, chord_status, subfolder
+            FROM knowledge_entries
+            WHERE category = ? AND (subfolder IS NULL OR subfolder = '')
+            ORDER BY title
+            """,
+            (category,),
+        ).fetchall()
+
+    # Get counts per subfolder for display
+    subfolder_counts = {}
+    rows = db.execute(
         """
-        SELECT entry_id, title, created_at, needs_chord, chord_status
+        SELECT subfolder, COUNT(*) as count
         FROM knowledge_entries
-        WHERE category = ?
-        ORDER BY title
+        WHERE category = ? AND subfolder IS NOT NULL AND subfolder != ''
+        GROUP BY subfolder
         """,
-        (category,),
+        (category,)
     ).fetchall()
+    for row in rows:
+        subfolder_counts[row['subfolder']] = row['count']
 
     # Get categories for sidebar (from user_categories with counts)
     categories = get_categories_with_counts()
@@ -653,23 +704,74 @@ def view_category(category: str):
     return render_template(
         'library_category.html',
         category=category,
+        current_subfolder=subfolder,
         entries=[dict(e) for e in entries],
         categories=categories,
+        subfolders=subfolders,
+        subfolder_counts=subfolder_counts,
+        folder=folder,
     )
 
 
 @library_bp.route('/search')
 @login_required
 def search():
-    """Search the library."""
+    """Search the library using hybrid semantic + keyword search."""
+    import os
+    from flask import session
+
     query = request.args.get('q', '')
 
     if not query:
-        return render_template('library_search.html', query='', results=[])
+        return render_template('library_search.html', query='', results=[], maybe_related=[], search_type='none')
 
     db = get_db()
+    user_id = session.get('user', {}).get('user_id')
 
-    # Simple text search (SQLite FTS would be better for large datasets)
+    # Try to use hybrid search with embeddings
+    embedding_service = None
+    try:
+        from .rag.embedding_service import EmbeddingService
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+        from .core import get_api_key_for_user
+
+        # Get OpenAI key (user's or system)
+        openai_key = None
+        if user_id:
+            openai_key = get_api_key_for_user(user_id, 'openai')
+        if not openai_key:
+            openai_key = os.environ.get('OPENAI_API_KEY')
+
+        if openai_key:
+            provider = OpenAIEmbeddingProvider(api_key=openai_key)
+            embedding_service = EmbeddingService(provider, db)
+    except Exception as e:
+        logger.warning(f"Could not initialize embedding service for search: {e}")
+
+    if embedding_service:
+        # Use hybrid search (semantic + keyword)
+        try:
+            search_result = embedding_service.hybrid_search(
+                query=query,
+                entry_type='knowledge',
+                limit=25,
+                include_low_confidence=True,
+            )
+
+            results = search_result.get('results', [])
+            maybe_related = search_result.get('maybe_related', [])
+
+            return render_template(
+                'library_search.html',
+                query=query,
+                results=results,
+                maybe_related=maybe_related,
+                search_type='hybrid',
+            )
+        except Exception as e:
+            logger.error(f"Hybrid search failed, falling back to keyword: {e}")
+
+    # Fallback to simple keyword search
     results = db.execute(
         """
         SELECT entry_id, title, category, content,
@@ -687,6 +789,8 @@ def search():
         'library_search.html',
         query=query,
         results=[dict(r) for r in results],
+        maybe_related=[],
+        search_type='keyword',
     )
 
 
@@ -2113,6 +2217,351 @@ key_phrases: []
 
     except Exception as e:
         logger.error(f"Create note failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@library_bp.route('/api/create-folder', methods=['POST'])
+@login_required
+def api_create_folder():
+    """Create a new subfolder under a category.
+
+    Request body:
+    {
+        "category": "concept",
+        "subfolder_name": "projects"
+    }
+
+    Response:
+    {
+        "status": "success",
+        "category": "concept",
+        "subfolder": "projects",
+        "path": "concept/projects"
+    }
+    """
+    import re
+    from flask import session
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    category = data.get('category', '').lower().strip()
+    subfolder_name = data.get('subfolder_name', '').strip()
+
+    if not category:
+        return jsonify({'error': 'Category is required'}), 400
+    if not subfolder_name:
+        return jsonify({'error': 'Subfolder name is required'}), 400
+
+    # Validate subfolder name
+    if '/' in subfolder_name or '\\' in subfolder_name:
+        return jsonify({'error': 'Subfolder name cannot contain slashes'}), 400
+    if not re.match(r'^[a-zA-Z0-9_-]+$', subfolder_name):
+        return jsonify({'error': 'Subfolder name can only contain letters, numbers, underscores, and hyphens'}), 400
+
+    db = get_db()
+    user_id = session.get('user', {}).get('user_id') or 'default'
+
+    # Validate category
+    categories = get_user_categories(db, user_id)
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return jsonify({
+            'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
+        }), 400
+
+    folder = category_folders.get(category, f'{category}s')
+    subfolder_path = f'{folder}/{subfolder_name}/.gitkeep'
+
+    try:
+        from .core import get_user_library_repo
+        from .auth import get_user_installation_token
+
+        token = get_user_installation_token(user_id, 'library')
+        if not token:
+            return jsonify({'error': 'GitHub authorization required'}), 401
+
+        repo = get_user_library_repo(user_id)
+
+        # Create .gitkeep file to establish the subfolder
+        create_file(
+            repo=repo,
+            path=subfolder_path,
+            content='',
+            message=f'Create subfolder: {folder}/{subfolder_name}',
+            token=token
+        )
+
+        logger.info(f"Created subfolder: {folder}/{subfolder_name}")
+
+        return jsonify({
+            'status': 'success',
+            'category': category,
+            'subfolder': subfolder_name,
+            'path': f'{folder}/{subfolder_name}'
+        })
+
+    except Exception as e:
+        logger.error(f"Create folder failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@library_bp.route('/api/category/<category>/subfolders', methods=['GET'])
+@login_required
+def api_list_subfolders(category: str):
+    """List all subfolders under a category.
+
+    Response:
+    {
+        "category": "concept",
+        "folder": "concept",
+        "subfolders": [
+            {"name": "projects", "path": "concept/projects", "note_count": 5}
+        ],
+        "root_note_count": 10
+    }
+    """
+    from flask import session
+    from .rag.database import get_user_categories
+    from .rag.github_service import list_folder
+
+    category = category.lower().strip()
+
+    db = get_db()
+    user_id = session.get('user', {}).get('user_id') or 'default'
+
+    # Validate category
+    categories = get_user_categories(db, user_id)
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return jsonify({
+            'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
+        }), 400
+
+    folder = category_folders.get(category, f'{category}s')
+
+    try:
+        from .core import get_user_library_repo
+        from .auth import get_user_installation_token
+
+        token = get_user_installation_token(user_id, 'library')
+        if not token:
+            return jsonify({'error': 'GitHub authorization required'}), 401
+
+        repo = get_user_library_repo(user_id)
+
+        # List contents of the category folder
+        items = list_folder(repo, folder, token)
+
+        # Filter to only directories (subfolders)
+        subfolders = [item['name'] for item in items if item.get('type') == 'dir']
+
+        # Get count of notes per subfolder from database
+        subfolder_counts = {}
+        rows = db.execute(
+            """
+            SELECT subfolder, COUNT(*) as count
+            FROM knowledge_entries
+            WHERE category = ? AND subfolder IS NOT NULL AND subfolder != ''
+            GROUP BY subfolder
+            """,
+            (category,)
+        ).fetchall()
+        for row in rows:
+            subfolder_counts[row['subfolder']] = row['count']
+
+        # Get root count (notes without subfolder)
+        root_count = db.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM knowledge_entries
+            WHERE category = ? AND (subfolder IS NULL OR subfolder = '')
+            """,
+            (category,)
+        ).fetchone()['count']
+
+        return jsonify({
+            'category': category,
+            'folder': folder,
+            'subfolders': [
+                {
+                    'name': sf,
+                    'path': f'{folder}/{sf}',
+                    'note_count': subfolder_counts.get(sf, 0)
+                }
+                for sf in subfolders
+            ],
+            'root_note_count': root_count
+        })
+
+    except Exception as e:
+        logger.error(f"List subfolders failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@library_bp.route('/api/entry/<path:entry_id>/subfolder', methods=['POST'])
+@login_required
+def api_move_to_subfolder(entry_id: str):
+    """Move a note to a different subfolder within its current category.
+
+    Request body:
+    {
+        "subfolder": "projects"  // or null/empty to move to category root
+    }
+
+    Response:
+    {
+        "status": "success",
+        "entry_id": "...",
+        "old_subfolder": null,
+        "new_subfolder": "projects",
+        "new_file_path": "concept/projects/2026-01-10-note.md"
+    }
+    """
+    from flask import session
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file, delete_file, get_file_content
+
+    data = request.get_json()
+    if data is None:
+        return jsonify({'error': 'No data provided'}), 400
+
+    new_subfolder = data.get('subfolder', '').strip() if data.get('subfolder') else None
+
+    # Validate subfolder name if provided
+    if new_subfolder and ('/' in new_subfolder or '\\' in new_subfolder):
+        return jsonify({'error': 'Subfolder name cannot contain slashes'}), 400
+
+    db = get_db()
+    user_id = session.get('user', {}).get('user_id') or 'default'
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path, subfolder
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return jsonify({'error': f'Note not found: {entry_id}'}), 404
+
+    old_subfolder = entry['subfolder']
+    if old_subfolder == new_subfolder:
+        return jsonify({'error': f"Note is already in subfolder '{new_subfolder or '(root)'}"}), 400
+
+    title = entry['title']
+    category = entry['category']
+    old_file_path = entry['file_path']
+    entry_db_id = entry['id']
+
+    # Get category folder
+    categories = get_user_categories(db, user_id)
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+    folder = category_folders.get(category, f'{category}s')
+
+    # Build new file path
+    filename = old_file_path.split('/')[-1]  # Preserve the filename
+    if new_subfolder:
+        new_file_path = f'{folder}/{new_subfolder}/{filename}'
+    else:
+        new_file_path = f'{folder}/{filename}'
+
+    try:
+        from .core import get_user_library_repo
+        from .auth import get_user_installation_token
+
+        token = get_user_installation_token(user_id, 'library')
+        if not token:
+            return jsonify({'error': 'GitHub authorization required'}), 401
+
+        repo = get_user_library_repo(user_id)
+
+        # Get current file content from GitHub
+        current_content = get_file_content(repo, old_file_path, token)
+
+        if current_content:
+            # Update subfolder in frontmatter
+            if current_content.startswith('---'):
+                parts = current_content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter_lines = parts[1].strip().split('\n')
+                    new_frontmatter_lines = []
+                    has_subfolder = False
+                    for line in frontmatter_lines:
+                        if line.startswith('subfolder:'):
+                            has_subfolder = True
+                            if new_subfolder:
+                                new_frontmatter_lines.append(f'subfolder: {new_subfolder}')
+                            # Else skip the line (remove subfolder field)
+                        else:
+                            new_frontmatter_lines.append(line)
+                    # Add subfolder if it wasn't in frontmatter
+                    if new_subfolder and not has_subfolder:
+                        new_frontmatter_lines.append(f'subfolder: {new_subfolder}')
+                    full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+                else:
+                    full_content = current_content
+            else:
+                full_content = current_content
+        else:
+            return jsonify({'error': f'File not found in GitHub: {old_file_path}'}), 404
+
+        # Create new file
+        create_file(
+            repo=repo,
+            path=new_file_path,
+            content=full_content,
+            message=f'Move note to subfolder: {title}',
+            token=token
+        )
+
+        # Delete old file
+        try:
+            delete_file(
+                repo=repo,
+                path=old_file_path,
+                message=f'Move note from {old_subfolder or "(root)"} to {new_subfolder or "(root)"}',
+                token=token
+            )
+        except Exception as del_err:
+            logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET file_path = ?, subfolder = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_file_path, new_subfolder, entry_db_id)
+        )
+        db.commit()
+
+        logger.info(f"Moved note to subfolder: {entry_id} ({old_subfolder or '(root)'} -> {new_subfolder or '(root)'})")
+
+        return jsonify({
+            'status': 'success',
+            'entry_id': entry_id,
+            'title': title,
+            'category': category,
+            'old_subfolder': old_subfolder,
+            'new_subfolder': new_subfolder,
+            'old_file_path': old_file_path,
+            'new_file_path': new_file_path
+        })
+
+    except Exception as e:
+        logger.error(f"Move to subfolder failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 

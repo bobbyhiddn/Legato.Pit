@@ -195,6 +195,10 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN key_phrases TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE knowledge_entries ADD COLUMN subfolder TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     # Project entries from Lab
     cursor.execute("""
