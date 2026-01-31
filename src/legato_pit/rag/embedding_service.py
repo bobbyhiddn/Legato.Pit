@@ -317,12 +317,15 @@ class EmbeddingService:
             ).fetchall()
             return [(r['id'], f"Title: {r['title']}\n\nDescription: {r['description'] or ''}") for r in rows]
 
-    def generate_missing_embeddings(self, entry_type: str = 'knowledge', delay: float = 0.1) -> int:
+    def generate_missing_embeddings(self, entry_type: str = 'knowledge', delay: float = 0.1, batch_size: int = 100) -> int:
         """Generate embeddings for all entries that don't have them.
+
+        Uses batch API calls for efficiency when processing many entries.
 
         Args:
             entry_type: 'knowledge' or 'project'
-            delay: Seconds to wait between API calls
+            delay: Seconds to wait between batch API calls (not per-item)
+            batch_size: Number of entries to process per batch API call
 
         Returns:
             Number of embeddings generated
@@ -330,19 +333,50 @@ class EmbeddingService:
         import time
 
         entries = self.get_entries_without_embeddings(entry_type)
+        if not entries:
+            logger.info(f"No missing embeddings for {entry_type}")
+            return 0
+
+        logger.info(f"Generating embeddings for {len(entries)} {entry_type} entries in batches of {batch_size}")
         count = 0
 
-        for entry_id, text in entries:
-            try:
-                if self.generate_and_store(entry_id, entry_type, text):
-                    count += 1
-                    logger.info(f"Generated embedding for {entry_type}:{entry_id}")
+        # Process in batches
+        for i in range(0, len(entries), batch_size):
+            batch = entries[i:i + batch_size]
+            entry_ids = [e[0] for e in batch]
+            texts = [e[1] for e in batch]
 
-                if delay > 0:
+            try:
+                # Use batch embedding API
+                embeddings = self.provider.create_embeddings_batch(texts)
+
+                # Store all embeddings from this batch
+                version = self.provider.model_identifier()
+                with self._lock:
+                    for entry_id, embedding in zip(entry_ids, embeddings):
+                        blob = self._serialize_embedding(embedding)
+                        self.conn.execute(
+                            """
+                            INSERT INTO embeddings (entry_id, entry_type, embedding, vector_version)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(entry_id, entry_type, vector_version)
+                            DO UPDATE SET embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP
+                            """,
+                            (entry_id, entry_type, blob, version),
+                        )
+                    self.conn.commit()
+
+                count += len(embeddings)
+                logger.info(f"Generated batch of {len(embeddings)} embeddings ({count}/{len(entries)} total)")
+
+                # Delay between batches (not between individual items)
+                if delay > 0 and i + batch_size < len(entries):
                     time.sleep(delay)
 
             except Exception as e:
-                logger.error(f"Failed to generate embedding for {entry_type}:{entry_id}: {e}")
+                logger.error(f"Failed to generate embeddings for batch starting at {i}: {e}")
+                # Continue with next batch instead of failing entirely
+                continue
 
         return count
 

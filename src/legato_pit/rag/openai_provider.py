@@ -95,3 +95,69 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def dimension(self) -> int:
         """Return the embedding dimension."""
         return self._dimension
+
+    def create_embeddings_batch(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
+        """Generate embeddings for multiple texts in batched API calls.
+
+        OpenAI supports up to 2048 texts per request, but we batch at 100
+        for reliability and memory efficiency.
+
+        Args:
+            texts: List of texts to embed
+            batch_size: Number of texts per API call (default 100)
+
+        Returns:
+            List of embedding vectors in the same order as input texts
+
+        Raises:
+            RuntimeError: If any API call fails
+        """
+        if not texts:
+            return []
+
+        all_embeddings = []
+        max_chars = 30000
+
+        # Process in batches
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+
+            # Truncate long texts
+            processed_batch = []
+            for text in batch:
+                if not text or not text.strip():
+                    processed_batch.append(" ")  # OpenAI requires non-empty
+                elif len(text) > max_chars:
+                    logger.warning(f"Truncating text from {len(text)} to {max_chars} chars")
+                    processed_batch.append(text[:max_chars])
+                else:
+                    processed_batch.append(text)
+
+            try:
+                response = requests.post(
+                    self.EMBEDDING_URL,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "input": processed_batch,
+                    },
+                    timeout=60,  # Longer timeout for batch
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # OpenAI returns embeddings with index field, sort by index
+                batch_embeddings = sorted(data["data"], key=lambda x: x["index"])
+                for item in batch_embeddings:
+                    all_embeddings.append(item["embedding"])
+
+                logger.info(f"Generated batch of {len(batch)} embeddings ({i+len(batch)}/{len(texts)})")
+
+            except requests.exceptions.RequestException as e:
+                logger.error(f"OpenAI batch embedding request failed: {e}")
+                raise RuntimeError(f"Failed to create batch embeddings: {e}")
+
+        return all_embeddings
