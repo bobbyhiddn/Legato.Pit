@@ -1,0 +1,656 @@
+{% extends "base.html" %}
+
+{% block title %}Import Markdown - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+.import-page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 1.75rem;
+}
+
+.page-header .subtitle {
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+/* Upload Section */
+.upload-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+}
+
+.upload-area {
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.upload-area:hover {
+    border-color: var(--accent-color);
+    background: rgba(88, 166, 255, 0.05);
+}
+
+.upload-area.dragover {
+    border-color: var(--accent-color);
+    background: rgba(88, 166, 255, 0.1);
+}
+
+.upload-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.upload-text {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+}
+
+.upload-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.file-input {
+    display: none;
+}
+
+/* Progress Section */
+.progress-section {
+    margin-top: 1.5rem;
+    display: none;
+}
+
+.progress-section.visible {
+    display: block;
+}
+
+.progress-bar-container {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--accent-color);
+    border-radius: 8px;
+    transition: width 0.3s ease;
+    width: 0;
+}
+
+.progress-text {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+/* Jobs Section */
+.jobs-section {
+    margin-top: 2rem;
+}
+
+.jobs-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.job-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.job-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.job-id {
+    font-family: monospace;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.job-stats {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.job-stat {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.job-status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.job-status.pending {
+    background: var(--warning-color);
+    color: #000;
+}
+
+.job-status.classifying {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.job-status.classified {
+    background: var(--success-color);
+    color: #fff;
+}
+
+.job-status.writing {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.job-status.completed {
+    background: #238636;
+    color: #fff;
+}
+
+.job-status.failed {
+    background: var(--danger-color);
+    color: #fff;
+}
+
+.job-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-secondary);
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* How it works */
+.how-it-works {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 2rem;
+}
+
+.how-it-works h3 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+}
+
+.steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.step {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.step-number {
+    width: 24px;
+    height: 24px;
+    background: var(--accent-color);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.step-text {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+/* Category Mode Section */
+.category-mode-section {
+    margin-bottom: 1.5rem;
+}
+
+.section-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+
+.mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.mode-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.mode-option:hover {
+    border-color: var(--accent-color);
+    background: rgba(88, 166, 255, 0.05);
+}
+
+.mode-option input[type="radio"] {
+    margin-top: 0.25rem;
+    accent-color: var(--accent-color);
+}
+
+.mode-option input[type="radio"]:checked + .mode-content {
+    color: var(--text-primary);
+}
+
+.mode-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.mode-title {
+    font-weight: 600;
+}
+
+.mode-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.new-category-input {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+}
+
+.new-category-input label {
+    display: block;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+
+.new-category-input input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.new-category-input input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.input-hint {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 600px) {
+    .job-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .job-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="import-page">
+    <header class="page-header">
+        <h1>Import Markdown</h1>
+        <p class="subtitle">Upload a ZIP of markdown files to classify and import into your Library</p>
+    </header>
+
+    <div class="upload-section">
+        <!-- Category Mode Selection -->
+        <div class="category-mode-section" id="categoryModeSection">
+            <label class="section-label">How should files be categorized?</label>
+
+            <div class="mode-options">
+                <label class="mode-option">
+                    <input type="radio" name="category_mode" value="auto" checked onchange="toggleNewCategoryInput()">
+                    <div class="mode-content">
+                        <span class="mode-title">Auto-classify</span>
+                        <span class="mode-desc">Claude analyzes each file and assigns the best category (concept, reflection, epiphany, etc.)</span>
+                    </div>
+                </label>
+
+                <label class="mode-option">
+                    <input type="radio" name="category_mode" value="new" onchange="toggleNewCategoryInput()">
+                    <div class="mode-content">
+                        <span class="mode-title">New category</span>
+                        <span class="mode-desc">Put all files into a new category you create</span>
+                    </div>
+                </label>
+            </div>
+
+            <div class="new-category-input" id="newCategoryInput" style="display: none;">
+                <label for="newCategoryName">New category name</label>
+                <input type="text" id="newCategoryName" placeholder="e.g., imported-notes, research, project-ideas">
+                <span class="input-hint">Lowercase letters, numbers, and hyphens only</span>
+            </div>
+        </div>
+
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('zipFile').click()">
+            <input type="file" id="zipFile" class="file-input" accept=".zip">
+            <div class="upload-icon">&#128230;</div>
+            <p class="upload-text">Drop a ZIP file here or click to browse</p>
+            <p class="upload-hint">Contains .md files you want to classify and import</p>
+        </div>
+
+        <div class="progress-section" id="progressSection">
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <p class="progress-text" id="progressText">Uploading...</p>
+        </div>
+    </div>
+
+    <div class="how-it-works">
+        <h3>How it works</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <span class="step-text"><strong>Upload</strong> - Select a ZIP file containing your markdown notes</span>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <span class="step-text"><strong>Classify</strong> - Claude analyzes each file and assigns categories, tags, and metadata</span>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <span class="step-text"><strong>Review</strong> - Preview the classifications and make any adjustments</span>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <span class="step-text"><strong>Import</strong> - Confirm to write files to your Library with updated frontmatter</span>
+            </div>
+        </div>
+    </div>
+
+    {% if jobs %}
+    <div class="jobs-section">
+        <h2>Recent Imports</h2>
+        <div class="jobs-list">
+            {% for job in jobs %}
+            <div class="job-card" data-job-id="{{ job.job_id }}">
+                <div class="job-info">
+                    <div class="job-id">{{ job.job_id }}</div>
+                    <div class="job-stats">
+                        <span class="job-stat">{{ job.file_count }} files</span>
+                        {% if job.classified_count > 0 %}
+                        <span class="job-stat">{{ job.classified_count }} classified</span>
+                        {% endif %}
+                        {% if job.written_count > 0 %}
+                        <span class="job-stat">{{ job.written_count }} written</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <span class="job-status {{ job.status }}">{{ job.status }}</span>
+                <div class="job-actions">
+                    {% if job.status == 'pending' %}
+                    <button class="btn btn-primary btn-sm" onclick="classifyJob('{{ job.job_id }}')">Classify</button>
+                    {% elif job.status == 'classified' %}
+                    <a href="{{ url_for('import_api.preview_job', job_id=job.job_id) }}" class="btn btn-primary btn-sm">Review</a>
+                    {% elif job.status == 'completed' %}
+                    <a href="{{ url_for('library.index') }}" class="btn btn-secondary btn-sm">View Library</a>
+                    {% endif %}
+                    <button class="btn btn-secondary btn-sm" onclick="deleteJob('{{ job.job_id }}')">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="jobs-section">
+        <div class="empty-state">
+            <div class="empty-state-icon">&#128195;</div>
+            <p>No imports yet. Upload a ZIP file to get started.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('zipFile');
+const progressSection = document.getElementById('progressSection');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const newCategoryInput = document.getElementById('newCategoryInput');
+
+// Toggle new category input based on mode selection
+function toggleNewCategoryInput() {
+    const mode = document.querySelector('input[name="category_mode"]:checked').value;
+    newCategoryInput.style.display = mode === 'new' ? 'block' : 'none';
+}
+
+// Get category mode settings
+function getCategorySettings() {
+    const mode = document.querySelector('input[name="category_mode"]:checked').value;
+    const newCategory = document.getElementById('newCategoryName').value.trim();
+    return { mode, newCategory };
+}
+
+// Drag and drop handling
+uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+});
+
+uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('dragover');
+});
+
+uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFile(files[0]);
+    }
+});
+
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+    }
+});
+
+async function handleFile(file) {
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+        showError('Please select a ZIP file');
+        return;
+    }
+
+    // Get category settings
+    const { mode, newCategory } = getCategorySettings();
+
+    // Validate new category if needed
+    if (mode === 'new' && !newCategory) {
+        showError('Please enter a name for the new category');
+        document.getElementById('newCategoryName').focus();
+        return;
+    }
+
+    // Validate category name format
+    if (mode === 'new' && !/^[a-z0-9-]+$/.test(newCategory)) {
+        showError('Category name can only contain lowercase letters, numbers, and hyphens');
+        document.getElementById('newCategoryName').focus();
+        return;
+    }
+
+    // Show progress
+    progressSection.classList.add('visible');
+    progressBar.style.width = '0%';
+    progressText.textContent = 'Uploading...';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category_mode', mode);
+    if (mode === 'new') {
+        formData.append('new_category', newCategory);
+    }
+
+    try {
+        // Simulate upload progress
+        progressBar.style.width = '30%';
+
+        const response = await fetch('/import/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        progressBar.style.width = '60%';
+
+        const data = await response.json();
+
+        if (response.ok) {
+            progressBar.style.width = '100%';
+
+            if (mode === 'new') {
+                progressText.textContent = `Uploaded ${data.file_count} files. Assigning to "${newCategory}"...`;
+            } else {
+                progressText.textContent = `Uploaded ${data.file_count} files. Classifying...`;
+            }
+
+            // Auto-start classification
+            await classifyJob(data.job_id, mode);
+        } else {
+            progressSection.classList.remove('visible');
+            showError(data.error || 'Upload failed');
+        }
+    } catch (error) {
+        progressSection.classList.remove('visible');
+        showError('Upload failed: ' + error.message);
+    }
+}
+
+async function classifyJob(jobId, mode = 'auto') {
+    progressSection.classList.add('visible');
+    progressBar.style.width = '70%';
+
+    if (mode === 'new') {
+        progressText.textContent = 'Sorting files into category...';
+    } else {
+        progressText.textContent = 'Classifying files with Claude...';
+    }
+
+    try {
+        const response = await fetch(`/import/api/jobs/${jobId}/classify`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            progressBar.style.width = '100%';
+            progressText.textContent = `Classified ${data.classified_count} files!`;
+            showSuccess('Classification complete!');
+
+            // Redirect to review page
+            setTimeout(() => {
+                window.location.href = `/import/jobs/${jobId}`;
+            }, 1000);
+        } else {
+            progressSection.classList.remove('visible');
+            showError(data.error || 'Classification failed');
+        }
+    } catch (error) {
+        progressSection.classList.remove('visible');
+        showError('Classification failed: ' + error.message);
+    }
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this import job?')) return;
+
+    try {
+        const response = await fetch(`/import/api/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            // Remove job card from DOM
+            const card = document.querySelector(`[data-job-id="${jobId}"]`);
+            if (card) card.remove();
+            showSuccess('Job deleted');
+        } else {
+            const data = await response.json();
+            showError(data.error || 'Delete failed');
+        }
+    } catch (error) {
+        showError('Delete failed: ' + error.message);
+    }
+}
+</script>
+{% endblock %}
