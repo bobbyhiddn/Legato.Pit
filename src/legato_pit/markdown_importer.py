@@ -652,8 +652,48 @@ class MarkdownImporter:
         user_db.commit()
         user_db.close()
 
+        # Generate embeddings for imported entries
+        if entry_ids:
+            self._generate_embeddings(entry_ids)
+
         job.status = "completed"
         return entry_ids
+
+    def _generate_embeddings(self, entry_ids: List[str]):
+        """Generate embeddings for the imported entries.
+
+        Args:
+            entry_ids: List of entry IDs to generate embeddings for
+        """
+        import os
+        from .rag.database import get_user_db_path
+        from .core import get_api_key_for_user
+        import sqlite3
+
+        try:
+            openai_key = get_api_key_for_user(self.user_id, 'openai')
+            if not openai_key:
+                logger.warning("No OpenAI API key - skipping embedding generation")
+                return
+
+            from .rag.openai_provider import OpenAIEmbeddingProvider
+            from .rag.embedding_service import EmbeddingService
+
+            user_db_path = get_user_db_path(self.user_id)
+            user_db = sqlite3.connect(str(user_db_path))
+            user_db.row_factory = sqlite3.Row
+
+            provider = OpenAIEmbeddingProvider(api_key=openai_key)
+            embedding_service = EmbeddingService(provider, user_db)
+
+            # Generate embeddings for the imported entries
+            count = embedding_service.generate_missing_embeddings('knowledge', delay=0.05)
+            logger.info(f"Generated {count} embeddings for imported entries")
+
+            user_db.close()
+
+        except Exception as e:
+            logger.error(f"Failed to generate embeddings: {e}")
 
     def _get_user_categories(self) -> List[Dict]:
         """Get user's custom categories."""
