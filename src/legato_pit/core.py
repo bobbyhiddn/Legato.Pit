@@ -89,12 +89,22 @@ def create_app():
         APP_DESCRIPTION='Dashboard & Motif for LEGATO'
     )
 
-    # Rate limiting
+    # Rate limiting - exempt MCP endpoints since they're OAuth-authenticated
+    def mcp_exempt():
+        """Exempt MCP endpoints from IP-based rate limiting.
+
+        MCP requests are authenticated via OAuth tokens, so IP-based rate
+        limiting is unnecessary and causes disconnections during normal usage
+        (Claude makes many API calls during normal operation).
+        """
+        return request.path.startswith('/mcp')
+
     limiter = Limiter(
         key_func=get_remote_address,
         app=app,
         default_limits=["200 per day", "50 per hour"],
-        storage_uri="memory://"
+        storage_uri="memory://",
+        request_filter=mcp_exempt  # Don't rate limit MCP endpoints
     )
 
     # Store limiter on app for use in blueprints
@@ -116,6 +126,7 @@ def create_app():
     from .admin import admin_bp
     from .stripe_billing import billing_bp
     from .import_api import import_api_bp
+    from .assets import assets_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -132,6 +143,7 @@ def create_app():
     app.register_blueprint(admin_bp)  # Admin console
     app.register_blueprint(billing_bp)  # Stripe billing
     app.register_blueprint(import_api_bp)  # Markdown ZIP import
+    app.register_blueprint(assets_bp)  # Library asset management
 
     # Initialize all databases on startup
     with app.app_context():

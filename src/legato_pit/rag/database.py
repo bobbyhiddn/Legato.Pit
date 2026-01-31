@@ -360,6 +360,26 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         )
     """)
 
+    # Library assets (images, files) stored in category assets folders
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS library_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT UNIQUE NOT NULL,
+            category TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            mime_type TEXT,
+            file_size INTEGER,
+            alt_text TEXT,
+            description TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_assets_category ON library_assets(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_assets_asset_id ON library_assets(asset_id)")
+
     # Pipeline processing jobs for motif/transcript processing
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS processing_jobs (
@@ -1052,7 +1072,8 @@ def get_user_legato_db():
             if canonical:
                 canonical_user_id = canonical['user_id']
                 if canonical_user_id != mcp_user_id:
-                    logger.warning(f"MCP user_id mismatch: jwt={mcp_user_id}, canonical={canonical_user_id}")
+                    # Expected when token was issued with old user_id - resolved correctly
+                    logger.debug(f"MCP user_id resolved: jwt={mcp_user_id} -> canonical={canonical_user_id}")
                 user_id = canonical_user_id
             else:
                 # No user found by github_id, fall back to JWT user_id

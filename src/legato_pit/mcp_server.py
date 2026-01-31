@@ -658,6 +658,105 @@ TOOLS = [
             "properties": {},
             "required": []
         }
+    },
+    {
+        "name": "list_assets",
+        "description": "List assets (images, files) in a category's assets folder. Assets can be referenced in notes using markdown: ![alt text](assets/filename.png)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Filter assets by category (optional - lists all if not specified)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of assets to return (default: 50)",
+                    "default": 50
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_asset",
+        "description": "Get metadata for a specific asset including its markdown reference.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID (e.g., 'asset-abc123')"
+                }
+            },
+            "required": ["asset_id"]
+        }
+    },
+    {
+        "name": "delete_asset",
+        "description": "Delete an asset from the library. Removes from both GitHub and database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID to delete"
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true to confirm deletion"
+                }
+            },
+            "required": ["asset_id", "confirm"]
+        }
+    },
+    {
+        "name": "get_asset_reference",
+        "description": "Get the markdown reference for an asset to use in notes. Returns a properly formatted markdown image/link reference.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID"
+                },
+                "alt_text": {
+                    "type": "string",
+                    "description": "Optional alt text to use (overrides stored alt_text)"
+                }
+            },
+            "required": ["asset_id"]
+        }
+    },
+    {
+        "name": "upload_asset",
+        "description": "Upload an image or file to a category's assets folder. The file content must be base64-encoded. Returns a markdown reference you can use in notes. Supported types: PNG, JPEG, GIF, WebP, SVG, PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Target category for the asset (e.g., 'concept', 'epiphany')"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Original filename with extension (e.g., 'diagram.png', 'chart.jpg')"
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": "Base64-encoded file content"
+                },
+                "alt_text": {
+                    "type": "string",
+                    "description": "Alt text for images (used in markdown reference)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional description of the asset"
+                }
+            },
+            "required": ["category", "filename", "content_base64"]
+        }
     }
 ]
 
@@ -692,6 +791,11 @@ def handle_tool_call(params: dict) -> dict:
         'process_motif': tool_process_motif,
         'get_processing_status': tool_get_processing_status,
         'check_connection': tool_check_connection,
+        'list_assets': tool_list_assets,
+        'get_asset': tool_get_asset,
+        'delete_asset': tool_delete_asset,
+        'get_asset_reference': tool_get_asset_reference,
+        'upload_asset': tool_upload_asset,
     }
 
     handler = tool_handlers.get(name)
@@ -2848,6 +2952,309 @@ def tool_check_connection(args: dict) -> dict:
         result["database"]["note_count_error"] = str(e)
 
     return result
+
+
+# ============ Asset Tools ============
+
+def tool_list_assets(args: dict) -> dict:
+    """List assets in the library, optionally filtered by category."""
+    category = args.get('category', '').strip().lower()
+    limit = min(int(args.get('limit', 50)), 100)
+
+    db = get_db()
+
+    if category:
+        rows = db.execute("""
+            SELECT asset_id, category, filename, file_path, mime_type, file_size,
+                   alt_text, description, created_at
+            FROM library_assets
+            WHERE category = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (category, limit)).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT asset_id, category, filename, file_path, mime_type, file_size,
+                   alt_text, description, created_at
+            FROM library_assets
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+    assets = []
+    for row in rows:
+        asset = dict(row)
+        asset['markdown_ref'] = f"![{asset['alt_text'] or asset['filename']}](assets/{asset['filename']})"
+        assets.append(asset)
+
+    return {
+        "assets": assets,
+        "count": len(assets),
+        "usage_hint": "Use markdown references in notes like: ![alt text](assets/filename.png)"
+    }
+
+
+def tool_get_asset(args: dict) -> dict:
+    """Get metadata for a specific asset."""
+    asset_id = args.get('asset_id', '').strip()
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    db = get_db()
+
+    row = db.execute("""
+        SELECT asset_id, category, filename, file_path, mime_type, file_size,
+               alt_text, description, created_at
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    asset = dict(row)
+    asset['markdown_ref'] = f"![{asset['alt_text'] or asset['filename']}](assets/{asset['filename']})"
+
+    return asset
+
+
+def tool_delete_asset(args: dict) -> dict:
+    """Delete an asset from the library."""
+    from .rag.github_service import delete_file
+    from .auth import get_user_installation_token
+
+    asset_id = args.get('asset_id', '').strip()
+    confirm = args.get('confirm', False)
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    if not confirm:
+        return {"error": "confirm must be true to delete an asset"}
+
+    db = get_db()
+
+    # Get asset info
+    row = db.execute("""
+        SELECT file_path, filename
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    # Get user credentials
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') and g.mcp_user else None
+    if not user_id:
+        return {"error": "Authentication required"}
+
+    token = get_user_installation_token(user_id, 'library')
+    if not token:
+        return {"error": "GitHub authorization required"}
+
+    from .core import get_user_library_repo
+    library_repo = get_user_library_repo()
+    if not library_repo:
+        return {"error": "Library repo not configured"}
+
+    try:
+        # Delete from GitHub
+        try:
+            delete_file(
+                repo=library_repo,
+                path=row['file_path'],
+                message=f"Delete asset: {row['filename']}",
+                token=token
+            )
+        except Exception as e:
+            if '404' not in str(e):
+                raise
+            # File already deleted from GitHub
+
+        # Delete from database
+        db.execute("DELETE FROM library_assets WHERE asset_id = ?", (asset_id,))
+        commit_and_checkpoint(db)
+
+        logger.info(f"MCP deleted asset: {asset_id}")
+
+        return {
+            "success": True,
+            "deleted": asset_id,
+            "filename": row['filename']
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete asset {asset_id}: {e}")
+        return {"error": str(e)}
+
+
+def tool_get_asset_reference(args: dict) -> dict:
+    """Get the markdown reference for an asset."""
+    asset_id = args.get('asset_id', '').strip()
+    custom_alt = args.get('alt_text', '').strip()
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    db = get_db()
+
+    row = db.execute("""
+        SELECT filename, alt_text, mime_type, category
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    alt_text = custom_alt or row['alt_text'] or row['filename']
+    markdown_ref = f"![{alt_text}](assets/{row['filename']})"
+
+    # Determine if it's an image or a link
+    is_image = row['mime_type'] and row['mime_type'].startswith('image/')
+
+    return {
+        "asset_id": asset_id,
+        "category": row['category'],
+        "filename": row['filename'],
+        "markdown_ref": markdown_ref,
+        "is_image": is_image,
+        "usage": f"Add this to your note content: {markdown_ref}"
+    }
+
+
+def tool_upload_asset(args: dict) -> dict:
+    """Upload an image or file to a category's assets folder."""
+    import base64
+    import secrets
+    import mimetypes
+    import os
+    from .rag.github_service import create_binary_file, file_exists, create_file
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    category = args.get('category', '').strip().lower()
+    filename = args.get('filename', '').strip()
+    content_base64 = args.get('content_base64', '').strip()
+    alt_text = args.get('alt_text', '').strip()
+    description = args.get('description', '').strip()
+
+    # Validation
+    if not category:
+        return {"error": "category is required"}
+    if not filename:
+        return {"error": "filename is required"}
+    if not content_base64:
+        return {"error": "content_base64 is required"}
+
+    # Decode base64 content
+    try:
+        content = base64.b64decode(content_base64)
+    except Exception as e:
+        return {"error": f"Invalid base64 content: {e}"}
+
+    # Check file size (10MB max)
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    if len(content) > MAX_FILE_SIZE:
+        return {"error": f"File too large. Maximum size is {MAX_FILE_SIZE // 1024 // 1024}MB"}
+
+    # Determine and validate MIME type
+    mime_type = mimetypes.guess_type(filename)[0]
+    ALLOWED_MIME_TYPES = {
+        'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml',
+        'application/pdf', 'text/csv', 'application/json',
+    }
+    if mime_type not in ALLOWED_MIME_TYPES:
+        return {
+            "error": f"File type not allowed: {mime_type}",
+            "allowed_types": list(ALLOWED_MIME_TYPES)
+        }
+
+    # Get user credentials
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') and g.mcp_user else None
+    if not user_id:
+        return {"error": "Authentication required"}
+
+    token = get_user_installation_token(user_id, 'library')
+    if not token:
+        return {"error": "GitHub authorization required"}
+
+    library_repo = get_user_library_repo()
+    if not library_repo:
+        return {"error": "Library repo not configured"}
+
+    try:
+        db = get_db()
+
+        # Generate asset ID and sanitized filename
+        asset_id = f"asset-{secrets.token_hex(6)}"
+
+        # Sanitize filename
+        safe_filename = os.path.basename(filename).replace(' ', '-')
+        safe_filename = ''.join(c for c in safe_filename if c.isalnum() or c in '._-')
+        name_part, ext = os.path.splitext(safe_filename)
+        if len(name_part) > 30:
+            name_part = name_part[:30]
+
+        # Create final filename with asset ID
+        final_filename = f"{name_part}-{asset_id[-6:]}{ext}"
+        file_path = f"{category}/assets/{final_filename}"
+
+        # Ensure assets folder exists
+        assets_folder = f"{category}/assets"
+        gitkeep_path = f"{assets_folder}/.gitkeep"
+        if not file_exists(library_repo, gitkeep_path, token):
+            try:
+                create_file(
+                    repo=library_repo,
+                    path=gitkeep_path,
+                    content="# Assets folder for images and files\n",
+                    message=f"Create assets folder for {category}",
+                    token=token
+                )
+                logger.info(f"Created assets folder: {assets_folder}")
+            except Exception:
+                pass  # Folder might already exist
+
+        # Upload the file to GitHub
+        result = create_binary_file(
+            repo=library_repo,
+            path=file_path,
+            content=content,
+            message=f"Add asset: {final_filename}",
+            token=token
+        )
+
+        # Store in database
+        db.execute("""
+            INSERT INTO library_assets
+            (asset_id, category, filename, file_path, mime_type, file_size, alt_text, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (asset_id, category, final_filename, file_path, mime_type, len(content), alt_text, description))
+        commit_and_checkpoint(db)
+
+        logger.info(f"MCP uploaded asset: {asset_id} -> {file_path}")
+
+        # Generate markdown reference
+        markdown_ref = f"![{alt_text or final_filename}](assets/{final_filename})"
+
+        return {
+            "success": True,
+            "asset_id": asset_id,
+            "filename": final_filename,
+            "file_path": file_path,
+            "mime_type": mime_type,
+            "file_size": len(content),
+            "markdown_ref": markdown_ref,
+            "usage": f"Add this to your note content: {markdown_ref}",
+            "commit_sha": result.get('commit', {}).get('sha', '')[:7],
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to upload asset: {e}", exc_info=True)
+        return {"error": str(e)}
 
 
 # ============ Resource Handlers ============

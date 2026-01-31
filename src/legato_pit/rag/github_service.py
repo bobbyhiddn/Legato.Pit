@@ -315,3 +315,173 @@ def create_file(
     result = response.json()
     logger.info(f"Created {path} in {repo}: {result['commit']['sha'][:7]}")
     return result
+
+
+def create_binary_file(
+    repo: str,
+    path: str,
+    content: bytes,
+    message: str,
+    token: str,
+    branch: str = "main",
+) -> dict:
+    """Create a new binary file on GitHub (fails if exists).
+
+    Args:
+        repo: Repository in "owner/repo" format
+        path: File path within repo
+        content: File content as bytes (binary data)
+        message: Commit message
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        Dict with commit info from GitHub API
+
+    Raises:
+        requests.RequestException on API errors
+    """
+    # Encode binary content to base64
+    encoded = base64.b64encode(content).decode("utf-8")
+
+    # Create via Contents API (no sha = create new)
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    response = requests.put(
+        url,
+        json={
+            "message": message,
+            "content": encoded,
+            "branch": branch,
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=30,  # Longer timeout for binary files
+    )
+    response.raise_for_status()
+
+    result = response.json()
+    logger.info(f"Created binary file {path} in {repo}: {result['commit']['sha'][:7]}")
+    return result
+
+
+def get_binary_file(
+    repo: str,
+    path: str,
+    token: str,
+    branch: str = "main",
+) -> Optional[bytes]:
+    """Get binary file content from GitHub.
+
+    Args:
+        repo: Repository in "owner/repo" format
+        path: File path within repo
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        File content as bytes, or None if not found
+    """
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+    response = requests.get(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=30,  # Longer timeout for binary files
+    )
+
+    if response.status_code == 404:
+        return None
+
+    response.raise_for_status()
+    data = response.json()
+
+    # Decode base64 content to bytes
+    content = base64.b64decode(data["content"])
+    return content
+
+
+def update_binary_file(
+    repo: str,
+    path: str,
+    content: bytes,
+    message: str,
+    token: str,
+    branch: str = "main",
+) -> dict:
+    """Update an existing binary file on GitHub.
+
+    Args:
+        repo: Repository in "owner/repo" format
+        path: File path within repo
+        content: New file content as bytes
+        message: Commit message
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        Dict with commit info from GitHub API
+
+    Raises:
+        requests.RequestException on API errors
+    """
+    # Get current SHA
+    sha = get_file_sha(repo, path, token, branch)
+
+    # Encode binary content to base64
+    encoded = base64.b64encode(content).decode("utf-8")
+
+    # Commit via Contents API
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    response = requests.put(
+        url,
+        json={
+            "message": message,
+            "content": encoded,
+            "sha": sha,
+            "branch": branch,
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    result = response.json()
+    logger.info(f"Updated binary file {path} in {repo}: {result['commit']['sha'][:7]}")
+    return result
+
+
+def file_exists(
+    repo: str,
+    path: str,
+    token: str,
+    branch: str = "main",
+) -> bool:
+    """Check if a file exists on GitHub.
+
+    Args:
+        repo: Repository in "owner/repo" format
+        path: File path within repo
+        token: GitHub PAT
+        branch: Branch name
+
+    Returns:
+        True if file exists, False otherwise
+    """
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+    response = requests.get(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=10,
+    )
+
+    return response.status_code == 200

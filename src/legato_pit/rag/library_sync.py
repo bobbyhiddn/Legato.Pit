@@ -330,6 +330,33 @@ class LibrarySync:
                     'knowledge', delay=0.1
                 )
 
+            # Also sync assets from */assets/ folders
+            asset_files = [
+                item for item in tree_data.get('tree', [])
+                if item['type'] == 'blob'
+                and '/assets/' in item['path']
+                and not item['path'].endswith('.gitkeep')
+                and not item['path'].startswith('.')
+            ]
+
+            stats['assets_found'] = len(asset_files)
+            stats['assets_created'] = 0
+            stats['assets_updated'] = 0
+
+            for item in asset_files:
+                try:
+                    result = self._process_asset_file(item['path'], item.get('size', 0))
+                    if result == 'created':
+                        stats['assets_created'] += 1
+                    elif result == 'updated':
+                        stats['assets_updated'] += 1
+                except Exception as e:
+                    logger.error(f"Error processing asset {item['path']}: {e}")
+                    stats['errors'] += 1
+
+            if stats['assets_found'] > 0:
+                logger.info(f"Synced {stats['assets_created']} new, {stats['assets_updated']} updated assets")
+
             # Log sync
             self._log_sync(repo, branch, stats)
 
@@ -780,3 +807,136 @@ class LibrarySync:
         if row:
             return dict(row)
         return {'status': 'never_synced'}
+
+    def sync_assets_from_github(
+        self,
+        repo: str = "bobbyhiddn/Legato.Library",
+        token: Optional[str] = None,
+        branch: str = "main",
+    ) -> Dict:
+        """Sync assets from GitHub repository.
+
+        Scans for files in */assets/ folders and indexes them in the database.
+        Does not download the actual files - just tracks metadata.
+
+        Args:
+            repo: GitHub repo in "owner/repo" format
+            token: GitHub PAT for API access
+            branch: Branch to sync from
+
+        Returns:
+            Dict with sync statistics
+        """
+        import mimetypes
+
+        if not token:
+            raise ValueError("GitHub token required for sync")
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+        }
+
+        stats = {
+            'assets_found': 0,
+            'assets_created': 0,
+            'assets_updated': 0,
+            'errors': 0,
+        }
+
+        try:
+            # Get repository tree
+            tree_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
+            response = requests.get(tree_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            tree_data = response.json()
+
+            # Filter for files in */assets/ folders
+            # Pattern: category/assets/filename (not .gitkeep)
+            asset_files = [
+                item for item in tree_data.get('tree', [])
+                if item['type'] == 'blob'
+                and '/assets/' in item['path']
+                and not item['path'].endswith('.gitkeep')
+                and not item['path'].startswith('.')
+            ]
+
+            stats['assets_found'] = len(asset_files)
+            logger.info(f"Found {len(asset_files)} asset files in {repo}")
+
+            for item in asset_files:
+                try:
+                    result = self._process_asset_file(item['path'], item.get('size', 0))
+                    if result == 'created':
+                        stats['assets_created'] += 1
+                    elif result == 'updated':
+                        stats['assets_updated'] += 1
+                except Exception as e:
+                    logger.error(f"Error processing asset {item['path']}: {e}")
+                    stats['errors'] += 1
+
+            return stats
+
+        except requests.RequestException as e:
+            logger.error(f"GitHub API error during asset sync: {e}")
+            raise
+
+    def _process_asset_file(self, file_path: str, file_size: int) -> str:
+        """Process a single asset file from GitHub tree.
+
+        Args:
+            file_path: Path like "concept/assets/image-abc123.png"
+            file_size: File size in bytes
+
+        Returns:
+            'created', 'updated', or 'skipped'
+        """
+        import mimetypes
+        import secrets
+
+        # Parse the path to extract category and filename
+        # Expected format: category/assets/filename.ext
+        parts = Path(file_path).parts
+        if len(parts) < 3 or parts[-2] != 'assets':
+            logger.debug(f"Skipping non-asset path: {file_path}")
+            return 'skipped'
+
+        category = parts[0]
+        filename = parts[-1]
+
+        # Determine MIME type from filename
+        mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+        # Check if asset already exists by file_path
+        existing = self.conn.execute(
+            "SELECT asset_id FROM library_assets WHERE file_path = ?",
+            (file_path,)
+        ).fetchone()
+
+        if existing:
+            # Update existing asset
+            self.conn.execute(
+                """
+                UPDATE library_assets
+                SET file_size = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
+                """,
+                (file_size, mime_type, file_path)
+            )
+            self.conn.commit()
+            logger.debug(f"Updated asset: {file_path}")
+            return 'updated'
+        else:
+            # Create new asset record
+            asset_id = f"asset-{secrets.token_hex(6)}"
+            self.conn.execute(
+                """
+                INSERT INTO library_assets
+                (asset_id, category, filename, file_path, mime_type, file_size)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (asset_id, category, filename, file_path, mime_type, file_size)
+            )
+            self.conn.commit()
+            logger.info(f"Created asset: {asset_id} -> {file_path}")
+            return 'created'
