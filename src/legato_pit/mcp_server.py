@@ -75,6 +75,23 @@ def get_embedding_service():
     return g.mcp_embedding_service
 
 
+# ============ Rate Limit Exemption ============
+# MCP endpoints are OAuth-authenticated, so we exempt them from IP-based rate limiting.
+# This prevents Claude from hitting the 50/hour limit during normal usage.
+
+@mcp_bp.before_request
+def exempt_mcp_from_rate_limit():
+    """Exempt all MCP requests from rate limiting.
+
+    Flask-Limiter checks for this attribute to skip rate limiting.
+    MCP uses OAuth token authentication, so IP-based rate limiting
+    is unnecessary and causes disconnections during normal operation.
+    """
+    from flask import g
+    # This is the flag Flask-Limiter checks to skip rate limiting
+    g._rate_limiting_complete = True
+
+
 # ============ Protocol Version Discovery ============
 
 @mcp_bp.route('', methods=['HEAD', 'OPTIONS'])
