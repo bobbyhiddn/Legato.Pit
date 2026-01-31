@@ -730,6 +730,50 @@ def generate_entry_id(category: str, title: str, content_hash: str = None) -> st
     return base_id
 
 
+def _generate_embedding_for_entry(entry_id: str, content: str):
+    """Generate embedding for a newly created entry.
+
+    Args:
+        entry_id: The entry's ID
+        content: The entry's content text
+    """
+    import os
+    from .core import get_api_key_for_user
+
+    try:
+        # Get user context from session if available
+        user_id = None
+        try:
+            from flask import session
+            user_id = session.get('user', {}).get('user_id')
+        except RuntimeError:
+            pass  # No request context
+
+        openai_key = None
+        if user_id:
+            openai_key = get_api_key_for_user(user_id, 'openai')
+        if not openai_key:
+            openai_key = os.environ.get('OPENAI_API_KEY')
+
+        if not openai_key:
+            logger.debug("No OpenAI API key - skipping embedding generation")
+            return
+
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+        from .rag.embedding_service import EmbeddingService
+
+        db = get_db()
+        provider = OpenAIEmbeddingProvider(api_key=openai_key)
+        embedding_service = EmbeddingService(provider, db)
+
+        # Generate embedding synchronously
+        if embedding_service.generate_and_store(entry_id, 'knowledge', content):
+            logger.info(f"Generated embedding for {entry_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate embedding for {entry_id}: {e}")
+
+
 def tool_create_note(args: dict) -> dict:
     """Create a new note in the library."""
     from .rag.database import get_user_categories
@@ -856,6 +900,9 @@ def tool_create_note(args: dict) -> dict:
             (entry_id, title, category, content, file_path, content_hash)
         )
     db.commit()
+
+    # Generate embedding for the new entry
+    _generate_embedding_for_entry(entry_id, content)
 
     logger.info(f"MCP created note: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
 

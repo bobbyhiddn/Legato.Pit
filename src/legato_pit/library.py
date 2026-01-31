@@ -43,6 +43,41 @@ def get_agents_db():
     return g.agents_db_conn
 
 
+def _generate_embedding_for_entry(user_id: str, entry_id: str, content: str):
+    """Generate embedding for a newly created entry.
+
+    Args:
+        user_id: The user's ID
+        entry_id: The entry's ID
+        content: The entry's content text
+    """
+    import os
+    from .core import get_api_key_for_user
+
+    try:
+        openai_key = get_api_key_for_user(user_id, 'openai') if user_id else None
+        if not openai_key:
+            openai_key = os.environ.get('OPENAI_API_KEY')
+
+        if not openai_key:
+            logger.debug("No OpenAI API key - skipping embedding generation")
+            return
+
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+        from .rag.embedding_service import EmbeddingService
+
+        db = get_db()
+        provider = OpenAIEmbeddingProvider(api_key=openai_key)
+        embedding_service = EmbeddingService(provider, db)
+
+        # Generate embedding synchronously
+        if embedding_service.generate_and_store(entry_id, 'knowledge', content):
+            logger.info(f"Generated embedding for {entry_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate embedding for {entry_id}: {e}")
+
+
 # ============ Background Job Helpers ============
 
 def create_background_job(job_type: str, user_id: str = None) -> str:
@@ -2064,6 +2099,9 @@ key_phrases: []
             (entry_id, title, category, content, file_path)
         )
         db.commit()
+
+        # Generate embedding for the new entry
+        _generate_embedding_for_entry(user_id, entry_id, content)
 
         logger.info(f"Created note: {entry_id} - {title} in {category}")
 
