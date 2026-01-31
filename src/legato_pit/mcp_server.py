@@ -774,6 +774,63 @@ TOOLS = [
             },
             "required": ["category", "filename", "content_base64"]
         }
+    },
+    {
+        "name": "upload_markdown_as_note",
+        "description": "Upload a markdown file directly as a note. Parses any existing frontmatter and augments it with required fields. Useful for importing existing markdown files or when you already have formatted markdown content with metadata.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "markdown_content": {
+                    "type": "string",
+                    "description": "The full markdown content, optionally including YAML frontmatter delimited by ---"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "The category for the note (e.g., 'concept', 'epiphany'). Required if not specified in frontmatter."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "The title for the note. If not provided, extracted from frontmatter or first heading."
+                },
+                "subfolder": {
+                    "type": "string",
+                    "description": "Optional: Subfolder within the category to place the note"
+                },
+                "preserve_frontmatter": {
+                    "type": "boolean",
+                    "description": "If true, preserve existing frontmatter fields like tags, dates, etc. (default: true)",
+                    "default": True
+                }
+            },
+            "required": ["markdown_content"]
+        }
+    },
+    {
+        "name": "create_category",
+        "description": "Create a new category in the Legato library. Categories organize notes by type/purpose. Creates the category folder in GitHub.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Category name (lowercase letters, numbers, hyphens only - e.g., 'research', 'daily-journal', 'project')"
+                },
+                "display_name": {
+                    "type": "string",
+                    "description": "Human-readable display name (e.g., 'Research Notes', 'Daily Journal')"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of what this category is for"
+                },
+                "color": {
+                    "type": "string",
+                    "description": "Optional hex color code for UI (e.g., '#10b981'). Defaults to indigo if not specified."
+                }
+            },
+            "required": ["name", "display_name"]
+        }
     }
 ]
 
@@ -813,6 +870,8 @@ def handle_tool_call(params: dict) -> dict:
         'delete_asset': tool_delete_asset,
         'get_asset_reference': tool_get_asset_reference,
         'upload_asset': tool_upload_asset,
+        'upload_markdown_as_note': tool_upload_markdown_as_note,
+        'create_category': tool_create_category,
     }
 
     handler = tool_handlers.get(name)
@@ -3271,6 +3330,363 @@ def tool_upload_asset(args: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Failed to upload asset: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+def tool_upload_markdown_as_note(args: dict) -> dict:
+    """Upload a markdown file directly as a note, parsing and augmenting frontmatter."""
+    from .rag.database import get_user_categories
+    from .rag.github_service import create_file
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    markdown_content = args.get('markdown_content', '').strip()
+    category_arg = args.get('category', '').lower().strip() if args.get('category') else None
+    title_arg = args.get('title', '').strip() if args.get('title') else None
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+    preserve_frontmatter = args.get('preserve_frontmatter', True)
+
+    if not markdown_content:
+        return {"error": "markdown_content is required"}
+
+    # Parse existing frontmatter if present
+    existing_frontmatter = {}
+    body_content = markdown_content
+
+    if markdown_content.startswith('---'):
+        parts = markdown_content.split('---', 2)
+        if len(parts) >= 3:
+            # Has frontmatter
+            frontmatter_text = parts[1].strip()
+            body_content = parts[2].strip()
+
+            # Parse YAML frontmatter (simple parser)
+            for line in frontmatter_text.split('\n'):
+                line = line.strip()
+                if ':' in line:
+                    key, _, value = line.partition(':')
+                    key = key.strip()
+                    value = value.strip()
+                    # Strip quotes from strings
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    elif value.startswith("'") and value.endswith("'"):
+                        value = value[1:-1]
+                    # Handle booleans and nulls
+                    if value.lower() == 'true':
+                        value = True
+                    elif value.lower() == 'false':
+                        value = False
+                    elif value.lower() in ('null', '~', ''):
+                        value = None
+                    # Handle JSON arrays (simple check)
+                    elif value.startswith('[') and value.endswith(']'):
+                        try:
+                            import json
+                            value = json.loads(value)
+                        except Exception:
+                            pass  # Keep as string
+                    existing_frontmatter[key] = value
+
+    # Determine title: arg > frontmatter > first heading > error
+    title = title_arg
+    if not title:
+        title = existing_frontmatter.get('title')
+    if not title:
+        # Try to extract from first heading
+        import re
+        heading_match = re.search(r'^#\s+(.+)$', body_content, re.MULTILINE)
+        if heading_match:
+            title = heading_match.group(1).strip()
+    if not title:
+        return {"error": "Could not determine title. Provide 'title' parameter, include 'title' in frontmatter, or start content with a # heading."}
+
+    # Determine category: arg > frontmatter > error
+    category = category_arg
+    if not category:
+        category = existing_frontmatter.get('category', '').lower().strip() if existing_frontmatter.get('category') else None
+    if not category:
+        return {"error": "Category is required. Provide 'category' parameter or include 'category' in frontmatter."}
+
+    # Validate subfolder
+    if subfolder and ('/' in subfolder or '\\' in subfolder):
+        return {"error": "Subfolder name cannot contain slashes. Use a simple name like 'projects' or 'backlog'."}
+
+    # Get user credentials
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') and g.mcp_user else None
+    if not user_id:
+        return {"error": "Authentication required"}
+
+    token = get_user_installation_token(user_id, 'library')
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    # Validate category
+    db = get_db()
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category '{category}'. Must be one of: {', '.join(sorted(valid_categories))}",
+            "hint": "Use the create_category tool to create a new category first."
+        }
+
+    # Compute content hash
+    content_hash = compute_content_hash(body_content)
+
+    # Generate entry_id
+    entry_id = generate_entry_id(category, title)
+
+    # Check for collision
+    collision = db.execute(
+        "SELECT entry_id FROM knowledge_entries WHERE entry_id = ?",
+        (entry_id,)
+    ).fetchone()
+    if collision:
+        logger.info(f"Entry ID collision for '{title}', disambiguating with content hash")
+        entry_id = generate_entry_id(category, title, content_hash)
+
+    # Build file path
+    slug = generate_slug(title)
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    folder = category_folders.get(category, f'{category}s')
+    if subfolder:
+        file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
+    else:
+        file_path = f'{folder}/{date_str}-{slug}.md'
+
+    # Build new frontmatter
+    timestamp = datetime.utcnow().isoformat() + 'Z'
+    frontmatter_dict = {
+        'id': entry_id,
+        'title': title,
+        'category': category,
+        'created': timestamp,
+        'content_hash': content_hash,
+        'source': 'mcp-claude',
+        'domain_tags': [],
+        'key_phrases': [],
+    }
+
+    # Preserve certain existing frontmatter fields if requested
+    if preserve_frontmatter:
+        preservable_fields = [
+            'tags', 'domain_tags', 'key_phrases', 'task_status', 'due_date',
+            'needs_chord', 'chord_name', 'chord_scope', 'author', 'aliases',
+            'related', 'links', 'references', 'source_url', 'original_date'
+        ]
+        for field in preservable_fields:
+            if field in existing_frontmatter and existing_frontmatter[field] is not None:
+                frontmatter_dict[field] = existing_frontmatter[field]
+
+    # Add optional fields
+    if subfolder:
+        frontmatter_dict['subfolder'] = subfolder
+
+    # Get task_status and due_date from preserved frontmatter
+    task_status = frontmatter_dict.get('task_status')
+    due_date = frontmatter_dict.get('due_date')
+
+    # Build frontmatter string
+    frontmatter_lines = ['---']
+    for key, value in frontmatter_dict.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            frontmatter_lines.append(f'{key}: {str(value).lower()}')
+        elif isinstance(value, list):
+            frontmatter_lines.append(f'{key}: {json.dumps(value)}')
+        elif isinstance(value, str) and ('"' in value or ':' in value or value.startswith('#')):
+            frontmatter_lines.append(f'{key}: "{value}"')
+        else:
+            frontmatter_lines.append(f'{key}: {value}')
+    frontmatter_lines.append('---')
+    frontmatter_lines.append('')
+
+    full_content = '\n'.join(frontmatter_lines) + body_content
+
+    # Create file in GitHub
+    repo = get_user_library_repo(user_id)
+
+    try:
+        create_file(
+            repo=repo,
+            path=file_path,
+            content=full_content,
+            message=f'Upload markdown note via MCP: {title}',
+            token=token
+        )
+    except Exception as e:
+        logger.error(f"Failed to create file in GitHub: {e}", exc_info=True)
+        return {"error": f"Failed to save to GitHub: {str(e)}"}
+
+    # Insert into database
+    try:
+        if task_status:
+            cursor = db.execute(
+                """
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, subfolder, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+                """,
+                (entry_id, title, category, body_content, file_path, task_status, due_date, content_hash, subfolder)
+            )
+        else:
+            cursor = db.execute(
+                """
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path, source_transcript, content_hash, subfolder, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+                """,
+                (entry_id, title, category, body_content, file_path, content_hash, subfolder)
+            )
+        row = cursor.fetchone()
+        entry_db_id = row[0]
+        commit_and_checkpoint(db)
+
+        # Generate embedding
+        _generate_embedding_for_entry(entry_db_id, entry_id, body_content)
+
+    except Exception as e:
+        logger.error(f"Failed to insert into database: {e}", exc_info=True)
+        return {"error": f"Note saved to GitHub but failed to index locally: {str(e)}"}
+
+    logger.info(f"MCP uploaded markdown note: {entry_id} - {title}")
+
+    result = {
+        "success": True,
+        "entry_id": entry_id,
+        "title": title,
+        "category": category,
+        "file_path": file_path,
+        "frontmatter_preserved": preserve_frontmatter,
+    }
+
+    if subfolder:
+        result["subfolder"] = subfolder
+    if task_status:
+        result["task_status"] = task_status
+    if due_date:
+        result["due_date"] = due_date
+
+    return result
+
+
+def tool_create_category(args: dict) -> dict:
+    """Create a new category in the Legato library.
+
+    This is consistent with the categories.py web UI endpoint.
+    Uses the same validation, folder naming conventions, and helper functions.
+    """
+    from .rag.database import get_user_categories
+    from .categories import create_category_folder
+    from .auth import get_user_installation_token
+
+    name = args.get('name', '').lower().strip()
+    display_name = args.get('display_name', '').strip()
+    description = args.get('description', '').strip() if args.get('description') else ''
+    color = args.get('color', '#6366f1').strip()  # Default to indigo
+
+    # Validation
+    if not name:
+        return {"error": "Category name is required"}
+    if not display_name:
+        return {"error": "Display name is required"}
+
+    # Validate name format - match categories.py validation
+    import re
+    if not re.match(r'^[a-z][a-z0-9-]*$', name):
+        return {"error": "Category name must start with a letter and contain only lowercase letters, numbers, and hyphens"}
+
+    if len(name) > 30:
+        return {"error": "Category name must be 30 characters or less"}
+
+    # Validate color format
+    if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
+        return {"error": "Color must be a valid hex code (e.g., '#10b981')"}
+
+    # Get user credentials
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') and g.mcp_user else None
+    if not user_id:
+        return {"error": "Authentication required"}
+
+    token = get_user_installation_token(user_id, 'library')
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    db = get_db()
+
+    # Check if category already exists (including inactive ones)
+    existing = db.execute(
+        "SELECT id, is_active FROM user_categories WHERE user_id = ? AND name = ?",
+        (user_id, name)
+    ).fetchone()
+
+    if existing:
+        if existing['is_active'] == 1:
+            return {"error": f"Category '{name}' already exists"}
+        else:
+            # Reactivate the inactive category
+            db.execute("""
+                UPDATE user_categories
+                SET is_active = 1, display_name = ?, description = ?, color = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (display_name, description, color, existing['id']))
+            commit_and_checkpoint(db)
+
+            logger.info(f"MCP reactivated category: {name} (id={existing['id']})")
+
+            return {
+                "success": True,
+                "name": name,
+                "display_name": display_name,
+                "reactivated": True,
+            }
+
+    # Folder name convention: category name + 's' (matching categories.py)
+    folder_name = f"{name}s"
+
+    # Determine sort order (after existing categories)
+    max_order = db.execute(
+        "SELECT MAX(sort_order) FROM user_categories WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()[0] or 0
+    sort_order = max_order + 1
+
+    try:
+        # Insert into database
+        cursor = db.execute("""
+            INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, name, display_name, description, folder_name, sort_order, color))
+        commit_and_checkpoint(db)
+        category_id = cursor.lastrowid
+
+        # Create folder in GitHub using the shared helper
+        folder_result = create_category_folder(folder_name, token=token, user_id=user_id)
+
+        logger.info(f"MCP created category: {name} ({display_name}) for user {user_id}")
+
+        return {
+            "success": True,
+            "id": category_id,
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+            "folder_name": folder_name,
+            "color": color,
+            "sort_order": sort_order,
+            "folder_created": folder_result.get('created', False),
+        }
+
+    except Exception as e:
+        if 'UNIQUE constraint' in str(e):
+            return {"error": f"Category '{name}' already exists"}
+        logger.error(f"Failed to create category: {e}", exc_info=True)
         return {"error": str(e)}
 
 
