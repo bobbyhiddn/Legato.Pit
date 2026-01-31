@@ -716,15 +716,62 @@ def view_category(category: str, subfolder: str = None):
 @library_bp.route('/search')
 @login_required
 def search():
-    """Search the library."""
+    """Search the library using hybrid semantic + keyword search."""
+    import os
+    from flask import session
+
     query = request.args.get('q', '')
 
     if not query:
-        return render_template('library_search.html', query='', results=[])
+        return render_template('library_search.html', query='', results=[], maybe_related=[], search_type='none')
 
     db = get_db()
+    user_id = session.get('user', {}).get('user_id')
 
-    # Simple text search (SQLite FTS would be better for large datasets)
+    # Try to use hybrid search with embeddings
+    embedding_service = None
+    try:
+        from .rag.embedding_service import EmbeddingService
+        from .rag.openai_provider import OpenAIEmbeddingProvider
+        from .core import get_api_key_for_user
+
+        # Get OpenAI key (user's or system)
+        openai_key = None
+        if user_id:
+            openai_key = get_api_key_for_user(user_id, 'openai')
+        if not openai_key:
+            openai_key = os.environ.get('OPENAI_API_KEY')
+
+        if openai_key:
+            provider = OpenAIEmbeddingProvider(api_key=openai_key)
+            embedding_service = EmbeddingService(provider, db)
+    except Exception as e:
+        logger.warning(f"Could not initialize embedding service for search: {e}")
+
+    if embedding_service:
+        # Use hybrid search (semantic + keyword)
+        try:
+            search_result = embedding_service.hybrid_search(
+                query=query,
+                entry_type='knowledge',
+                limit=25,
+                include_low_confidence=True,
+            )
+
+            results = search_result.get('results', [])
+            maybe_related = search_result.get('maybe_related', [])
+
+            return render_template(
+                'library_search.html',
+                query=query,
+                results=results,
+                maybe_related=maybe_related,
+                search_type='hybrid',
+            )
+        except Exception as e:
+            logger.error(f"Hybrid search failed, falling back to keyword: {e}")
+
+    # Fallback to simple keyword search
     results = db.execute(
         """
         SELECT entry_id, title, category, content,
@@ -742,6 +789,8 @@ def search():
         'library_search.html',
         query=query,
         results=[dict(r) for r in results],
+        maybe_related=[],
+        search_type='keyword',
     )
 
 

@@ -2,10 +2,216 @@
 
 {% block title %}Search - Library - {{ app_name }}{% endblock %}
 
+{% block head %}
+<style>
+    .search-container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 1rem;
+    }
+
+    .search-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .search-header h1 {
+        margin: 0 0 0.5rem 0;
+    }
+
+    .search-type-badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+    }
+
+    .search-type-badge.hybrid {
+        background: rgba(99, 102, 241, 0.15);
+        color: var(--accent-color);
+    }
+
+    .library-search {
+        margin-bottom: 2rem;
+    }
+
+    .search-form {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .search-input {
+        flex: 1;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 1rem;
+    }
+
+    .search-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    .results-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .results-count {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .entry-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .entry-card {
+        display: block;
+        padding: 1rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        text-decoration: none;
+        color: var(--text-primary);
+        transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .entry-card:hover {
+        border-color: var(--accent-color);
+        transform: translateX(2px);
+    }
+
+    .entry-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .entry-title {
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+
+    .entry-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-shrink: 0;
+    }
+
+    .entry-category {
+        font-size: 0.75rem;
+        padding: 0.2rem 0.5rem;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+        text-transform: capitalize;
+    }
+
+    .match-badges {
+        display: flex;
+        gap: 0.25rem;
+    }
+
+    .match-badge {
+        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+
+    .match-badge.semantic {
+        background: rgba(139, 92, 246, 0.2);
+        color: #a78bfa;
+    }
+
+    .match-badge.keyword {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+    }
+
+    .similarity-bar {
+        height: 3px;
+        background: var(--bg-tertiary);
+        border-radius: 2px;
+        margin-top: 0.5rem;
+        overflow: hidden;
+    }
+
+    .similarity-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent-color), #a78bfa);
+        border-radius: 2px;
+        transition: width 0.3s;
+    }
+
+    .entry-snippet {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin: 0.5rem 0 0 0;
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .maybe-related-section {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .maybe-related-section h3 {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin: 0 0 1rem 0;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .maybe-related-section .entry-card {
+        opacity: 0.8;
+    }
+
+    .maybe-related-section .entry-card:hover {
+        opacity: 1;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-secondary);
+    }
+
+    .search-actions {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border-color);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="search-container">
     <header class="search-header">
         <h1>Search Library</h1>
+        {% if search_type == 'hybrid' %}
+        <span class="search-type-badge hybrid">Semantic + Keyword Search</span>
+        {% elif search_type == 'keyword' %}
+        <span class="search-type-badge">Keyword Search</span>
+        {% endif %}
     </header>
 
     <div class="library-search">
@@ -17,21 +223,63 @@
 
     {% if query %}
     <div class="search-results">
-        <p class="results-count">{{ results|length }} results for "{{ query }}"</p>
+        <div class="results-header">
+            <p class="results-count">{{ results|length }}{% if maybe_related %} + {{ maybe_related|length }} related{% endif %} results for "{{ query }}"</p>
+        </div>
 
         <div class="entry-list">
             {% for result in results %}
             <a href="{{ url_for('library.view_entry', entry_id=result.entry_id) }}" class="entry-card search-result">
-                <span class="entry-title">{{ result.title }}</span>
-                <span class="entry-meta">
-                    <span class="entry-category">{{ result.category or 'general' }}</span>
-                </span>
-                <p class="entry-snippet">{{ result.content[:200] }}...</p>
+                <div class="entry-header">
+                    <span class="entry-title">{{ result.title }}</span>
+                    <span class="entry-meta">
+                        {% if result.match_types %}
+                        <span class="match-badges">
+                            {% for match_type in result.match_types %}
+                            <span class="match-badge {{ match_type }}">{{ match_type }}</span>
+                            {% endfor %}
+                        </span>
+                        {% endif %}
+                        <span class="entry-category">{{ result.category or 'general' }}</span>
+                    </span>
+                </div>
+                <p class="entry-snippet">{{ result.content[:200] if result.content else '' }}{% if result.content and result.content|length > 200 %}...{% endif %}</p>
+                {% if result.similarity is defined %}
+                <div class="similarity-bar">
+                    <div class="similarity-fill" style="width: {{ (result.similarity * 100)|int }}%"></div>
+                </div>
+                {% endif %}
             </a>
             {% else %}
             <p class="empty-state">No results found for "{{ query }}"</p>
             {% endfor %}
         </div>
+
+        {% if maybe_related %}
+        <div class="maybe-related-section">
+            <h3>Maybe Related</h3>
+            <div class="entry-list">
+                {% for result in maybe_related %}
+                <a href="{{ url_for('library.view_entry', entry_id=result.entry_id) }}" class="entry-card search-result">
+                    <div class="entry-header">
+                        <span class="entry-title">{{ result.title }}</span>
+                        <span class="entry-meta">
+                            {% if result.match_types %}
+                            <span class="match-badges">
+                                {% for match_type in result.match_types %}
+                                <span class="match-badge {{ match_type }}">{{ match_type }}</span>
+                                {% endfor %}
+                            </span>
+                            {% endif %}
+                            <span class="entry-category">{{ result.category or 'general' }}</span>
+                        </span>
+                    </div>
+                    <p class="entry-snippet">{{ result.content[:200] if result.content else '' }}{% if result.content and result.content|length > 200 %}...{% endif %}</p>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
