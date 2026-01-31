@@ -45,3 +45,18 @@ class EmbeddingProvider(ABC):
             Integer dimension (e.g., 1536 for OpenAI text-embedding-3-small)
         """
         pass
+
+    def create_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Generate embedding vectors for multiple texts in a single API call.
+
+        Args:
+            texts: List of texts to embed
+
+        Returns:
+            List of embedding vectors (same order as input texts)
+
+        Note:
+            Default implementation calls create_embedding for each text.
+            Providers should override this for efficient batch processing.
+        """
+        return [self.create_embedding(text) for text in texts]
