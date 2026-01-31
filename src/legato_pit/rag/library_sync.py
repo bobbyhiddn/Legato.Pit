@@ -12,6 +12,7 @@ import hashlib
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -310,18 +311,41 @@ class LibrarySync:
             stats['files_found'] = len(md_files)
             logger.info(f"Found {len(md_files)} markdown files in {repo}")
 
-            # Process each file
-            for item in md_files:
+            # Phase 1: Fetch files in parallel (no DB access, thread-safe)
+            fetched_files = []
+            max_workers = min(10, len(md_files))  # Cap at 10 concurrent requests
+
+            if max_workers > 0:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_item = {
+                        executor.submit(
+                            self._fetch_github_file,
+                            repo, item['path'], headers
+                        ): item
+                        for item in md_files
+                    }
+
+                    for future in as_completed(future_to_item):
+                        item = future_to_item[future]
+                        try:
+                            file_data = future.result()
+                            fetched_files.append(file_data)
+                        except Exception as e:
+                            logger.error(f"Error fetching {item['path']}: {e}")
+                            stats['errors'] += 1
+
+                logger.info(f"Fetched {len(fetched_files)} files in parallel")
+
+            # Phase 2: Process database writes sequentially (thread-safe)
+            for file_data in fetched_files:
                 try:
-                    result = self._process_github_file(
-                        repo, item['path'], item['sha'], headers
-                    )
+                    result = self._process_fetched_file(file_data)
                     if result == 'created':
                         stats['entries_created'] += 1
                     elif result == 'updated':
                         stats['entries_updated'] += 1
                 except Exception as e:
-                    logger.error(f"Error processing {item['path']}: {e}")
+                    logger.error(f"Error processing {file_data['path']}: {e}")
                     stats['errors'] += 1
 
             # Generate embeddings only if we created/updated entries
@@ -339,6 +363,195 @@ class LibrarySync:
             logger.error(f"GitHub API error: {e}")
             raise
 
+    def _fetch_github_file(
+        self,
+        repo: str,
+        path: str,
+        headers: Dict,
+    ) -> Dict:
+        """Fetch and parse a single file from GitHub (thread-safe, no DB access).
+
+        Returns:
+            Dict with parsed file data including frontmatter and body
+        """
+        import base64
+
+        content_url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        response = requests.get(content_url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        file_data = response.json()
+        content = base64.b64decode(file_data['content']).decode('utf-8')
+
+        # Parse frontmatter and content
+        frontmatter, body = parse_markdown_frontmatter(content)
+
+        return {
+            'path': path,
+            'frontmatter': frontmatter,
+            'body': body,
+        }
+
+    def _process_fetched_file(self, file_data: Dict) -> str:
+        """Process a pre-fetched file's data and write to database.
+
+        Args:
+            file_data: Dict with 'path', 'frontmatter', 'body' from _fetch_github_file
+
+        Returns:
+            'created', 'updated', or 'skipped'
+        """
+        import json
+
+        path = file_data['path']
+        frontmatter = file_data['frontmatter']
+        body = file_data['body']
+
+        # Extract metadata
+        title = frontmatter.get('title') or extract_title_from_content(body, path)
+        raw_category = frontmatter.get('category') or categorize_from_path(path)
+        category = normalize_category(raw_category)
+
+        # Compute content hash for integrity/deduplication
+        content_hash = compute_content_hash(body)
+
+        # Generate canonical entry_id
+        entry_id = generate_entry_id(category, title)
+
+        # Check for entry_id collision
+        collision = self.conn.execute(
+            "SELECT file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
+            (entry_id, path)
+        ).fetchone()
+        if collision:
+            logger.info(f"Entry ID collision detected for {path}, disambiguating with content hash")
+            entry_id = generate_entry_id(category, title, content_hash)
+
+        # Extract chord fields
+        needs_chord = 1 if frontmatter.get('needs_chord') else 0
+        chord_name = frontmatter.get('chord_name')
+        chord_scope = frontmatter.get('chord_scope')
+        chord_id = frontmatter.get('chord_id')
+        chord_status = frontmatter.get('chord_status')
+        chord_repo = frontmatter.get('chord_repo')
+
+        # Extract source transcript
+        source_transcript = frontmatter.get('source_transcript')
+
+        # Extract task fields
+        task_status = frontmatter.get('task_status')
+        due_date = frontmatter.get('due_date')
+
+        valid_task_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+        if task_status and task_status not in valid_task_statuses:
+            logger.warning(f"Invalid task_status '{task_status}' in {path}, ignoring")
+            task_status = None
+
+        # Extract dates
+        created_at = frontmatter.get('created') or frontmatter.get('created_at')
+        updated_at = frontmatter.get('updated') or frontmatter.get('updated_at')
+        created_at = _parse_frontmatter_date(created_at)
+        updated_at = _parse_frontmatter_date(updated_at)
+
+        # Extract topic tags
+        domain_tags_raw = frontmatter.get('domain_tags')
+        key_phrases_raw = frontmatter.get('key_phrases')
+
+        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith('['):
+            try:
+                domain_tags = json.dumps(json.loads(domain_tags_raw))
+            except json.JSONDecodeError:
+                domain_tags = domain_tags_raw
+        elif isinstance(domain_tags_raw, list):
+            domain_tags = json.dumps(domain_tags_raw)
+        else:
+            domain_tags = None
+
+        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith('['):
+            try:
+                key_phrases = json.dumps(json.loads(key_phrases_raw))
+            except json.JSONDecodeError:
+                key_phrases = key_phrases_raw
+        elif isinstance(key_phrases_raw, list):
+            key_phrases = json.dumps(key_phrases_raw)
+        else:
+            key_phrases = None
+
+        # Check if entry exists
+        existing = self.conn.execute(
+            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
+            (path,)
+        ).fetchone()
+
+        if existing:
+            # Update existing entry
+            existing_data = self.conn.execute(
+                "SELECT chord_status, chord_repo, chord_id FROM knowledge_entries WHERE file_path = ?",
+                (path,)
+            ).fetchone()
+
+            # Chord status logic
+            if chord_status or chord_repo:
+                final_chord_status = chord_status
+                final_chord_repo = chord_repo
+                final_chord_id = chord_id
+            elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif existing_data and existing_data['chord_repo']:
+                final_chord_status = existing_data['chord_status']
+                final_chord_repo = existing_data['chord_repo']
+                final_chord_id = existing_data['chord_id']
+            elif needs_chord:
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
+            else:
+                final_chord_status = None
+                final_chord_repo = None
+                final_chord_id = None
+
+            self.conn.execute(
+                """
+                UPDATE knowledge_entries
+                SET entry_id = ?, title = ?, category = ?, content = ?,
+                    needs_chord = ?, chord_name = ?, chord_scope = ?,
+                    chord_id = ?, chord_status = ?, chord_repo = ?,
+                    domain_tags = ?, key_phrases = ?, source_transcript = ?,
+                    task_status = ?, due_date = ?, content_hash = ?,
+                    updated_at = COALESCE(?, CURRENT_TIMESTAMP)
+                WHERE file_path = ?
+                """,
+                (entry_id, title, category, body,
+                 needs_chord, chord_name, chord_scope,
+                 final_chord_id, final_chord_status, final_chord_repo,
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date, content_hash, updated_at, path)
+            )
+            self.conn.commit()
+            logger.debug(f"Updated: {entry_id} - {title}")
+            return 'updated'
+        else:
+            # Create new entry
+            self.conn.execute(
+                """
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+                """,
+                (entry_id, title, category, body, path,
+                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
+                 domain_tags, key_phrases, source_transcript,
+                 task_status, due_date, content_hash, created_at, updated_at)
+            )
+            self.conn.commit()
+            logger.info(f"Created: {entry_id} - {title}")
+            return 'created'
+
     def _process_github_file(
         self,
         repo: str,
@@ -351,17 +564,10 @@ class LibrarySync:
         Returns:
             'created', 'updated', or 'skipped'
         """
-        # Fetch file content
-        content_url = f"https://api.github.com/repos/{repo}/contents/{path}"
-        response = requests.get(content_url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        file_data = response.json()
-        import base64
-        content = base64.b64decode(file_data['content']).decode('utf-8')
-
-        # Parse frontmatter and content
-        frontmatter, body = parse_markdown_frontmatter(content)
+        # Fetch and parse file
+        file_data = self._fetch_github_file(repo, path, headers)
+        frontmatter = file_data['frontmatter']
+        body = file_data['body']
 
         # Extract metadata
         title = frontmatter.get('title') or extract_title_from_content(body, path)
