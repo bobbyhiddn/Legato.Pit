@@ -658,6 +658,75 @@ TOOLS = [
             "properties": {},
             "required": []
         }
+    },
+    {
+        "name": "list_assets",
+        "description": "List assets (images, files) in a category's assets folder. Assets can be referenced in notes using markdown: ![alt text](assets/filename.png)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Filter assets by category (optional - lists all if not specified)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of assets to return (default: 50)",
+                    "default": 50
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_asset",
+        "description": "Get metadata for a specific asset including its markdown reference.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID (e.g., 'asset-abc123')"
+                }
+            },
+            "required": ["asset_id"]
+        }
+    },
+    {
+        "name": "delete_asset",
+        "description": "Delete an asset from the library. Removes from both GitHub and database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID to delete"
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true to confirm deletion"
+                }
+            },
+            "required": ["asset_id", "confirm"]
+        }
+    },
+    {
+        "name": "get_asset_reference",
+        "description": "Get the markdown reference for an asset to use in notes. Returns a properly formatted markdown image/link reference.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {
+                    "type": "string",
+                    "description": "The asset ID"
+                },
+                "alt_text": {
+                    "type": "string",
+                    "description": "Optional alt text to use (overrides stored alt_text)"
+                }
+            },
+            "required": ["asset_id"]
+        }
     }
 ]
 
@@ -692,6 +761,10 @@ def handle_tool_call(params: dict) -> dict:
         'process_motif': tool_process_motif,
         'get_processing_status': tool_get_processing_status,
         'check_connection': tool_check_connection,
+        'list_assets': tool_list_assets,
+        'get_asset': tool_get_asset,
+        'delete_asset': tool_delete_asset,
+        'get_asset_reference': tool_get_asset_reference,
     }
 
     handler = tool_handlers.get(name)
@@ -2848,6 +2921,177 @@ def tool_check_connection(args: dict) -> dict:
         result["database"]["note_count_error"] = str(e)
 
     return result
+
+
+# ============ Asset Tools ============
+
+def tool_list_assets(args: dict) -> dict:
+    """List assets in the library, optionally filtered by category."""
+    category = args.get('category', '').strip().lower()
+    limit = min(int(args.get('limit', 50)), 100)
+
+    db = get_db()
+
+    if category:
+        rows = db.execute("""
+            SELECT asset_id, category, filename, file_path, mime_type, file_size,
+                   alt_text, description, created_at
+            FROM library_assets
+            WHERE category = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (category, limit)).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT asset_id, category, filename, file_path, mime_type, file_size,
+                   alt_text, description, created_at
+            FROM library_assets
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+    assets = []
+    for row in rows:
+        asset = dict(row)
+        asset['markdown_ref'] = f"![{asset['alt_text'] or asset['filename']}](assets/{asset['filename']})"
+        assets.append(asset)
+
+    return {
+        "assets": assets,
+        "count": len(assets),
+        "usage_hint": "Use markdown references in notes like: ![alt text](assets/filename.png)"
+    }
+
+
+def tool_get_asset(args: dict) -> dict:
+    """Get metadata for a specific asset."""
+    asset_id = args.get('asset_id', '').strip()
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    db = get_db()
+
+    row = db.execute("""
+        SELECT asset_id, category, filename, file_path, mime_type, file_size,
+               alt_text, description, created_at
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    asset = dict(row)
+    asset['markdown_ref'] = f"![{asset['alt_text'] or asset['filename']}](assets/{asset['filename']})"
+
+    return asset
+
+
+def tool_delete_asset(args: dict) -> dict:
+    """Delete an asset from the library."""
+    from .rag.github_service import delete_file
+    from .auth import get_user_installation_token
+
+    asset_id = args.get('asset_id', '').strip()
+    confirm = args.get('confirm', False)
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    if not confirm:
+        return {"error": "confirm must be true to delete an asset"}
+
+    db = get_db()
+
+    # Get asset info
+    row = db.execute("""
+        SELECT file_path, filename
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    # Get user credentials
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') and g.mcp_user else None
+    if not user_id:
+        return {"error": "Authentication required"}
+
+    token = get_user_installation_token(user_id, 'library')
+    if not token:
+        return {"error": "GitHub authorization required"}
+
+    from .core import get_user_library_repo
+    library_repo = get_user_library_repo()
+    if not library_repo:
+        return {"error": "Library repo not configured"}
+
+    try:
+        # Delete from GitHub
+        try:
+            delete_file(
+                repo=library_repo,
+                path=row['file_path'],
+                message=f"Delete asset: {row['filename']}",
+                token=token
+            )
+        except Exception as e:
+            if '404' not in str(e):
+                raise
+            # File already deleted from GitHub
+
+        # Delete from database
+        db.execute("DELETE FROM library_assets WHERE asset_id = ?", (asset_id,))
+        commit_and_checkpoint(db)
+
+        logger.info(f"MCP deleted asset: {asset_id}")
+
+        return {
+            "success": True,
+            "deleted": asset_id,
+            "filename": row['filename']
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete asset {asset_id}: {e}")
+        return {"error": str(e)}
+
+
+def tool_get_asset_reference(args: dict) -> dict:
+    """Get the markdown reference for an asset."""
+    asset_id = args.get('asset_id', '').strip()
+    custom_alt = args.get('alt_text', '').strip()
+
+    if not asset_id:
+        return {"error": "asset_id is required"}
+
+    db = get_db()
+
+    row = db.execute("""
+        SELECT filename, alt_text, mime_type, category
+        FROM library_assets
+        WHERE asset_id = ?
+    """, (asset_id,)).fetchone()
+
+    if not row:
+        return {"error": f"Asset not found: {asset_id}"}
+
+    alt_text = custom_alt or row['alt_text'] or row['filename']
+    markdown_ref = f"![{alt_text}](assets/{row['filename']})"
+
+    # Determine if it's an image or a link
+    is_image = row['mime_type'] and row['mime_type'].startswith('image/')
+
+    return {
+        "asset_id": asset_id,
+        "category": row['category'],
+        "filename": row['filename'],
+        "markdown_ref": markdown_ref,
+        "is_image": is_image,
+        "usage": f"Add this to your note content: {markdown_ref}"
+    }
 
 
 # ============ Resource Handlers ============

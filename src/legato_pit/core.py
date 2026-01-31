@@ -116,6 +116,7 @@ def create_app():
     from .admin import admin_bp
     from .stripe_billing import billing_bp
     from .import_api import import_api_bp
+    from .assets import assets_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -132,6 +133,7 @@ def create_app():
     app.register_blueprint(admin_bp)  # Admin console
     app.register_blueprint(billing_bp)  # Stripe billing
     app.register_blueprint(import_api_bp)  # Markdown ZIP import
+    app.register_blueprint(assets_bp)  # Library asset management
 
     # Initialize all databases on startup
     with app.app_context():
