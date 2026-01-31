@@ -381,7 +381,7 @@ TOOLS = [
                             "replace_all": {
                                 "type": "boolean",
                                 "description": "If true, replace all occurrences. If false (default), old_string must appear exactly once.",
-                                "default": false
+                                "default": False
                             }
                         },
                         "required": ["old_string", "new_string"]
