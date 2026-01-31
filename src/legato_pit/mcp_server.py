@@ -348,13 +348,13 @@ TOOLS = [
     },
     {
         "name": "update_note",
-        "description": "Update an existing note in the Legato library. Updates both GitHub and local database.",
+        "description": "Update an existing note in the Legato library. Supports two content update modes: (1) full replacement via 'content' parameter, or (2) precise diff-based edits via 'edits' parameter. The 'edits' mode is preferred for targeted changes as it requires less context and is more precise. Cannot use both 'content' and 'edits' together.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entry_id": {
                     "type": "string",
-                    "description": "The entry ID of the note to update (e.g., 'kb-abc12345')"
+                    "description": "The entry ID of the note to update (e.g., 'library.concept.my-note')"
                 },
                 "title": {
                     "type": "string",
@@ -362,7 +362,30 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "New content for the note in markdown (optional)"
+                    "description": "Full replacement content in markdown. Use this only for complete rewrites. For targeted changes, prefer 'edits' instead."
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "Array of precise string replacement operations. Each edit finds and replaces exact text. Edits are applied sequentially. Preferred over 'content' for targeted changes.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {
+                                "type": "string",
+                                "description": "The exact text to find in the note content. Must be unique unless replace_all is true."
+                            },
+                            "new_string": {
+                                "type": "string",
+                                "description": "The replacement text. Can be empty to delete the old_string."
+                            },
+                            "replace_all": {
+                                "type": "boolean",
+                                "description": "If true, replace all occurrences. If false (default), old_string must appear exactly once.",
+                                "default": false
+                            }
+                        },
+                        "required": ["old_string", "new_string"]
+                    }
                 },
                 "category": {
                     "type": "string",
@@ -795,9 +818,10 @@ def tool_create_note(args: dict) -> dict:
     if task_status and task_status not in valid_statuses:
         return {"error": f"Invalid task_status. Must be one of: {', '.join(sorted(valid_statuses))}"}
 
-    # Validate category
+    # Validate category - use user's custom categories, not just defaults
     db = get_db()
-    categories = get_user_categories(db, 'default')
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    categories = get_user_categories(db, user_id or 'default')
     valid_categories = {c['name'] for c in categories}
     category_folders = {c['name']: c['folder_name'] for c in categories}
 
@@ -929,7 +953,8 @@ def tool_list_categories(args: dict) -> dict:
     from .rag.database import get_user_categories
 
     db = get_db()
-    categories = get_user_categories(db, 'default')
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+    categories = get_user_categories(db, user_id or 'default')
 
     # Get counts per category
     counts = db.execute("""
@@ -1318,8 +1343,87 @@ def tool_spawn_agent(args: dict) -> dict:
         return {"error": f"Failed to queue project: {str(e)}"}
 
 
+def apply_edits(content: str, edits: list) -> tuple[str, list, str | None]:
+    """Apply a sequence of string replacement edits to content.
+
+    Args:
+        content: The original content string
+        edits: List of edit operations, each with:
+            - old_string: Text to find (required)
+            - new_string: Replacement text (required, can be empty)
+            - replace_all: If True, replace all occurrences (default False)
+
+    Returns:
+        Tuple of (modified_content, applied_edits, error_message)
+        - If successful: (new_content, list_of_applied, None)
+        - If error: (original_content, [], error_message)
+    """
+    if not edits:
+        return content, [], "No edits provided"
+
+    modified = content
+    applied = []
+
+    for i, edit in enumerate(edits):
+        old_string = edit.get('old_string', '')
+        new_string = edit.get('new_string', '')
+        replace_all = edit.get('replace_all', False)
+
+        # Validate old_string is present
+        if not old_string:
+            return content, [], f"Edit {i+1}: 'old_string' is required and cannot be empty"
+
+        # new_string can be empty (for deletions), but must be present
+        if 'new_string' not in edit:
+            return content, [], f"Edit {i+1}: 'new_string' is required (can be empty for deletions)"
+
+        # Count occurrences
+        count = modified.count(old_string)
+
+        if count == 0:
+            # Provide helpful context for debugging
+            preview = old_string[:100] + '...' if len(old_string) > 100 else old_string
+            return content, [], f"Edit {i+1}: 'old_string' not found in content. Searched for: {repr(preview)}"
+
+        if count > 1 and not replace_all:
+            return content, [], (
+                f"Edit {i+1}: 'old_string' appears {count} times in content. "
+                f"Set 'replace_all': true to replace all occurrences, or provide more context to make it unique."
+            )
+
+        # Apply the edit
+        if replace_all:
+            modified = modified.replace(old_string, new_string)
+            applied.append({
+                "edit_index": i + 1,
+                "occurrences_replaced": count,
+                "old_preview": old_string[:50] + '...' if len(old_string) > 50 else old_string,
+                "new_preview": new_string[:50] + '...' if len(new_string) > 50 else new_string
+            })
+        else:
+            modified = modified.replace(old_string, new_string, 1)
+            applied.append({
+                "edit_index": i + 1,
+                "occurrences_replaced": 1,
+                "old_preview": old_string[:50] + '...' if len(old_string) > 50 else old_string,
+                "new_preview": new_string[:50] + '...' if len(new_string) > 50 else new_string
+            })
+
+    return modified, applied, None
+
+
 def tool_update_note(args: dict) -> dict:
-    """Update an existing note in both GitHub and local database."""
+    """Update an existing note in both GitHub and local database.
+
+    Supports two content update modes:
+    1. Full replacement: Provide 'content' with the complete new content
+    2. Diff-based edits: Provide 'edits' array with precise string replacements
+
+    The 'edits' mode is preferred for targeted changes as it:
+    - Requires less context (only the strings to find and replace)
+    - Is more precise and auditable
+    - Reduces risk of accidentally changing other content
+    """
     from .rag.database import get_user_categories
     from .rag.github_service import commit_file, get_file_content
 
@@ -1327,12 +1431,26 @@ def tool_update_note(args: dict) -> dict:
     new_title = args.get('title', '').strip() if args.get('title') else None
     new_content = args.get('content', '').strip() if args.get('content') else None
     new_category = args.get('category', '').lower().strip() if args.get('category') else None
+    edits = args.get('edits')  # List of {old_string, new_string, replace_all?}
 
     if not entry_id:
         return {"error": "entry_id is required"}
 
-    if not new_title and not new_content and not new_category:
-        return {"error": "At least one of title, content, or category must be provided"}
+    # Validate mutual exclusivity of content and edits
+    if new_content and edits:
+        return {"error": "Cannot use both 'content' and 'edits'. Use 'content' for full replacement or 'edits' for targeted changes."}
+
+    # Validate edits structure if provided
+    if edits is not None:
+        if not isinstance(edits, list):
+            return {"error": "'edits' must be an array of edit operations"}
+        if len(edits) == 0:
+            return {"error": "'edits' array cannot be empty"}
+
+    # At least one update must be provided
+    has_content_update = new_content is not None or (edits is not None and len(edits) > 0)
+    if not new_title and not has_content_update and not new_category:
+        return {"error": "At least one of title, content, edits, or category must be provided"}
 
     db = get_db()
 
@@ -1361,12 +1479,30 @@ def tool_update_note(args: dict) -> dict:
 
     # Use existing values as defaults
     title = new_title or entry['title']
-    content = new_content if new_content is not None else entry['content']
     category = new_category or entry['category']
     file_path = entry['file_path']
 
-    # Recompute content_hash if content changed
-    new_content_hash = compute_content_hash(content) if new_content is not None else None
+    # Determine final content - supports both full replacement and diff-based edits
+    content_changed = False
+    applied_edits_info = []
+
+    if edits:
+        # Apply diff-based edits to existing content
+        existing_content = entry['content']
+        content, applied_edits_info, edit_error = apply_edits(existing_content, edits)
+        if edit_error:
+            return {"error": edit_error}
+        content_changed = True
+    elif new_content is not None:
+        # Full content replacement
+        content = new_content
+        content_changed = True
+    else:
+        # No content change
+        content = entry['content']
+
+    # Recompute content_hash if content changed (via edits or full replacement)
+    new_content_hash = compute_content_hash(content) if content_changed else None
 
     # Get user's installation token
     from .auth import get_user_installation_token
@@ -1455,9 +1591,17 @@ key_phrases: []
             )
         db.commit()
 
+        # Regenerate embedding if content changed
+        if content_changed:
+            try:
+                _generate_embedding_for_entry(entry_id, content)
+            except Exception as emb_err:
+                logger.warning(f"Failed to regenerate embedding for {entry_id}: {emb_err}")
+
         logger.info(f"MCP updated note: {entry_id} - {title}")
 
-        return {
+        # Build response
+        response = {
             "success": True,
             "entry_id": entry_id,
             "title": title,
@@ -1465,10 +1609,19 @@ key_phrases: []
             "file_path": file_path,
             "changes": {
                 "title": new_title is not None,
-                "content": new_content is not None,
+                "content": content_changed,
                 "category": new_category is not None
             }
         }
+
+        # Include edit details when using diff-based mode
+        if applied_edits_info:
+            response["edits_applied"] = applied_edits_info
+            response["edit_mode"] = "diff"
+        elif content_changed:
+            response["edit_mode"] = "full_replacement"
+
+        return response
 
     except Exception as e:
         logger.error(f"Failed to update note: {e}")
