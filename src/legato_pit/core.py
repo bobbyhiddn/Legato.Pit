@@ -89,12 +89,22 @@ def create_app():
         APP_DESCRIPTION='Dashboard & Motif for LEGATO'
     )
 
-    # Rate limiting
+    # Rate limiting - exempt MCP endpoints since they're OAuth-authenticated
+    def mcp_exempt():
+        """Exempt MCP endpoints from IP-based rate limiting.
+
+        MCP requests are authenticated via OAuth tokens, so IP-based rate
+        limiting is unnecessary and causes disconnections during normal usage
+        (Claude makes many API calls during normal operation).
+        """
+        return request.path.startswith('/mcp')
+
     limiter = Limiter(
         key_func=get_remote_address,
         app=app,
         default_limits=["200 per day", "50 per hour"],
-        storage_uri="memory://"
+        storage_uri="memory://",
+        request_filter=mcp_exempt  # Don't rate limit MCP endpoints
     )
 
     # Store limiter on app for use in blueprints

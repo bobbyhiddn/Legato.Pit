@@ -1072,7 +1072,8 @@ def get_user_legato_db():
             if canonical:
                 canonical_user_id = canonical['user_id']
                 if canonical_user_id != mcp_user_id:
-                    logger.warning(f"MCP user_id mismatch: jwt={mcp_user_id}, canonical={canonical_user_id}")
+                    # Expected when token was issued with old user_id - resolved correctly
+                    logger.debug(f"MCP user_id resolved: jwt={mcp_user_id} -> canonical={canonical_user_id}")
                 user_id = canonical_user_id
             else:
                 # No user found by github_id, fall back to JWT user_id

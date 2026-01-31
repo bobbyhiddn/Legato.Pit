@@ -859,7 +859,9 @@ def require_mcp_auth(f):
                 "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
             ).fetchone()
             if canonical and canonical['user_id'] != claims.get('user_id'):
-                logger.warning(f"MCP user_id mismatch: jwt={claims.get('user_id')}, canonical={canonical['user_id']} - using canonical")
+                # This is expected when user re-registered or token was issued with old user_id
+                # We correctly resolve to canonical user_id, so this is handled - just debug log
+                logger.debug(f"MCP user_id resolved: jwt={claims.get('user_id')} -> canonical={canonical['user_id']}")
                 claims['user_id'] = canonical['user_id']
 
         # Store claims in g for use in handler
