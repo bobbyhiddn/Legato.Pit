@@ -2432,7 +2432,7 @@ def api_move_to_subfolder(entry_id: str):
     """
     from flask import session
     from .rag.database import get_user_categories
-    from .rag.github_service import create_file, delete_file, get_file_content
+    from .rag.github_service import create_file, commit_file, delete_file, get_file_content, file_exists
 
     data = request.get_json()
     if data is None:
@@ -2522,14 +2522,24 @@ def api_move_to_subfolder(entry_id: str):
         else:
             return jsonify({'error': f'File not found in GitHub: {old_file_path}'}), 404
 
-        # Create new file
-        create_file(
-            repo=repo,
-            path=new_file_path,
-            content=full_content,
-            message=f'Move note to subfolder: {title}',
-            token=token
-        )
+        # Create new file (or update if destination already exists - collision case)
+        if file_exists(repo, new_file_path, token):
+            logger.info(f"Destination {new_file_path} exists, updating instead of creating")
+            commit_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=f'Move note to subfolder: {title}',
+                token=token
+            )
+        else:
+            create_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=f'Move note to subfolder: {title}',
+                token=token
+            )
 
         # Delete old file
         try:
