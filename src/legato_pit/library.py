@@ -271,7 +271,8 @@ def get_categories_with_counts():
         if category_name and category_name not in defined_categories:
             # Auto-create the category record
             display_name = category_name.replace('-', ' ').title()
-            folder_name = f"{category_name}s"
+            # Avoid double 's' for names ending in 's'
+            folder_name = category_name if category_name.endswith('s') else f"{category_name}s"
 
             try:
                 max_order = db.execute(
@@ -646,7 +647,8 @@ def view_category(category: str, subfolder: str = None):
     # Get category folder info
     categories_list = get_user_categories(db, user_id)
     category_folders = {c['name']: c['folder_name'] for c in categories_list}
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
 
     # Get subfolders from GitHub
     subfolders = []
@@ -2156,7 +2158,8 @@ def api_create_note():
 
         # Build file path
         date_str = datetime.utcnow().strftime('%Y-%m-%d')
-        folder = category_folders.get(category, f'{category}s')
+        default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
         file_path = f'{folder}/{date_str}-{slug}.md'
 
         # Build frontmatter
@@ -2275,7 +2278,8 @@ def api_create_folder():
             'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
         }), 400
 
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
     subfolder_path = f'{folder}/{subfolder_name}/.gitkeep'
 
     try:
@@ -2345,7 +2349,8 @@ def api_list_subfolders(category: str):
             'error': f'Invalid category. Must be one of: {", ".join(sorted(valid_categories))}'
         }), 400
 
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
 
     try:
         from .core import get_user_library_repo
@@ -2467,7 +2472,8 @@ def api_move_to_subfolder(entry_id: str):
     # Get category folder
     categories = get_user_categories(db, user_id)
     category_folders = {c['name']: c['folder_name'] for c in categories}
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
 
     # Build new file path
     filename = old_file_path.split('/')[-1]  # Preserve the filename
@@ -2667,7 +2673,8 @@ def api_update_category(entry_id: str):
                     # Calculate new file path
                     # Old: glimmers/2024-01-10-something.md -> New: concepts/2024-01-10-something.md
                     filename = old_file_path.split('/')[-1]
-                    new_folder = category_folders.get(new_category, f'{new_category}s')
+                    default_new_folder = new_category if new_category.endswith('s') else f'{new_category}s'
+                    new_folder = category_folders.get(new_category, default_new_folder)
                     new_file_path = f'{new_folder}/{filename}'
 
                     # Create file in new location
