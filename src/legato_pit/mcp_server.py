@@ -852,6 +852,102 @@ TOOLS = [
             },
             "required": ["name", "display_name"]
         }
+    },
+    {
+        "name": "download_note",
+        "description": "Download a single note from the library to a local filesystem path. Writes the note content directly to a file, making it available for local operations like compilation, processing, or editing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID (e.g., 'library.concept.my-note') - most reliable lookup"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Alternative: path in the library (e.g., 'concepts/2026-01-10-my-note.md')"
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Local filesystem path to write the file to (e.g., '/home/user/output/chapter1.md')"
+                },
+                "strip_frontmatter": {
+                    "type": "boolean",
+                    "description": "Remove YAML frontmatter from output (default: false)",
+                    "default": False
+                }
+            },
+            "required": ["destination"]
+        }
+    },
+    {
+        "name": "download_notes",
+        "description": "Bulk download notes from a category/subfolder to a local directory. Efficiently downloads multiple notes in a single operation for compilation, processing, or batch operations.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Category to download from (e.g., 'concept', 'epiphany')"
+                },
+                "subfolder": {
+                    "type": "string",
+                    "description": "Optional: Specific subfolder within the category (e.g., 'chapters', 'research')"
+                },
+                "destination_dir": {
+                    "type": "string",
+                    "description": "Local directory to write files to (will be created if it doesn't exist)"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Optional: Glob pattern to filter notes by filename (e.g., '*chapter*', '2026-01-*')"
+                },
+                "strip_frontmatter": {
+                    "type": "boolean",
+                    "description": "Remove YAML frontmatter from output files (default: false)",
+                    "default": False
+                },
+                "flatten": {
+                    "type": "boolean",
+                    "description": "Put all files in destination root vs. preserving subfolder structure (default: true)",
+                    "default": True
+                }
+            },
+            "required": ["category", "destination_dir"]
+        }
+    },
+    {
+        "name": "download_notes_batch",
+        "description": "Download specific notes by entry ID to specified destinations. Useful when you need specific notes from different categories or with custom destination paths.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "array",
+                    "description": "Array of notes to download, each with entry_id and destination path",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "entry_id": {
+                                "type": "string",
+                                "description": "The entry ID of the note to download"
+                            },
+                            "destination": {
+                                "type": "string",
+                                "description": "Local filesystem path to write this note to"
+                            }
+                        },
+                        "required": ["entry_id", "destination"]
+                    }
+                },
+                "strip_frontmatter": {
+                    "type": "boolean",
+                    "description": "Remove YAML frontmatter from all output files (default: false)",
+                    "default": False
+                }
+            },
+            "required": ["notes"]
+        }
     }
 ]
 
@@ -894,6 +990,9 @@ def handle_tool_call(params: dict) -> dict:
         'upload_asset': tool_upload_asset,
         'upload_markdown_as_note': tool_upload_markdown_as_note,
         'create_category': tool_create_category,
+        'download_note': tool_download_note,
+        'download_notes': tool_download_notes,
+        'download_notes_batch': tool_download_notes_batch,
     }
 
     handler = tool_handlers.get(name)
@@ -3802,6 +3901,336 @@ def tool_create_category(args: dict) -> dict:
             return {"error": f"Category '{name}' already exists"}
         logger.error(f"Failed to create category: {e}", exc_info=True)
         return {"error": str(e)}
+
+
+def _strip_yaml_frontmatter(content: str) -> str:
+    """Remove YAML frontmatter from markdown content.
+
+    Frontmatter is delimited by --- at the start and end,
+    appearing at the beginning of the file.
+    """
+    if not content.startswith('---'):
+        return content
+
+    # Find the closing ---
+    lines = content.split('\n')
+    end_idx = None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == '---':
+            end_idx = i
+            break
+
+    if end_idx is None:
+        # No closing ---, return original
+        return content
+
+    # Return content after frontmatter, stripping leading newlines
+    result = '\n'.join(lines[end_idx + 1:]).lstrip('\n')
+    return result
+
+
+def tool_download_note(args: dict) -> dict:
+    """Download a single note to a local filesystem path."""
+    import os
+
+    entry_id = args.get('entry_id', '').strip() if args.get('entry_id') else None
+    file_path_lookup = args.get('file_path', '').strip() if args.get('file_path') else None
+    destination = args.get('destination', '').strip()
+    strip_frontmatter = args.get('strip_frontmatter', False)
+
+    if not destination:
+        return {"error": "destination is required"}
+
+    if not entry_id and not file_path_lookup:
+        return {"error": "Either entry_id or file_path is required"}
+
+    db = get_db()
+    entry = None
+    lookup_method = None
+
+    # Try entry_id first
+    if entry_id:
+        entry = db.execute(
+            """
+            SELECT entry_id, title, category, content, file_path
+            FROM knowledge_entries
+            WHERE entry_id = ?
+            """,
+            (entry_id,)
+        ).fetchone()
+        lookup_method = "entry_id"
+
+    # Fallback to file_path
+    if not entry and file_path_lookup:
+        entry = db.execute(
+            """
+            SELECT entry_id, title, category, content, file_path
+            FROM knowledge_entries
+            WHERE file_path = ?
+            """,
+            (file_path_lookup,)
+        ).fetchone()
+        lookup_method = "file_path"
+
+    if not entry:
+        search_term = entry_id or file_path_lookup
+        return {"error": f"Note not found: {search_term}"}
+
+    content = entry['content'] or ''
+
+    if strip_frontmatter:
+        content = _strip_yaml_frontmatter(content)
+
+    # Ensure destination directory exists
+    dest_dir = os.path.dirname(destination)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+
+    # Write file with UTF-8 encoding
+    try:
+        with open(destination, 'w', encoding='utf-8') as f:
+            f.write(content)
+        bytes_written = len(content.encode('utf-8'))
+    except Exception as e:
+        logger.error(f"Failed to write file {destination}: {e}")
+        return {"error": f"Failed to write file: {str(e)}"}
+
+    return {
+        "success": True,
+        "source": entry['entry_id'],
+        "destination": destination,
+        "bytes_written": bytes_written,
+        "lookup_method": lookup_method
+    }
+
+
+def tool_download_notes(args: dict) -> dict:
+    """Bulk download notes from a category/subfolder to a local directory."""
+    import os
+    import fnmatch
+    from .rag.database import get_user_categories
+
+    category = args.get('category', '').lower().strip()
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+    destination_dir = args.get('destination_dir', '').strip()
+    pattern = args.get('pattern', '').strip() if args.get('pattern') else None
+    strip_frontmatter = args.get('strip_frontmatter', False)
+    flatten = args.get('flatten', True)
+
+    if not category:
+        return {"error": "category is required"}
+
+    if not destination_dir:
+        return {"error": "destination_dir is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    # Query notes in this category/subfolder combination
+    if subfolder:
+        rows = db.execute(
+            """
+            SELECT entry_id, title, content, file_path, subfolder
+            FROM knowledge_entries
+            WHERE category = ? AND subfolder = ?
+            ORDER BY file_path ASC
+            """,
+            (category, subfolder)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """
+            SELECT entry_id, title, content, file_path, subfolder
+            FROM knowledge_entries
+            WHERE category = ?
+            ORDER BY file_path ASC
+            """,
+            (category,)
+        ).fetchall()
+
+    # Apply pattern filter if specified
+    if pattern:
+        filtered_rows = []
+        for row in rows:
+            file_path = row['file_path'] or ''
+            filename = os.path.basename(file_path)
+            if fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(file_path, pattern):
+                filtered_rows.append(row)
+        rows = filtered_rows
+
+    if not rows:
+        return {
+            "success": True,
+            "files_written": 0,
+            "total_bytes": 0,
+            "files": [],
+            "message": "No matching notes found"
+        }
+
+    # Ensure destination directory exists
+    os.makedirs(destination_dir, exist_ok=True)
+
+    files_written = []
+    total_bytes = 0
+    errors = []
+
+    for row in rows:
+        content = row['content'] or ''
+
+        if strip_frontmatter:
+            content = _strip_yaml_frontmatter(content)
+
+        # Determine destination filename
+        source_path = row['file_path'] or f"{row['entry_id']}.md"
+        filename = os.path.basename(source_path)
+
+        if flatten:
+            dest_path = os.path.join(destination_dir, filename)
+        else:
+            # Preserve subfolder structure
+            row_subfolder = row['subfolder']
+            if row_subfolder:
+                dest_path = os.path.join(destination_dir, row_subfolder, filename)
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            else:
+                dest_path = os.path.join(destination_dir, filename)
+
+        try:
+            with open(dest_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            bytes_written = len(content.encode('utf-8'))
+            total_bytes += bytes_written
+            files_written.append({
+                "source": row['entry_id'],
+                "destination": dest_path,
+                "bytes": bytes_written
+            })
+        except Exception as e:
+            logger.error(f"Failed to write file {dest_path}: {e}")
+            errors.append({
+                "source": row['entry_id'],
+                "destination": dest_path,
+                "error": str(e)
+            })
+
+    result = {
+        "success": len(errors) == 0,
+        "files_written": len(files_written),
+        "total_bytes": total_bytes,
+        "files": files_written
+    }
+
+    if errors:
+        result["errors"] = errors
+
+    return result
+
+
+def tool_download_notes_batch(args: dict) -> dict:
+    """Download specific notes by entry ID to specified destinations."""
+    import os
+
+    notes = args.get('notes', [])
+    strip_frontmatter = args.get('strip_frontmatter', False)
+
+    if not notes:
+        return {"error": "notes array is required and cannot be empty"}
+
+    if not isinstance(notes, list):
+        return {"error": "notes must be an array"}
+
+    # Validate all notes have required fields
+    for i, note in enumerate(notes):
+        if not isinstance(note, dict):
+            return {"error": f"notes[{i}] must be an object"}
+        if not note.get('entry_id'):
+            return {"error": f"notes[{i}].entry_id is required"}
+        if not note.get('destination'):
+            return {"error": f"notes[{i}].destination is required"}
+
+    db = get_db()
+
+    # Fetch all requested notes in one query
+    entry_ids = [n['entry_id'].strip() for n in notes]
+    placeholders = ','.join(['?' for _ in entry_ids])
+
+    rows = db.execute(
+        f"""
+        SELECT entry_id, title, content, file_path
+        FROM knowledge_entries
+        WHERE entry_id IN ({placeholders})
+        """,
+        entry_ids
+    ).fetchall()
+
+    # Create lookup map
+    entries_map = {row['entry_id']: row for row in rows}
+
+    files_written = []
+    total_bytes = 0
+    errors = []
+
+    for note in notes:
+        entry_id = note['entry_id'].strip()
+        destination = note['destination'].strip()
+
+        if entry_id not in entries_map:
+            errors.append({
+                "source": entry_id,
+                "destination": destination,
+                "error": "Note not found"
+            })
+            continue
+
+        entry = entries_map[entry_id]
+        content = entry['content'] or ''
+
+        if strip_frontmatter:
+            content = _strip_yaml_frontmatter(content)
+
+        # Ensure destination directory exists
+        dest_dir = os.path.dirname(destination)
+        if dest_dir:
+            os.makedirs(dest_dir, exist_ok=True)
+
+        try:
+            with open(destination, 'w', encoding='utf-8') as f:
+                f.write(content)
+            bytes_written = len(content.encode('utf-8'))
+            total_bytes += bytes_written
+            files_written.append({
+                "source": entry_id,
+                "destination": destination,
+                "bytes": bytes_written
+            })
+        except Exception as e:
+            logger.error(f"Failed to write file {destination}: {e}")
+            errors.append({
+                "source": entry_id,
+                "destination": destination,
+                "error": str(e)
+            })
+
+    result = {
+        "success": len(errors) == 0,
+        "files_written": len(files_written),
+        "total_bytes": total_bytes,
+        "files": files_written
+    }
+
+    if errors:
+        result["errors"] = errors
+
+    return result
 
 
 # ============ Resource Handlers ============
