@@ -26,6 +26,9 @@ mcp_bp = Blueprint('mcp', __name__, url_prefix='/mcp')
 # Disable strict slashes so /mcp and /mcp/ both work
 mcp_bp.strict_slashes = False
 
+# Note: MCP endpoints are exempted from rate limiting in core.py
+# because they use OAuth authentication (token identifies user)
+
 # MCP Protocol version (as of June 2025 spec)
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
@@ -487,6 +490,24 @@ TOOLS = [
         }
     },
     {
+        "name": "list_subfolder_contents",
+        "description": "List all notes within a specific subfolder of a category.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The category containing the subfolder"
+                },
+                "subfolder": {
+                    "type": ["string", "null"],
+                    "description": "The subfolder name, or null/empty to list notes at the category root"
+                }
+            },
+            "required": ["category"]
+        }
+    },
+    {
         "name": "move_to_subfolder",
         "description": "Move a note to a different subfolder within its current category. Use null or empty string for subfolder to move to the category root.",
         "inputSchema": {
@@ -856,6 +877,7 @@ def handle_tool_call(params: dict) -> dict:
         'move_category': tool_move_category,
         'create_subfolder': tool_create_subfolder,
         'list_subfolders': tool_list_subfolders,
+        'list_subfolder_contents': tool_list_subfolder_contents,
         'move_to_subfolder': tool_move_to_subfolder,
         'delete_note': tool_delete_note,
         'list_tasks': tool_list_tasks,
@@ -2259,9 +2281,83 @@ def tool_list_subfolders(args: dict) -> dict:
         return {"error": f"Failed to list subfolders: {str(e)}"}
 
 
+def tool_list_subfolder_contents(args: dict) -> dict:
+    """List all notes within a specific subfolder of a category."""
+    from .rag.database import get_user_categories
+
+    category = args.get('category', '').lower().strip()
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+
+    if not category:
+        return {"error": "category is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    folder = category_folders.get(category, category if category.endswith('s') else f'{category}s')
+
+    try:
+        # Query notes in this category/subfolder combination
+        if subfolder:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, created_at, updated_at, file_path
+                FROM knowledge_entries
+                WHERE category = ? AND subfolder = ?
+                ORDER BY updated_at DESC
+                """,
+                (category, subfolder)
+            ).fetchall()
+            path_display = f"{folder}/{subfolder}"
+        else:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, created_at, updated_at, file_path
+                FROM knowledge_entries
+                WHERE category = ? AND (subfolder IS NULL OR subfolder = '')
+                ORDER BY updated_at DESC
+                """,
+                (category,)
+            ).fetchall()
+            path_display = f"{folder} (root)"
+
+        notes = [
+            {
+                "entry_id": row['entry_id'],
+                "title": row['title'],
+                "created_at": row['created_at'],
+                "updated_at": row['updated_at'],
+                "file_path": row['file_path']
+            }
+            for row in rows
+        ]
+
+        return {
+            "category": category,
+            "subfolder": subfolder,
+            "path": path_display,
+            "note_count": len(notes),
+            "notes": notes
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list subfolder contents: {e}")
+        return {"error": f"Failed to list subfolder contents: {str(e)}"}
+
+
 def tool_move_to_subfolder(args: dict) -> dict:
     """Move a note to a different subfolder within its current category."""
-    from .rag.github_service import create_file, delete_file, get_file_content
+    from .rag.github_service import create_file, commit_file, delete_file, get_file_content, file_exists
 
     entry_id = args.get('entry_id', '').strip()
     new_subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
@@ -2353,14 +2449,24 @@ def tool_move_to_subfolder(args: dict) -> dict:
         else:
             return {"error": f"File not found in GitHub: {old_file_path}"}
 
-        # Create new file
-        create_file(
-            repo=repo,
-            path=new_file_path,
-            content=full_content,
-            message=f'Move note to subfolder: {title}',
-            token=token
-        )
+        # Create new file (or update if destination already exists - collision case)
+        if file_exists(repo, new_file_path, token):
+            logger.info(f"Destination {new_file_path} exists, updating instead of creating")
+            commit_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=f'Move note to subfolder: {title}',
+                token=token
+            )
+        else:
+            create_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=f'Move note to subfolder: {title}',
+                token=token
+            )
 
         # Delete old file
         try:

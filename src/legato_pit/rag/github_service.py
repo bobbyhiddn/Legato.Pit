@@ -246,6 +246,7 @@ def move_file(
     """Move a file from one path to another on GitHub.
 
     This is done by getting content, creating at new location, deleting old.
+    If a file already exists at the destination, it will be overwritten.
 
     Args:
         repo: Repository in "owner/repo" format
@@ -266,8 +267,14 @@ def move_file(
     if content is None:
         raise ValueError(f"File not found: {old_path}")
 
-    # Create at new location
-    created = create_file(repo, new_path, content, message, token, branch)
+    # Check if destination already exists (collision case)
+    if file_exists(repo, new_path, token, branch):
+        # Use commit_file to update existing file (requires SHA)
+        logger.info(f"Destination {new_path} exists, updating instead of creating")
+        created = commit_file(repo, new_path, content, message, token, branch)
+    else:
+        # Create at new location
+        created = create_file(repo, new_path, content, message, token, branch)
 
     # Delete from old location
     deleted = delete_file(repo, old_path, f"Remove {old_path} (moved)", token, branch)
