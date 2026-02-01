@@ -1134,7 +1134,9 @@ def tool_create_note(args: dict) -> dict:
 
     # Build file path (including subfolder if provided)
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
-    folder = category_folders.get(category, f'{category}s')
+    # Fallback folder name - avoid double 's' for names ending in 's'
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
     if subfolder:
         file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
     else:
@@ -2041,7 +2043,8 @@ key_phrases: []
 
         # Build new file path
         filename = old_file_path.split('/')[-1]  # Preserve the date-slug filename
-        new_folder = category_folders.get(new_category, f'{new_category}s')
+        default_new_folder = new_category if new_category.endswith('s') else f'{new_category}s'
+        new_folder = category_folders.get(new_category, default_new_folder)
         new_file_path = f'{new_folder}/{filename}'
 
         # Create new file in GitHub
@@ -2132,7 +2135,8 @@ def tool_create_subfolder(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
     subfolder_path = f'{folder}/{subfolder_name}/.gitkeep'
 
     # Get user's installation token
@@ -2192,7 +2196,8 @@ def tool_list_subfolders(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
 
     # Get user's installation token
     from .auth import get_user_installation_token
@@ -2297,7 +2302,8 @@ def tool_move_to_subfolder(args: dict) -> dict:
     from .rag.database import get_user_categories
     categories = get_user_categories(db, user_id or 'default')
     category_folders = {c['name']: c['folder_name'] for c in categories}
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
 
     # Build new file path
     filename = old_file_path.split('/')[-1]  # Preserve the filename
@@ -3451,7 +3457,8 @@ def tool_upload_markdown_as_note(args: dict) -> dict:
     # Build file path
     slug = generate_slug(title)
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
-    folder = category_folders.get(category, f'{category}s')
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
     if subfolder:
         file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
     else:

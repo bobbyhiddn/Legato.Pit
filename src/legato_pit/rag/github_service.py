@@ -93,7 +93,15 @@ def commit_file(
         },
         timeout=15,
     )
-    response.raise_for_status()
+
+    # Log details on error before raising
+    if not response.ok:
+        try:
+            error_body = response.json()
+            logger.error(f"GitHub API error committing {path}: {response.status_code} - {error_body}")
+        except Exception:
+            logger.error(f"GitHub API error committing {path}: {response.status_code} - {response.text[:500]}")
+        response.raise_for_status()
 
     result = response.json()
     logger.info(f"Committed {path} to {repo}: {result['commit']['sha'][:7]}")
@@ -310,7 +318,15 @@ def create_file(
         },
         timeout=15,
     )
-    response.raise_for_status()
+
+    # Log details on error before raising
+    if not response.ok:
+        try:
+            error_body = response.json()
+            logger.error(f"GitHub API error creating {path}: {response.status_code} - {error_body}")
+        except Exception:
+            logger.error(f"GitHub API error creating {path}: {response.status_code} - {response.text[:500]}")
+        response.raise_for_status()
 
     result = response.json()
     logger.info(f"Created {path} in {repo}: {result['commit']['sha'][:7]}")
