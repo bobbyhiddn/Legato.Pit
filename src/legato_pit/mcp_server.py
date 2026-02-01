@@ -26,6 +26,9 @@ mcp_bp = Blueprint('mcp', __name__, url_prefix='/mcp')
 # Disable strict slashes so /mcp and /mcp/ both work
 mcp_bp.strict_slashes = False
 
+# Note: MCP endpoints are exempted from rate limiting in core.py
+# because they use OAuth authentication (token identifies user)
+
 # MCP Protocol version (as of June 2025 spec)
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
