@@ -490,6 +490,14 @@ class LibrarySync:
         else:
             key_phrases = None
 
+        # Extract subfolder from path (e.g., "rocks-cry-outs/chapters/file.md" -> "chapters")
+        path_parts = path.split('/')
+        if len(path_parts) >= 3:  # folder/subfolder/file.md
+            # Check if the middle part is actually a subfolder (not just the category folder)
+            subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
+        else:
+            subfolder = None
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -553,14 +561,6 @@ class LibrarySync:
 
             # For file moves, update file_path and subfolder; otherwise just update by file_path
             if moved_from_entry_id:
-                # Extract subfolder from new path
-                path_parts = path.split('/')
-                if len(path_parts) >= 3:  # folder/subfolder/file.md
-                    # Check if the middle part is actually a subfolder (not just the category folder)
-                    new_subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
-                else:
-                    new_subfolder = None
-
                 self.conn.execute(
                     """
                     UPDATE knowledge_entries
@@ -574,7 +574,7 @@ class LibrarySync:
                     WHERE id = ?
                     """,
                     (entry_id, title, category, body,
-                     path, new_subfolder,
+                     path, subfolder,
                      needs_chord, chord_name, chord_scope,
                      final_chord_id, final_chord_status, final_chord_repo,
                      domain_tags, key_phrases, source_transcript,
@@ -588,6 +588,7 @@ class LibrarySync:
                     """
                     UPDATE knowledge_entries
                     SET entry_id = ?, title = ?, category = ?, content = ?,
+                        subfolder = ?,
                         needs_chord = ?, chord_name = ?, chord_scope = ?,
                         chord_id = ?, chord_status = ?, chord_repo = ?,
                         domain_tags = ?, key_phrases = ?, source_transcript = ?,
@@ -596,6 +597,7 @@ class LibrarySync:
                     WHERE file_path = ?
                     """,
                     (entry_id, title, category, body,
+                     subfolder,
                      needs_chord, chord_name, chord_scope,
                      final_chord_id, final_chord_status, final_chord_repo,
                      domain_tags, key_phrases, source_transcript,
@@ -609,19 +611,19 @@ class LibrarySync:
             self.conn.execute(
                 """
                 INSERT INTO knowledge_entries
-                (entry_id, title, category, content, file_path,
+                (entry_id, title, category, content, file_path, subfolder,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
-                (entry_id, title, category, body, path,
+                (entry_id, title, category, body, path, subfolder,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else "") + (f" [subfolder:{subfolder}]" if subfolder else ""))
             return 'created'
 
     def sync_from_filesystem(self, library_path: str) -> Dict:
@@ -789,6 +791,14 @@ class LibrarySync:
         else:
             key_phrases = None
 
+        # Extract subfolder from path (e.g., "rocks-cry-outs/chapters/file.md" -> "chapters")
+        path_parts = relative_path.split('/')
+        if len(path_parts) >= 3:  # folder/subfolder/file.md
+            # Check if the middle part is actually a subfolder (not just the category folder)
+            subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
+        else:
+            subfolder = None
+
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
             "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
@@ -842,14 +852,6 @@ class LibrarySync:
 
             # For file moves, update file_path and subfolder; otherwise just update by file_path
             if moved_from_entry_id:
-                # Extract subfolder from new path
-                path_parts = relative_path.split('/')
-                if len(path_parts) >= 3:  # folder/subfolder/file.md
-                    # Check if the middle part is actually a subfolder (not just the category folder)
-                    new_subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
-                else:
-                    new_subfolder = None
-
                 self.conn.execute(
                     """
                     UPDATE knowledge_entries
@@ -863,7 +865,7 @@ class LibrarySync:
                     WHERE id = ?
                     """,
                     (entry_id, title, category, body,
-                     relative_path, new_subfolder,
+                     relative_path, subfolder,
                      needs_chord, chord_name, chord_scope,
                      final_chord_id, final_chord_status, final_chord_repo,
                      domain_tags, key_phrases, source_transcript,
@@ -877,6 +879,7 @@ class LibrarySync:
                     """
                     UPDATE knowledge_entries
                     SET entry_id = ?, title = ?, category = ?, content = ?,
+                        subfolder = ?,
                         needs_chord = ?, chord_name = ?, chord_scope = ?,
                         chord_id = ?, chord_status = ?, chord_repo = ?,
                         domain_tags = ?, key_phrases = ?, source_transcript = ?,
@@ -885,6 +888,7 @@ class LibrarySync:
                     WHERE file_path = ?
                     """,
                     (entry_id, title, category, body,
+                     subfolder,
                      needs_chord, chord_name, chord_scope,
                      final_chord_id, final_chord_status, final_chord_repo,
                      domain_tags, key_phrases, source_transcript,
@@ -898,19 +902,19 @@ class LibrarySync:
             self.conn.execute(
                 """
                 INSERT INTO knowledge_entries
-                (entry_id, title, category, content, file_path,
+                (entry_id, title, category, content, file_path, subfolder,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
-                (entry_id, title, category, body, relative_path,
+                (entry_id, title, category, body, relative_path, subfolder,
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else ""))
+            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else "") + (f" [subfolder:{subfolder}]" if subfolder else ""))
             return 'created'
 
     def _log_sync(self, source: str, branch: str, stats: Dict):
