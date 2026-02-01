@@ -90,21 +90,20 @@ def create_app():
     )
 
     # Rate limiting
-    # MCP endpoints are exempted because they use OAuth authentication
-    # instead of IP-based limits (the OAuth token identifies the user)
-    def exempt_mcp_endpoints():
-        """Return True to exempt request from rate limiting."""
-        from flask import request
-        # Exempt MCP endpoints - they use OAuth for auth
-        return request.path.startswith('/mcp')
-
     limiter = Limiter(
         key_func=get_remote_address,
         app=app,
         default_limits=["200 per day", "50 per hour"],
         storage_uri="memory://",
-        request_filter=exempt_mcp_endpoints
     )
+
+    # MCP endpoints are exempted because they use OAuth authentication
+    # instead of IP-based limits (the OAuth token identifies the user)
+    @limiter.request_filter
+    def exempt_mcp_endpoints():
+        """Return True to exempt request from rate limiting."""
+        # Exempt MCP endpoints - they use OAuth for auth
+        return request.path.startswith('/mcp')
 
     # Store limiter on app for use in blueprints
     app.limiter = limiter
