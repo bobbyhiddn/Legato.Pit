@@ -2159,7 +2159,7 @@ def api_create_note():
         # Build file path
         date_str = datetime.utcnow().strftime('%Y-%m-%d')
         default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+        folder = category_folders.get(category, default_folder)
         file_path = f'{folder}/{date_str}-{slug}.md'
 
         # Build frontmatter
