@@ -623,6 +623,46 @@ TOOLS = [
         }
     },
     {
+        "name": "rename_note",
+        "description": "Rename a note's title. This updates the note's title, regenerates the entry_id and file path based on the new title, moves the file in GitHub, and updates all references. Git-native operation with atomic commit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to rename"
+                },
+                "new_title": {
+                    "type": "string",
+                    "description": "The new title for the note"
+                }
+            },
+            "required": ["entry_id", "new_title"]
+        }
+    },
+    {
+        "name": "rename_subfolder",
+        "description": "Rename a subfolder within a category. Moves all notes in the subfolder to the new path and updates their file paths. Git-native operation with atomic commits.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The category containing the subfolder"
+                },
+                "old_name": {
+                    "type": "string",
+                    "description": "Current name of the subfolder to rename"
+                },
+                "new_name": {
+                    "type": "string",
+                    "description": "New name for the subfolder"
+                }
+            },
+            "required": ["category", "old_name", "new_name"]
+        }
+    },
+    {
         "name": "delete_note",
         "description": "Delete a note from the Legato library. Removes from both GitHub and local database. Requires confirmation flag.",
         "inputSchema": {
@@ -980,6 +1020,8 @@ def handle_tool_call(params: dict) -> dict:
         'list_subfolders': tool_list_subfolders,
         'list_subfolder_contents': tool_list_subfolder_contents,
         'move_to_subfolder': tool_move_to_subfolder,
+        'rename_note': tool_rename_note,
+        'rename_subfolder': tool_rename_subfolder,
         'delete_note': tool_delete_note,
         'list_tasks': tool_list_tasks,
         'update_task_status': tool_update_task_status,
@@ -2992,6 +3034,457 @@ def tool_move_to_subfolder(args: dict) -> dict:
     except Exception as e:
         logger.error(f"Failed to move note to subfolder: {e}")
         return {"error": f"Failed to move note to subfolder: {str(e)}"}
+
+
+def tool_rename_note(args: dict) -> dict:
+    """Rename a note's title and update all associated paths and references.
+
+    This is a git-native operation that:
+    1. Updates the title in frontmatter
+    2. Generates a new entry_id based on the new title
+    3. Moves the file to a new path with the new slug
+    4. Updates all database references
+    5. Regenerates embeddings for the new entry_id
+    """
+    from .rag.github_service import create_file, commit_file, delete_file, get_file_content, file_exists
+
+    entry_id = args.get('entry_id', '').strip()
+    new_title = args.get('new_title', '').strip()
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+    if not new_title:
+        return {"error": "new_title is required"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path, subfolder, content_hash
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    old_title = entry['title']
+    if old_title == new_title:
+        return {"error": f"Note already has title '{new_title}'"}
+
+    category = entry['category']
+    old_file_path = entry['file_path']
+    subfolder = entry['subfolder']
+    content = entry['content']
+    content_hash = entry['content_hash']
+    entry_db_id = entry['id']
+
+    # Generate new slug and entry_id
+    def generate_slug(title: str) -> str:
+        """Generate a URL-friendly slug from title."""
+        slug = title.lower().strip()
+        slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+        slug = re.sub(r'[\s_]+', '-', slug)
+        slug = re.sub(r'-+', '-', slug)
+        slug = slug.strip('-')
+        return slug[:80] if len(slug) > 80 else slug
+
+    new_slug = generate_slug(new_title)
+    if not new_slug:
+        return {"error": "New title must contain at least some alphanumeric characters"}
+
+    # Generate new entry_id
+    new_entry_id = f"library.{category}.{new_slug}"
+
+    # Check for collision
+    existing = db.execute(
+        "SELECT entry_id FROM knowledge_entries WHERE entry_id = ? AND id != ?",
+        (new_entry_id, entry_db_id)
+    ).fetchone()
+    if existing:
+        # Add hash suffix to disambiguate
+        if content_hash:
+            new_entry_id = f"library.{category}.{new_slug}.{content_hash[:12]}"
+        else:
+            import hashlib
+            hash_suffix = hashlib.sha256(new_title.encode()).hexdigest()[:12]
+            new_entry_id = f"library.{category}.{new_slug}.{hash_suffix}"
+
+    # Get category folder
+    from .rag.database import get_user_categories
+    categories = get_user_categories(db, user_id or 'default')
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
+
+    # Build new file path - preserve the date prefix from old filename
+    old_filename = old_file_path.split('/')[-1]
+    # Extract date prefix (YYYY-MM-DD) if present
+    date_match = re.match(r'^(\d{4}-\d{2}-\d{2})-', old_filename)
+    if date_match:
+        date_prefix = date_match.group(1)
+        new_filename = f'{date_prefix}-{new_slug}.md'
+    else:
+        # No date prefix, just use new slug
+        new_filename = f'{new_slug}.md'
+
+    if subfolder:
+        new_file_path = f'{folder}/{subfolder}/{new_filename}'
+    else:
+        new_file_path = f'{folder}/{new_filename}'
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Get current file content from GitHub
+        current_content = get_file_content(repo, old_file_path, token)
+
+        if not current_content:
+            return {"error": f"File not found in GitHub: {old_file_path}"}
+
+        # Update frontmatter with new title and entry_id
+        if current_content.startswith('---'):
+            parts = current_content.split('---', 2)
+            if len(parts) >= 3:
+                frontmatter_lines = parts[1].strip().split('\n')
+                new_frontmatter_lines = []
+                has_title = False
+                has_id = False
+                for line in frontmatter_lines:
+                    if line.startswith('title:'):
+                        has_title = True
+                        # Handle quoted titles
+                        new_frontmatter_lines.append(f'title: "{new_title}"')
+                    elif line.startswith('id:'):
+                        has_id = True
+                        new_frontmatter_lines.append(f'id: {new_entry_id}')
+                    else:
+                        new_frontmatter_lines.append(line)
+                # Add if not present
+                if not has_title:
+                    new_frontmatter_lines.insert(0, f'title: "{new_title}"')
+                if not has_id:
+                    new_frontmatter_lines.insert(0, f'id: {new_entry_id}')
+                full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+            else:
+                full_content = current_content
+        else:
+            full_content = current_content
+
+        # Create new file (or update if destination already exists)
+        commit_message = f'Rename note: {old_title} → {new_title}'
+        if file_exists(repo, new_file_path, token):
+            logger.info(f"Destination {new_file_path} exists, updating instead of creating")
+            commit_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=commit_message,
+                token=token
+            )
+        else:
+            create_file(
+                repo=repo,
+                path=new_file_path,
+                content=full_content,
+                message=commit_message,
+                token=token
+            )
+
+        # Delete old file (only if path changed)
+        if old_file_path != new_file_path:
+            try:
+                delete_file(
+                    repo=repo,
+                    path=old_file_path,
+                    message=f'Remove old file after rename: {old_title}',
+                    token=token
+                )
+            except Exception as del_err:
+                logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+
+        # Update database
+        db.execute(
+            """
+            UPDATE knowledge_entries
+            SET entry_id = ?, title = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_entry_id, new_title, new_file_path, entry_db_id)
+        )
+
+        # Update note_links table to update references
+        db.execute(
+            """
+            UPDATE note_links
+            SET source_entry_id = ?
+            WHERE source_entry_id = ?
+            """,
+            (new_entry_id, entry_id)
+        )
+        db.execute(
+            """
+            UPDATE note_links
+            SET target_entry_id = ?
+            WHERE target_entry_id = ?
+            """,
+            (new_entry_id, entry_id)
+        )
+
+        commit_and_checkpoint(db)
+
+        # Regenerate embedding for new entry_id
+        try:
+            service = get_embedding_service()
+            if service:
+                # Delete old embedding
+                db.execute("DELETE FROM embeddings WHERE entry_id = ?", (entry_db_id,))
+                # Generate new embedding
+                service.generate_and_store(new_entry_id, 'knowledge', content, db_id=entry_db_id)
+                commit_and_checkpoint(db)
+        except Exception as emb_err:
+            logger.warning(f"Failed to regenerate embedding: {emb_err}")
+
+        logger.info(f"MCP renamed note: {entry_id} → {new_entry_id} ('{old_title}' → '{new_title}')")
+
+        return {
+            "success": True,
+            "old_entry_id": entry_id,
+            "new_entry_id": new_entry_id,
+            "old_title": old_title,
+            "new_title": new_title,
+            "old_file_path": old_file_path,
+            "new_file_path": new_file_path
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to rename note: {e}")
+        return {"error": f"Failed to rename note: {str(e)}"}
+
+
+def tool_rename_subfolder(args: dict) -> dict:
+    """Rename a subfolder within a category.
+
+    This is a git-native operation that:
+    1. Moves all notes in the old subfolder to the new subfolder path
+    2. Updates the subfolder field in frontmatter for each note
+    3. Updates database records for all affected notes
+    4. Removes the old .gitkeep and creates a new one
+    """
+    from .rag.github_service import (
+        create_file, commit_file, delete_file, get_file_content,
+        file_exists, list_folder
+    )
+    from .rag.database import get_user_categories
+
+    category = args.get('category', '').lower().strip()
+    old_name = args.get('old_name', '').strip()
+    new_name = args.get('new_name', '').strip()
+
+    if not category:
+        return {"error": "category is required"}
+    if not old_name:
+        return {"error": "old_name is required"}
+    if not new_name:
+        return {"error": "new_name is required"}
+    if old_name == new_name:
+        return {"error": "old_name and new_name are the same"}
+
+    # Validate subfolder names
+    if '/' in old_name or '\\' in old_name or '/' in new_name or '\\' in new_name:
+        return {"error": "Subfolder names cannot contain slashes"}
+    if not re.match(r'^[a-zA-Z0-9_-]+$', new_name):
+        return {"error": "New subfolder name can only contain letters, numbers, underscores, and hyphens"}
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Validate category
+    categories = get_user_categories(db, user_id or 'default')
+    valid_categories = {c['name'] for c in categories}
+    category_folders = {c['name']: c['folder_name'] for c in categories}
+
+    if category not in valid_categories:
+        return {
+            "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
+        }
+
+    default_folder = category if category.endswith('s') else f'{category}s'
+    folder = category_folders.get(category, default_folder)
+    old_subfolder_path = f'{folder}/{old_name}'
+    new_subfolder_path = f'{folder}/{new_name}'
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    try:
+        # Check if old subfolder exists
+        old_items = list_folder(repo, old_subfolder_path, token)
+        if not old_items:
+            return {"error": f"Subfolder not found: {old_subfolder_path}"}
+
+        # Check if new subfolder already exists
+        new_items = list_folder(repo, new_subfolder_path, token)
+        if new_items:
+            return {"error": f"Destination subfolder already exists: {new_subfolder_path}"}
+
+        # Get all notes in the old subfolder from database
+        notes = db.execute(
+            """
+            SELECT id, entry_id, title, file_path
+            FROM knowledge_entries
+            WHERE category = ? AND subfolder = ?
+            """,
+            (category, old_name)
+        ).fetchall()
+
+        moved_count = 0
+        errors = []
+
+        # Move each note to the new subfolder
+        for note in notes:
+            note_id = note['id']
+            note_entry_id = note['entry_id']
+            note_title = note['title']
+            old_file_path = note['file_path']
+
+            # Build new file path
+            filename = old_file_path.split('/')[-1]
+            new_file_path = f'{new_subfolder_path}/{filename}'
+
+            try:
+                # Get current file content
+                current_content = get_file_content(repo, old_file_path, token)
+                if not current_content:
+                    errors.append(f"File not found: {old_file_path}")
+                    continue
+
+                # Update subfolder in frontmatter
+                if current_content.startswith('---'):
+                    parts = current_content.split('---', 2)
+                    if len(parts) >= 3:
+                        frontmatter_lines = parts[1].strip().split('\n')
+                        new_frontmatter_lines = []
+                        has_subfolder = False
+                        for line in frontmatter_lines:
+                            if line.startswith('subfolder:'):
+                                has_subfolder = True
+                                new_frontmatter_lines.append(f'subfolder: {new_name}')
+                            else:
+                                new_frontmatter_lines.append(line)
+                        if not has_subfolder:
+                            new_frontmatter_lines.append(f'subfolder: {new_name}')
+                        full_content = f"---\n{chr(10).join(new_frontmatter_lines)}\n---{parts[2]}"
+                    else:
+                        full_content = current_content
+                else:
+                    full_content = current_content
+
+                # Create new file
+                create_file(
+                    repo=repo,
+                    path=new_file_path,
+                    content=full_content,
+                    message=f'Rename subfolder: move {note_title}',
+                    token=token
+                )
+
+                # Delete old file
+                try:
+                    delete_file(
+                        repo=repo,
+                        path=old_file_path,
+                        message=f'Rename subfolder: remove old {note_title}',
+                        token=token
+                    )
+                except Exception as del_err:
+                    logger.warning(f"Failed to delete old file {old_file_path}: {del_err}")
+
+                # Update database
+                db.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET file_path = ?, subfolder = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (new_file_path, new_name, note_id)
+                )
+                moved_count += 1
+
+            except Exception as note_err:
+                errors.append(f"Failed to move {note_title}: {str(note_err)}")
+                logger.error(f"Failed to move note {note_entry_id}: {note_err}")
+
+        # Create .gitkeep in new subfolder (if not already there from moves)
+        new_gitkeep_path = f'{new_subfolder_path}/.gitkeep'
+        if not file_exists(repo, new_gitkeep_path, token):
+            try:
+                create_file(
+                    repo=repo,
+                    path=new_gitkeep_path,
+                    content='',
+                    message=f'Create subfolder: {new_subfolder_path}',
+                    token=token
+                )
+            except Exception as gitkeep_err:
+                logger.warning(f"Failed to create .gitkeep in new subfolder: {gitkeep_err}")
+
+        # Delete old .gitkeep if exists and folder is now empty
+        old_gitkeep_path = f'{old_subfolder_path}/.gitkeep'
+        try:
+            # Check if old folder is empty (only .gitkeep remains)
+            remaining_items = list_folder(repo, old_subfolder_path, token)
+            remaining_files = [item for item in remaining_items if item['name'] != '.gitkeep']
+            if not remaining_files and file_exists(repo, old_gitkeep_path, token):
+                delete_file(
+                    repo=repo,
+                    path=old_gitkeep_path,
+                    message=f'Remove empty subfolder: {old_subfolder_path}',
+                    token=token
+                )
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to cleanup old subfolder: {cleanup_err}")
+
+        commit_and_checkpoint(db)
+
+        logger.info(f"MCP renamed subfolder: {old_subfolder_path} → {new_subfolder_path} ({moved_count} notes)")
+
+        result = {
+            "success": True,
+            "category": category,
+            "old_name": old_name,
+            "new_name": new_name,
+            "old_path": old_subfolder_path,
+            "new_path": new_subfolder_path,
+            "notes_moved": moved_count
+        }
+        if errors:
+            result["warnings"] = errors
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to rename subfolder: {e}")
+        return {"error": f"Failed to rename subfolder: {str(e)}"}
 
 
 def tool_delete_note(args: dict) -> dict:
