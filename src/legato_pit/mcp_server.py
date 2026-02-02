@@ -835,6 +835,50 @@ TOOLS = [
         }
     },
     {
+        "name": "verify_sync_state",
+        "description": "Check consistency between database entries and GitHub files. Identifies notes that exist in the database but are missing from GitHub (orphaned DB entries) or exist in GitHub but missing from database. Use this to diagnose sync mismatches before running repair_sync_state.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional: check only notes in a specific category"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of entries to check (default: 100, max: 500)",
+                    "default": 100
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "repair_sync_state",
+        "description": "Repair sync mismatches between database and GitHub. For entries that exist in the database but are missing from GitHub, recreates the GitHub file from database content. This heals orphaned database entries caused by failed creates/updates.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Specific entry IDs to repair. If not provided, repairs all orphaned entries (up to limit)."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of entries to repair (default: 10, max: 50)",
+                    "default": 10
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, reports what would be repaired without making changes (default: false)",
+                    "default": False
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "list_assets",
         "description": "List assets (images, files) in a category's assets folder. Assets can be referenced in notes using markdown: ![alt text](assets/filename.png)",
         "inputSchema": {
@@ -1030,6 +1074,8 @@ def handle_tool_call(params: dict) -> dict:
         'process_motif': tool_process_motif,
         'get_processing_status': tool_get_processing_status,
         'check_connection': tool_check_connection,
+        'verify_sync_state': tool_verify_sync_state,
+        'repair_sync_state': tool_repair_sync_state,
         'list_assets': tool_list_assets,
         'get_asset': tool_get_asset,
         'delete_asset': tool_delete_asset,
@@ -1350,38 +1396,59 @@ def tool_create_note(args: dict) -> dict:
 
     repo = get_user_library_repo(user_id)
 
-    create_file(
-        repo=repo,
-        path=file_path,
-        content=full_content,
-        message=f'Create note via MCP: {title}',
-        token=token
-    )
+    # Atomic operation: Insert to DB first (in transaction), then push to GitHub.
+    # If GitHub fails, rollback DB. This prevents orphaned DB entries without GitHub files.
+    try:
+        # Insert into local database with task fields, subfolder, and content_hash
+        # This is in an implicit transaction - not committed yet
+        if task_status:
+            cursor = db.execute(
+                """
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, subfolder, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+                """,
+                (entry_id, title, category, content, file_path, task_status, due_date, content_hash, subfolder)
+            )
+        else:
+            cursor = db.execute(
+                """
+                INSERT INTO knowledge_entries
+                (entry_id, title, category, content, file_path, source_transcript, content_hash, subfolder, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+                """,
+                (entry_id, title, category, content, file_path, content_hash, subfolder)
+            )
+        row = cursor.fetchone()
+        entry_db_id = row[0]
 
-    # Insert into local database with task fields, subfolder, and content_hash
-    if task_status:
-        cursor = db.execute(
-            """
-            INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, task_status, due_date, content_hash, subfolder, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING id
-            """,
-            (entry_id, title, category, content, file_path, task_status, due_date, content_hash, subfolder)
-        )
-    else:
-        cursor = db.execute(
-            """
-            INSERT INTO knowledge_entries
-            (entry_id, title, category, content, file_path, source_transcript, content_hash, subfolder, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'mcp-claude', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING id
-            """,
-            (entry_id, title, category, content, file_path, content_hash, subfolder)
-        )
-    row = cursor.fetchone()
-    entry_db_id = row[0]
-    commit_and_checkpoint(db)
+        # Now push to GitHub - if this fails, we'll rollback the DB insert
+        try:
+            create_file(
+                repo=repo,
+                path=file_path,
+                content=full_content,
+                message=f'Create note via MCP: {title}',
+                token=token
+            )
+        except Exception as github_err:
+            # GitHub failed - rollback the database insert
+            logger.error(f"GitHub create failed for {entry_id}, rolling back DB: {github_err}")
+            db.rollback()
+            return {"error": f"Failed to create file in GitHub: {str(github_err)}"}
+
+        # Both succeeded - commit the database
+        commit_and_checkpoint(db)
+
+    except Exception as db_err:
+        logger.error(f"Database insert failed for {entry_id}: {db_err}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"error": f"Failed to create note in database: {str(db_err)}"}
 
     # Generate embedding for the new entry using integer database ID
     _generate_embedding_for_entry(entry_db_id, entry_id, content)
@@ -2268,9 +2335,12 @@ def tool_update_note(args: dict) -> dict:
     - Requires less context (only the strings to find and replace)
     - Is more precise and auditable
     - Reduces risk of accidentally changing other content
+
+    If the file doesn't exist in GitHub (sync mismatch), this will auto-repair
+    by creating the file from the database content.
     """
     from .rag.database import get_user_categories
-    from .rag.github_service import commit_file, get_file_content
+    from .rag.github_service import commit_file, create_file, get_file_content
 
     entry_id = args.get('entry_id', '').strip()
     new_title = args.get('title', '').strip() if args.get('title') else None
@@ -2360,6 +2430,7 @@ def tool_update_note(args: dict) -> dict:
     repo = get_user_library_repo(user_id)
 
     try:
+        file_missing_in_github = False
         current_content = get_file_content(repo, file_path, token)
         if current_content:
             # Parse existing frontmatter
@@ -2389,12 +2460,15 @@ def tool_update_note(args: dict) -> dict:
             else:
                 full_content = content
         else:
-            # File doesn't exist in GitHub, build new frontmatter
+            # File doesn't exist in GitHub - this is a sync mismatch
+            # Auto-repair by creating the file from database content
+            file_missing_in_github = True
+            logger.warning(f"Sync mismatch detected: {entry_id} exists in DB but not in GitHub at {file_path}. Auto-repairing.")
             timestamp = datetime.utcnow().isoformat() + 'Z'
             slug = generate_slug(title)
             content_hash = compute_content_hash(content)
             full_content = f"""---
-id: library.{category}.{slug}
+id: {entry_id}
 title: "{title}"
 category: {category}
 created: {timestamp}
@@ -2406,14 +2480,24 @@ key_phrases: []
 
 {content}"""
 
-        # Commit to GitHub
-        commit_file(
-            repo=repo,
-            path=file_path,
-            content=full_content,
-            message=f'Update note via MCP: {title}',
-            token=token
-        )
+        # Commit to GitHub (or create if file was missing)
+        if file_missing_in_github:
+            # Auto-repair: create the missing file
+            create_file(
+                repo=repo,
+                path=file_path,
+                content=full_content,
+                message=f'Repair sync: recreate note via MCP: {title}',
+                token=token
+            )
+        else:
+            commit_file(
+                repo=repo,
+                path=file_path,
+                content=full_content,
+                message=f'Update note via MCP: {title}',
+                token=token
+            )
 
         # Update local database (include content_hash if content changed)
         if new_content_hash:
@@ -2465,6 +2549,11 @@ key_phrases: []
             response["edit_mode"] = "diff"
         elif content_changed:
             response["edit_mode"] = "full_replacement"
+
+        # Indicate if sync was repaired
+        if file_missing_in_github:
+            response["sync_repaired"] = True
+            response["message"] = "File was missing in GitHub and has been recreated from database content."
 
         return response
 
@@ -3150,9 +3239,28 @@ def tool_rename_note(args: dict) -> dict:
     try:
         # Get current file content from GitHub
         current_content = get_file_content(repo, old_file_path, token)
+        sync_repaired = False
 
         if not current_content:
-            return {"error": f"File not found in GitHub: {old_file_path}"}
+            # File doesn't exist in GitHub - sync mismatch detected
+            # Auto-repair using database content
+            logger.warning(f"Sync mismatch detected: {entry_id} exists in DB but not in GitHub at {old_file_path}. Auto-repairing during rename.")
+            sync_repaired = True
+            # Build content from database
+            timestamp = datetime.utcnow().isoformat() + 'Z'
+            content_hash_value = content_hash or compute_content_hash(content)
+            current_content = f"""---
+id: {entry_id}
+title: "{old_title}"
+category: {category}
+created: {timestamp}
+content_hash: {content_hash_value}
+source: mcp-claude
+domain_tags: []
+key_phrases: []
+---
+
+{content}"""
 
         # Update frontmatter with new title and entry_id
         if current_content.startswith('---'):
@@ -3203,8 +3311,8 @@ def tool_rename_note(args: dict) -> dict:
                 token=token
             )
 
-        # Delete old file (only if path changed)
-        if old_file_path != new_file_path:
+        # Delete old file (only if path changed and file existed in GitHub)
+        if old_file_path != new_file_path and not sync_repaired:
             try:
                 delete_file(
                     repo=repo,
@@ -3257,9 +3365,9 @@ def tool_rename_note(args: dict) -> dict:
         except Exception as emb_err:
             logger.warning(f"Failed to regenerate embedding: {emb_err}")
 
-        logger.info(f"MCP renamed note: {entry_id} → {new_entry_id} ('{old_title}' → '{new_title}')")
+        logger.info(f"MCP renamed note: {entry_id} → {new_entry_id} ('{old_title}' → '{new_title}')" + (" [sync repaired]" if sync_repaired else ""))
 
-        return {
+        response = {
             "success": True,
             "old_entry_id": entry_id,
             "new_entry_id": new_entry_id,
@@ -3268,6 +3376,12 @@ def tool_rename_note(args: dict) -> dict:
             "old_file_path": old_file_path,
             "new_file_path": new_file_path
         }
+
+        if sync_repaired:
+            response["sync_repaired"] = True
+            response["message"] = "File was missing in GitHub and has been recreated from database content during rename."
+
+        return response
 
     except Exception as e:
         logger.error(f"Failed to rename note: {e}")
@@ -4117,6 +4231,280 @@ def tool_check_connection(args: dict) -> dict:
     except Exception as e:
         result["database"]["note_count"] = "error"
         result["database"]["note_count_error"] = str(e)
+
+    return result
+
+
+# ============ Sync State Tools ============
+
+def tool_verify_sync_state(args: dict) -> dict:
+    """Check consistency between database entries and GitHub files.
+
+    Identifies notes that exist in the database but are missing from GitHub
+    (orphaned DB entries) which can cause update/rename operations to fail.
+    """
+    from .rag.github_service import file_exists
+
+    category = args.get('category', '').strip().lower() if args.get('category') else None
+    limit = min(int(args.get('limit', 100)), 500)
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    # Get entries from database
+    if category:
+        entries = db.execute(
+            """
+            SELECT entry_id, title, category, file_path, content_hash
+            FROM knowledge_entries
+            WHERE category = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (category, limit)
+        ).fetchall()
+    else:
+        entries = db.execute(
+            """
+            SELECT entry_id, title, category, file_path, content_hash
+            FROM knowledge_entries
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+
+    # Check each entry against GitHub
+    orphaned_db_entries = []
+    healthy_entries = []
+    errors = []
+
+    for entry in entries:
+        entry_id = entry['entry_id']
+        file_path = entry['file_path']
+
+        try:
+            exists = file_exists(repo, file_path, token)
+            if exists:
+                healthy_entries.append({
+                    "entry_id": entry_id,
+                    "title": entry['title'],
+                    "file_path": file_path
+                })
+            else:
+                orphaned_db_entries.append({
+                    "entry_id": entry_id,
+                    "title": entry['title'],
+                    "category": entry['category'],
+                    "file_path": file_path,
+                    "issue": "File missing in GitHub - database entry exists but GitHub file does not"
+                })
+        except Exception as e:
+            errors.append({
+                "entry_id": entry_id,
+                "file_path": file_path,
+                "error": str(e)
+            })
+
+    result = {
+        "total_checked": len(entries),
+        "healthy_count": len(healthy_entries),
+        "orphaned_db_count": len(orphaned_db_entries),
+        "error_count": len(errors),
+        "sync_status": "healthy" if len(orphaned_db_entries) == 0 else "mismatch_detected"
+    }
+
+    if orphaned_db_entries:
+        result["orphaned_db_entries"] = orphaned_db_entries
+        result["recommendation"] = "Use repair_sync_state to recreate missing GitHub files from database content."
+
+    if errors:
+        result["errors"] = errors
+
+    return result
+
+
+def tool_repair_sync_state(args: dict) -> dict:
+    """Repair sync mismatches by recreating missing GitHub files from database content.
+
+    For entries that exist in the database but are missing from GitHub,
+    this recreates the GitHub file using the content stored in the database.
+    """
+    from .rag.github_service import create_file, file_exists
+
+    entry_ids = args.get('entry_ids', [])
+    limit = min(int(args.get('limit', 10)), 50)
+    dry_run = args.get('dry_run', False)
+
+    db = get_db()
+    user_id = g.mcp_user.get('user_id') if hasattr(g, 'mcp_user') else None
+
+    # Get user's installation token
+    from .auth import get_user_installation_token
+    from .core import get_user_library_repo
+
+    token = get_user_installation_token(user_id, 'library') if user_id else None
+    if not token:
+        return {"error": "GitHub authorization required. Please re-authenticate."}
+
+    repo = get_user_library_repo(user_id)
+
+    # Get entries to repair
+    if entry_ids:
+        # Repair specific entries
+        placeholders = ','.join('?' * len(entry_ids))
+        entries = db.execute(
+            f"""
+            SELECT id, entry_id, title, category, content, file_path, subfolder, content_hash, task_status, due_date
+            FROM knowledge_entries
+            WHERE entry_id IN ({placeholders})
+            """,
+            entry_ids
+        ).fetchall()
+    else:
+        # Find orphaned entries (exist in DB but not in GitHub)
+        all_entries = db.execute(
+            """
+            SELECT id, entry_id, title, category, content, file_path, subfolder, content_hash, task_status, due_date
+            FROM knowledge_entries
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit * 5,)  # Check more than limit to find orphaned ones
+        ).fetchall()
+
+        # Filter to only orphaned entries
+        entries = []
+        for entry in all_entries:
+            if len(entries) >= limit:
+                break
+            try:
+                if not file_exists(repo, entry['file_path'], token):
+                    entries.append(entry)
+            except Exception:
+                # If we can't check, skip it
+                pass
+
+    repaired = []
+    skipped = []
+    errors = []
+
+    for entry in entries:
+        entry_id = entry['entry_id']
+        file_path = entry['file_path']
+        title = entry['title']
+        category = entry['category']
+        content = entry['content']
+        content_hash = entry['content_hash'] or compute_content_hash(content)
+        subfolder = entry['subfolder']
+        task_status = entry['task_status']
+        due_date = entry['due_date']
+
+        # Check if file actually exists in GitHub
+        try:
+            exists = file_exists(repo, file_path, token)
+            if exists:
+                skipped.append({
+                    "entry_id": entry_id,
+                    "file_path": file_path,
+                    "reason": "File already exists in GitHub - no repair needed"
+                })
+                continue
+        except Exception as e:
+            errors.append({
+                "entry_id": entry_id,
+                "file_path": file_path,
+                "error": f"Failed to check file existence: {str(e)}"
+            })
+            continue
+
+        if dry_run:
+            repaired.append({
+                "entry_id": entry_id,
+                "title": title,
+                "file_path": file_path,
+                "action": "would_create",
+                "dry_run": True
+            })
+            continue
+
+        # Build the file content with frontmatter
+        timestamp = datetime.utcnow().isoformat() + 'Z'
+        frontmatter_lines = [
+            '---',
+            f'id: {entry_id}',
+            f'title: "{title}"',
+            f'category: {category}',
+            f'created: {timestamp}',
+            f'content_hash: {content_hash}',
+            'source: mcp-repair',
+            'domain_tags: []',
+            'key_phrases: []',
+        ]
+
+        if subfolder:
+            frontmatter_lines.append(f'subfolder: {subfolder}')
+        if task_status:
+            frontmatter_lines.append(f'task_status: {task_status}')
+        if due_date:
+            frontmatter_lines.append(f'due_date: {due_date}')
+
+        frontmatter_lines.append('---')
+        frontmatter_lines.append('')
+        frontmatter = '\n'.join(frontmatter_lines)
+        full_content = frontmatter + content
+
+        # Create the file in GitHub
+        try:
+            create_file(
+                repo=repo,
+                path=file_path,
+                content=full_content,
+                message=f'Repair sync: recreate note {title}',
+                token=token
+            )
+            repaired.append({
+                "entry_id": entry_id,
+                "title": title,
+                "file_path": file_path,
+                "action": "created"
+            })
+            logger.info(f"Repaired sync for {entry_id}: created {file_path}")
+        except Exception as e:
+            errors.append({
+                "entry_id": entry_id,
+                "file_path": file_path,
+                "error": f"Failed to create file: {str(e)}"
+            })
+
+    result = {
+        "dry_run": dry_run,
+        "repaired_count": len(repaired),
+        "skipped_count": len(skipped),
+        "error_count": len(errors)
+    }
+
+    if repaired:
+        result["repaired"] = repaired
+    if skipped:
+        result["skipped"] = skipped
+    if errors:
+        result["errors"] = errors
+
+    if dry_run and repaired:
+        result["message"] = f"Dry run complete. {len(repaired)} entries would be repaired. Run with dry_run=false to apply changes."
+    elif repaired:
+        result["message"] = f"Successfully repaired {len(repaired)} entries by creating missing GitHub files."
 
     return result
 
