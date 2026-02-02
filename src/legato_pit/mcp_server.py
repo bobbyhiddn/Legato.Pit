@@ -889,102 +889,6 @@ TOOLS = [
             },
             "required": ["name", "display_name"]
         }
-    },
-    {
-        "name": "download_note",
-        "description": "Download a single note from the library to a local filesystem path. Writes the note content directly to a file, making it available for local operations like compilation, processing, or editing. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "entry_id": {
-                    "type": "string",
-                    "description": "The entry ID (e.g., 'library.concept.my-note') - most reliable lookup"
-                },
-                "file_path": {
-                    "type": "string",
-                    "description": "Alternative: path in the library (e.g., 'concepts/2026-01-10-my-note.md')"
-                },
-                "destination": {
-                    "type": "string",
-                    "description": "Local filesystem path to write the file to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapter1.md')"
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from output (default: false)",
-                    "default": False
-                }
-            },
-            "required": ["destination"]
-        }
-    },
-    {
-        "name": "download_notes",
-        "description": "Bulk download notes from a category/subfolder to a local directory. Efficiently downloads multiple notes in a single operation for compilation, processing, or batch operations. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Category to download from (e.g., 'concept', 'epiphany')"
-                },
-                "subfolder": {
-                    "type": "string",
-                    "description": "Optional: Specific subfolder within the category (e.g., 'chapters', 'research')"
-                },
-                "destination_dir": {
-                    "type": "string",
-                    "description": "Local directory to write files to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapters/')"
-                },
-                "pattern": {
-                    "type": "string",
-                    "description": "Optional: Glob pattern to filter notes by filename (e.g., '*chapter*', '2026-01-*')"
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from output files (default: false)",
-                    "default": False
-                },
-                "flatten": {
-                    "type": "boolean",
-                    "description": "Put all files in destination root vs. preserving subfolder structure (default: true)",
-                    "default": True
-                }
-            },
-            "required": ["category", "destination_dir"]
-        }
-    },
-    {
-        "name": "download_notes_batch",
-        "description": "Download specific notes by entry ID to specified destinations. Useful when you need specific notes from different categories or with custom destination paths. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "notes": {
-                    "type": "array",
-                    "description": "Array of notes to download, each with entry_id and destination path",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "entry_id": {
-                                "type": "string",
-                                "description": "The entry ID of the note to download"
-                            },
-                            "destination": {
-                                "type": "string",
-                                "description": "Local filesystem path. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/ch01.md')"
-                            }
-                        },
-                        "required": ["entry_id", "destination"]
-                    }
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from all output files (default: false)",
-                    "default": False
-                }
-            },
-            "required": ["notes"]
-        }
     }
 ]
 
@@ -1028,9 +932,6 @@ def handle_tool_call(params: dict) -> dict:
         'upload_asset': tool_upload_asset,
         'upload_markdown_as_note': tool_upload_markdown_as_note,
         'create_category': tool_create_category,
-        'download_note': tool_download_note,
-        'download_notes': tool_download_notes,
-        'download_notes_batch': tool_download_notes_batch,
     }
 
     handler = tool_handlers.get(name)
