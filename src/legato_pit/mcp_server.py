@@ -855,7 +855,7 @@ TOOLS = [
     },
     {
         "name": "download_note",
-        "description": "Download a single note from the library to a local filesystem path. Writes the note content directly to a file, making it available for local operations like compilation, processing, or editing.",
+        "description": "Download a single note from the library to a local filesystem path. Writes the note content directly to a file, making it available for local operations like compilation, processing, or editing. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -869,7 +869,7 @@ TOOLS = [
                 },
                 "destination": {
                     "type": "string",
-                    "description": "Local filesystem path to write the file to (e.g., '/home/user/output/chapter1.md')"
+                    "description": "Local filesystem path to write the file to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapter1.md')"
                 },
                 "strip_frontmatter": {
                     "type": "boolean",
@@ -882,7 +882,7 @@ TOOLS = [
     },
     {
         "name": "download_notes",
-        "description": "Bulk download notes from a category/subfolder to a local directory. Efficiently downloads multiple notes in a single operation for compilation, processing, or batch operations.",
+        "description": "Bulk download notes from a category/subfolder to a local directory. Efficiently downloads multiple notes in a single operation for compilation, processing, or batch operations. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -896,7 +896,7 @@ TOOLS = [
                 },
                 "destination_dir": {
                     "type": "string",
-                    "description": "Local directory to write files to (will be created if it doesn't exist)"
+                    "description": "Local directory to write files to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapters/')"
                 },
                 "pattern": {
                     "type": "string",
@@ -918,7 +918,7 @@ TOOLS = [
     },
     {
         "name": "download_notes_batch",
-        "description": "Download specific notes by entry ID to specified destinations. Useful when you need specific notes from different categories or with custom destination paths.",
+        "description": "Download specific notes by entry ID to specified destinations. Useful when you need specific notes from different categories or with custom destination paths. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -934,7 +934,7 @@ TOOLS = [
                             },
                             "destination": {
                                 "type": "string",
-                                "description": "Local filesystem path to write this note to"
+                                "description": "Local filesystem path. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/ch01.md')"
                             }
                         },
                         "required": ["entry_id", "destination"]
