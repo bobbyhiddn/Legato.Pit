@@ -337,6 +337,43 @@ TOOLS = [
         }
     },
     {
+        "name": "get_notes",
+        "description": "Get the full content of multiple notes. Fetch by specific entry_ids, or by category/subfolder with optional pattern filtering. Returns note content directly - does NOT write to filesystem. Use this instead of download_notes when you need content in memory.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Array of entry IDs to fetch (e.g., ['kb-abc123', 'kb-def456']). If provided, category/subfolder are ignored."
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category to fetch notes from (ignored if entry_ids provided)"
+                },
+                "subfolder": {
+                    "type": "string",
+                    "description": "Subfolder within category (requires category)"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern to filter filenames (e.g., '*.md', 'project-*')"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum notes to return (default: 50, max: 100)",
+                    "default": 50
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": "Include full note content (default: true). Set false to get metadata only.",
+                    "default": True
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "list_recent_notes",
         "description": "List the most recently created notes in the library.",
         "inputSchema": {
@@ -967,6 +1004,7 @@ def handle_tool_call(params: dict) -> dict:
         'create_note': tool_create_note,
         'list_categories': tool_list_categories,
         'get_note': tool_get_note,
+        'get_notes': tool_get_notes,
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
         'update_note': tool_update_note,
@@ -1466,6 +1504,135 @@ def tool_get_note(args: dict) -> dict:
         "due_date": entry['due_date'],
         "lookup_method": lookup_method
     }
+
+
+def tool_get_notes(args: dict) -> dict:
+    """Get full content of multiple notes by entry_ids or category/subfolder."""
+    import fnmatch
+
+    entry_ids = args.get('entry_ids', [])
+    category = args.get('category', '').strip() if args.get('category') else None
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+    pattern = args.get('pattern', '').strip() if args.get('pattern') else None
+    limit = min(args.get('limit', 50), 100)  # Cap at 100
+    include_content = args.get('include_content', True)
+
+    db = get_db()
+    notes = []
+
+    if entry_ids:
+        # Fetch specific notes by entry_id
+        if not isinstance(entry_ids, list):
+            return {"error": "entry_ids must be an array"}
+
+        if len(entry_ids) > 100:
+            return {"error": "Maximum 100 entry_ids per request"}
+
+        # Batch query for efficiency
+        placeholders = ','.join(['?' for _ in entry_ids])
+        rows = db.execute(
+            f"""
+            SELECT entry_id, title, category, content, file_path, subfolder,
+                   created_at, updated_at, task_status, due_date
+            FROM knowledge_entries
+            WHERE entry_id IN ({placeholders})
+            """,
+            entry_ids
+        ).fetchall()
+
+        # Create lookup for ordering
+        results_map = {r['entry_id']: r for r in rows}
+
+        # Return in requested order, noting any not found
+        not_found = []
+        for eid in entry_ids:
+            if eid in results_map:
+                row = results_map[eid]
+                note = {
+                    "entry_id": row['entry_id'],
+                    "title": row['title'],
+                    "category": row['category'],
+                    "file_path": row['file_path'],
+                    "subfolder": row['subfolder'],
+                    "created_at": row['created_at'],
+                    "updated_at": row['updated_at'],
+                    "task_status": row['task_status'],
+                    "due_date": row['due_date'],
+                }
+                if include_content:
+                    note["content"] = row['content']
+                notes.append(note)
+            else:
+                not_found.append(eid)
+
+        return {
+            "notes": notes,
+            "count": len(notes),
+            "not_found": not_found if not_found else None,
+            "lookup_method": "entry_ids"
+        }
+
+    elif category:
+        # Fetch by category/subfolder
+        if subfolder:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, category, content, file_path, subfolder,
+                       created_at, updated_at, task_status, due_date
+                FROM knowledge_entries
+                WHERE category = ? AND subfolder = ?
+                ORDER BY file_path ASC
+                """,
+                (category, subfolder)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, category, content, file_path, subfolder,
+                       created_at, updated_at, task_status, due_date
+                FROM knowledge_entries
+                WHERE category = ?
+                ORDER BY file_path ASC
+                """,
+                (category,)
+            ).fetchall()
+
+        # Apply pattern filter if provided
+        for row in rows:
+            if pattern:
+                filename = row['file_path'].split('/')[-1] if row['file_path'] else ''
+                if not fnmatch.fnmatch(filename, pattern):
+                    continue
+
+            note = {
+                "entry_id": row['entry_id'],
+                "title": row['title'],
+                "category": row['category'],
+                "file_path": row['file_path'],
+                "subfolder": row['subfolder'],
+                "created_at": row['created_at'],
+                "updated_at": row['updated_at'],
+                "task_status": row['task_status'],
+                "due_date": row['due_date'],
+            }
+            if include_content:
+                note["content"] = row['content']
+            notes.append(note)
+
+            if len(notes) >= limit:
+                break
+
+        return {
+            "notes": notes,
+            "count": len(notes),
+            "category": category,
+            "subfolder": subfolder,
+            "pattern": pattern,
+            "lookup_method": "category"
+        }
+
+    else:
+        return {"error": "Either entry_ids or category is required"}
 
 
 def tool_list_recent_notes(args: dict) -> dict:
