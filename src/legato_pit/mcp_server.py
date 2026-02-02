@@ -374,6 +374,66 @@ TOOLS = [
         }
     },
     {
+        "name": "append_to_note",
+        "description": "Append content to an existing note. Useful for journals, logs, or incrementally building up notes without fetching and replacing the entire content.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to append to"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to append to the note"
+                },
+                "separator": {
+                    "type": "string",
+                    "description": "Separator between existing content and new content (default: '\\n\\n')",
+                    "default": "\n\n"
+                }
+            },
+            "required": ["entry_id", "content"]
+        }
+    },
+    {
+        "name": "get_related_notes",
+        "description": "Find notes semantically similar to a given note using embeddings. Great for discovering related content, research, and exploration.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to find related notes for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of related notes to return (default: 10, max: 25)",
+                    "default": 10
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional: filter results to a specific category"
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": "Include full content of related notes (default: false, returns snippets)",
+                    "default": False
+                }
+            },
+            "required": ["entry_id"]
+        }
+    },
+    {
+        "name": "get_library_stats",
+        "description": "Get statistics about the library: note counts by category, total notes, recent activity, and more. Useful for understanding what's available before diving in.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "list_recent_notes",
         "description": "List the most recently created notes in the library.",
         "inputSchema": {
@@ -909,6 +969,9 @@ def handle_tool_call(params: dict) -> dict:
         'list_categories': tool_list_categories,
         'get_note': tool_get_note,
         'get_notes': tool_get_notes,
+        'append_to_note': tool_append_to_note,
+        'get_related_notes': tool_get_related_notes,
+        'get_library_stats': tool_get_library_stats,
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
         'update_note': tool_update_note,
@@ -1534,6 +1597,262 @@ def tool_get_notes(args: dict) -> dict:
 
     else:
         return {"error": "Either entry_ids or category is required"}
+
+
+def tool_append_to_note(args: dict) -> dict:
+    """Append content to an existing note."""
+    from .rag.github_service import commit_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    append_content = args.get('content', '')
+    separator = args.get('separator', '\n\n')
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+    if not append_content:
+        return {"error": "content is required"}
+
+    db = get_db()
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Build new content
+    existing_content = entry['content'] or ''
+    new_content = existing_content + separator + append_content
+
+    # Get current file from GitHub to preserve frontmatter
+    try:
+        github_content = get_file_content(entry['file_path'])
+        if github_content:
+            # Find where body starts (after frontmatter)
+            if github_content.startswith('---'):
+                end_fm = github_content.find('---', 3)
+                if end_fm != -1:
+                    frontmatter = github_content[:end_fm + 3]
+                    full_content = frontmatter + '\n\n' + new_content
+                else:
+                    full_content = new_content
+            else:
+                full_content = new_content
+        else:
+            full_content = new_content
+    except Exception:
+        # Fallback: just use the content without frontmatter preservation
+        full_content = new_content
+
+    # Commit to GitHub
+    try:
+        commit_file(
+            entry['file_path'],
+            full_content,
+            f"Append to {entry['title']}"
+        )
+    except Exception as e:
+        return {"error": f"Failed to update GitHub: {str(e)}"}
+
+    # Update database
+    db.execute(
+        """
+        UPDATE knowledge_entries
+        SET content = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE entry_id = ?
+        """,
+        (new_content, entry_id)
+    )
+    db.commit()
+
+    # Regenerate embedding
+    try:
+        _generate_embedding_for_entry(entry['id'], entry_id, new_content)
+    except Exception as emb_err:
+        logger.warning(f"Failed to regenerate embedding for {entry_id}: {emb_err}")
+
+    return {
+        "success": True,
+        "entry_id": entry_id,
+        "title": entry['title'],
+        "appended_length": len(append_content),
+        "new_total_length": len(new_content)
+    }
+
+
+def tool_get_related_notes(args: dict) -> dict:
+    """Find notes semantically similar to a given note."""
+    entry_id = args.get('entry_id', '').strip()
+    limit = min(args.get('limit', 10), 25)  # Cap at 25
+    category = args.get('category', '').strip() if args.get('category') else None
+    include_content = args.get('include_content', False)
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    db = get_db()
+
+    # Get the source note
+    entry = db.execute(
+        """
+        SELECT entry_id, title, category, content
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Use embedding service to find similar notes
+    service = get_embedding_service()
+    if not service:
+        return {"error": "Embedding service not available. OPENAI_API_KEY may not be configured."}
+
+    try:
+        # Use the note's title + content snippet as the query
+        query_text = entry['title'] + " " + (entry['content'][:1000] if entry['content'] else "")
+
+        search_result = service.hybrid_search(
+            query=query_text,
+            entry_type='knowledge',
+            limit=limit + 1,  # +1 to exclude self
+            include_low_confidence=False,
+        )
+
+        related = []
+        for r in search_result.get('results', []):
+            # Skip the source note itself
+            if r['entry_id'] == entry_id:
+                continue
+
+            # Filter by category if specified
+            if category and r.get('category') != category:
+                continue
+
+            note = {
+                "entry_id": r['entry_id'],
+                "title": r['title'],
+                "category": r.get('category'),
+                "similarity": round(r.get('similarity', 0), 3),
+            }
+
+            if include_content:
+                note["content"] = r.get('content')
+            else:
+                # Include a snippet
+                content = r.get('content', '')
+                note["snippet"] = (content[:300] + '...') if len(content) > 300 else content
+
+            related.append(note)
+
+            if len(related) >= limit:
+                break
+
+        return {
+            "source_note": {
+                "entry_id": entry['entry_id'],
+                "title": entry['title'],
+                "category": entry['category']
+            },
+            "related_notes": related,
+            "count": len(related)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to find related notes: {e}", exc_info=True)
+        return {"error": f"Search failed: {str(e)}"}
+
+
+def tool_get_library_stats(args: dict) -> dict:
+    """Get statistics about the library."""
+    db = get_db()
+
+    # Total notes
+    total = db.execute("SELECT COUNT(*) as count FROM knowledge_entries").fetchone()['count']
+
+    # Notes by category
+    by_category = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
+    # Notes by task status
+    by_task_status = db.execute(
+        """
+        SELECT task_status, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+        GROUP BY task_status
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
+    # Recent activity (notes created/updated in last 7 days)
+    recent_created = db.execute(
+        """
+        SELECT COUNT(*) as count
+        FROM knowledge_entries
+        WHERE created_at >= datetime('now', '-7 days')
+        """
+    ).fetchone()['count']
+
+    recent_updated = db.execute(
+        """
+        SELECT COUNT(*) as count
+        FROM knowledge_entries
+        WHERE updated_at >= datetime('now', '-7 days')
+          AND updated_at != created_at
+        """
+    ).fetchone()['count']
+
+    # Most recent note
+    most_recent = db.execute(
+        """
+        SELECT entry_id, title, category, created_at
+        FROM knowledge_entries
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+    # Subfolder count
+    subfolder_count = db.execute(
+        """
+        SELECT COUNT(DISTINCT subfolder) as count
+        FROM knowledge_entries
+        WHERE subfolder IS NOT NULL AND subfolder != ''
+        """
+    ).fetchone()['count']
+
+    return {
+        "total_notes": total,
+        "by_category": [{"category": r['category'], "count": r['count']} for r in by_category],
+        "by_task_status": [{"status": r['task_status'], "count": r['count']} for r in by_task_status] if by_task_status else None,
+        "subfolder_count": subfolder_count,
+        "recent_activity": {
+            "created_last_7_days": recent_created,
+            "updated_last_7_days": recent_updated
+        },
+        "most_recent_note": {
+            "entry_id": most_recent['entry_id'],
+            "title": most_recent['title'],
+            "category": most_recent['category'],
+            "created_at": most_recent['created_at']
+        } if most_recent else None
+    }
 
 
 def tool_list_recent_notes(args: dict) -> dict:
