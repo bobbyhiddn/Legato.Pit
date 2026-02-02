@@ -337,6 +337,103 @@ TOOLS = [
         }
     },
     {
+        "name": "get_notes",
+        "description": "Get the full content of multiple notes. Fetch by specific entry_ids, or by category/subfolder with optional pattern filtering. Returns note content directly - does NOT write to filesystem. Use this instead of download_notes when you need content in memory.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Array of entry IDs to fetch (e.g., ['kb-abc123', 'kb-def456']). If provided, category/subfolder are ignored."
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category to fetch notes from (ignored if entry_ids provided)"
+                },
+                "subfolder": {
+                    "type": "string",
+                    "description": "Subfolder within category (requires category)"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern to filter filenames (e.g., '*.md', 'project-*')"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum notes to return (default: 50, max: 100)",
+                    "default": 50
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": "Include full note content (default: true). Set false to get metadata only.",
+                    "default": True
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "append_to_note",
+        "description": "Append content to an existing note. Useful for journals, logs, or incrementally building up notes without fetching and replacing the entire content.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to append to"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to append to the note"
+                },
+                "separator": {
+                    "type": "string",
+                    "description": "Separator between existing content and new content (default: '\\n\\n')",
+                    "default": "\n\n"
+                }
+            },
+            "required": ["entry_id", "content"]
+        }
+    },
+    {
+        "name": "get_related_notes",
+        "description": "Find notes semantically similar to a given note using embeddings. Great for discovering related content, research, and exploration.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "The entry ID of the note to find related notes for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of related notes to return (default: 10, max: 25)",
+                    "default": 10
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional: filter results to a specific category"
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": "Include full content of related notes (default: false, returns snippets)",
+                    "default": False
+                }
+            },
+            "required": ["entry_id"]
+        }
+    },
+    {
+        "name": "get_library_stats",
+        "description": "Get statistics about the library: note counts by category, total notes, recent activity, and more. Useful for understanding what's available before diving in.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "list_recent_notes",
         "description": "List the most recently created notes in the library.",
         "inputSchema": {
@@ -852,102 +949,6 @@ TOOLS = [
             },
             "required": ["name", "display_name"]
         }
-    },
-    {
-        "name": "download_note",
-        "description": "Download a single note from the library to a local filesystem path. Writes the note content directly to a file, making it available for local operations like compilation, processing, or editing. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "entry_id": {
-                    "type": "string",
-                    "description": "The entry ID (e.g., 'library.concept.my-note') - most reliable lookup"
-                },
-                "file_path": {
-                    "type": "string",
-                    "description": "Alternative: path in the library (e.g., 'concepts/2026-01-10-my-note.md')"
-                },
-                "destination": {
-                    "type": "string",
-                    "description": "Local filesystem path to write the file to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapter1.md')"
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from output (default: false)",
-                    "default": False
-                }
-            },
-            "required": ["destination"]
-        }
-    },
-    {
-        "name": "download_notes",
-        "description": "Bulk download notes from a category/subfolder to a local directory. Efficiently downloads multiple notes in a single operation for compilation, processing, or batch operations. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Category to download from (e.g., 'concept', 'epiphany')"
-                },
-                "subfolder": {
-                    "type": "string",
-                    "description": "Optional: Specific subfolder within the category (e.g., 'chapters', 'research')"
-                },
-                "destination_dir": {
-                    "type": "string",
-                    "description": "Local directory to write files to. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/chapters/')"
-                },
-                "pattern": {
-                    "type": "string",
-                    "description": "Optional: Glob pattern to filter notes by filename (e.g., '*chapter*', '2026-01-*')"
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from output files (default: false)",
-                    "default": False
-                },
-                "flatten": {
-                    "type": "boolean",
-                    "description": "Put all files in destination root vs. preserving subfolder structure (default: true)",
-                    "default": True
-                }
-            },
-            "required": ["category", "destination_dir"]
-        }
-    },
-    {
-        "name": "download_notes_batch",
-        "description": "Download specific notes by entry ID to specified destinations. Useful when you need specific notes from different categories or with custom destination paths. IMPORTANT: Use /mnt/user-data/outputs/ as the destination base path for files to be accessible in Claude's environment.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "notes": {
-                    "type": "array",
-                    "description": "Array of notes to download, each with entry_id and destination path",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "entry_id": {
-                                "type": "string",
-                                "description": "The entry ID of the note to download"
-                            },
-                            "destination": {
-                                "type": "string",
-                                "description": "Local filesystem path. Use /mnt/user-data/outputs/ base path (e.g., '/mnt/user-data/outputs/ch01.md')"
-                            }
-                        },
-                        "required": ["entry_id", "destination"]
-                    }
-                },
-                "strip_frontmatter": {
-                    "type": "boolean",
-                    "description": "Remove YAML frontmatter from all output files (default: false)",
-                    "default": False
-                }
-            },
-            "required": ["notes"]
-        }
     }
 ]
 
@@ -967,6 +968,10 @@ def handle_tool_call(params: dict) -> dict:
         'create_note': tool_create_note,
         'list_categories': tool_list_categories,
         'get_note': tool_get_note,
+        'get_notes': tool_get_notes,
+        'append_to_note': tool_append_to_note,
+        'get_related_notes': tool_get_related_notes,
+        'get_library_stats': tool_get_library_stats,
         'list_recent_notes': tool_list_recent_notes,
         'spawn_agent': tool_spawn_agent,
         'update_note': tool_update_note,
@@ -990,9 +995,6 @@ def handle_tool_call(params: dict) -> dict:
         'upload_asset': tool_upload_asset,
         'upload_markdown_as_note': tool_upload_markdown_as_note,
         'create_category': tool_create_category,
-        'download_note': tool_download_note,
-        'download_notes': tool_download_notes,
-        'download_notes_batch': tool_download_notes_batch,
     }
 
     handler = tool_handlers.get(name)
@@ -1465,6 +1467,391 @@ def tool_get_note(args: dict) -> dict:
         "task_status": entry['task_status'],
         "due_date": entry['due_date'],
         "lookup_method": lookup_method
+    }
+
+
+def tool_get_notes(args: dict) -> dict:
+    """Get full content of multiple notes by entry_ids or category/subfolder."""
+    import fnmatch
+
+    entry_ids = args.get('entry_ids', [])
+    category = args.get('category', '').strip() if args.get('category') else None
+    subfolder = args.get('subfolder', '').strip() if args.get('subfolder') else None
+    pattern = args.get('pattern', '').strip() if args.get('pattern') else None
+    limit = min(args.get('limit', 50), 100)  # Cap at 100
+    include_content = args.get('include_content', True)
+
+    db = get_db()
+    notes = []
+
+    if entry_ids:
+        # Fetch specific notes by entry_id
+        if not isinstance(entry_ids, list):
+            return {"error": "entry_ids must be an array"}
+
+        if len(entry_ids) > 100:
+            return {"error": "Maximum 100 entry_ids per request"}
+
+        # Batch query for efficiency
+        placeholders = ','.join(['?' for _ in entry_ids])
+        rows = db.execute(
+            f"""
+            SELECT entry_id, title, category, content, file_path, subfolder,
+                   created_at, updated_at, task_status, due_date
+            FROM knowledge_entries
+            WHERE entry_id IN ({placeholders})
+            """,
+            entry_ids
+        ).fetchall()
+
+        # Create lookup for ordering
+        results_map = {r['entry_id']: r for r in rows}
+
+        # Return in requested order, noting any not found
+        not_found = []
+        for eid in entry_ids:
+            if eid in results_map:
+                row = results_map[eid]
+                note = {
+                    "entry_id": row['entry_id'],
+                    "title": row['title'],
+                    "category": row['category'],
+                    "file_path": row['file_path'],
+                    "subfolder": row['subfolder'],
+                    "created_at": row['created_at'],
+                    "updated_at": row['updated_at'],
+                    "task_status": row['task_status'],
+                    "due_date": row['due_date'],
+                }
+                if include_content:
+                    note["content"] = row['content']
+                notes.append(note)
+            else:
+                not_found.append(eid)
+
+        return {
+            "notes": notes,
+            "count": len(notes),
+            "not_found": not_found if not_found else None,
+            "lookup_method": "entry_ids"
+        }
+
+    elif category:
+        # Fetch by category/subfolder
+        if subfolder:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, category, content, file_path, subfolder,
+                       created_at, updated_at, task_status, due_date
+                FROM knowledge_entries
+                WHERE category = ? AND subfolder = ?
+                ORDER BY file_path ASC
+                """,
+                (category, subfolder)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT entry_id, title, category, content, file_path, subfolder,
+                       created_at, updated_at, task_status, due_date
+                FROM knowledge_entries
+                WHERE category = ?
+                ORDER BY file_path ASC
+                """,
+                (category,)
+            ).fetchall()
+
+        # Apply pattern filter if provided
+        for row in rows:
+            if pattern:
+                filename = row['file_path'].split('/')[-1] if row['file_path'] else ''
+                if not fnmatch.fnmatch(filename, pattern):
+                    continue
+
+            note = {
+                "entry_id": row['entry_id'],
+                "title": row['title'],
+                "category": row['category'],
+                "file_path": row['file_path'],
+                "subfolder": row['subfolder'],
+                "created_at": row['created_at'],
+                "updated_at": row['updated_at'],
+                "task_status": row['task_status'],
+                "due_date": row['due_date'],
+            }
+            if include_content:
+                note["content"] = row['content']
+            notes.append(note)
+
+            if len(notes) >= limit:
+                break
+
+        return {
+            "notes": notes,
+            "count": len(notes),
+            "category": category,
+            "subfolder": subfolder,
+            "pattern": pattern,
+            "lookup_method": "category"
+        }
+
+    else:
+        return {"error": "Either entry_ids or category is required"}
+
+
+def tool_append_to_note(args: dict) -> dict:
+    """Append content to an existing note."""
+    from .rag.github_service import commit_file, get_file_content
+
+    entry_id = args.get('entry_id', '').strip()
+    append_content = args.get('content', '')
+    separator = args.get('separator', '\n\n')
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+    if not append_content:
+        return {"error": "content is required"}
+
+    db = get_db()
+
+    # Get existing note
+    entry = db.execute(
+        """
+        SELECT id, entry_id, title, category, content, file_path
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Build new content
+    existing_content = entry['content'] or ''
+    new_content = existing_content + separator + append_content
+
+    # Get current file from GitHub to preserve frontmatter
+    try:
+        github_content = get_file_content(entry['file_path'])
+        if github_content:
+            # Find where body starts (after frontmatter)
+            if github_content.startswith('---'):
+                end_fm = github_content.find('---', 3)
+                if end_fm != -1:
+                    frontmatter = github_content[:end_fm + 3]
+                    full_content = frontmatter + '\n\n' + new_content
+                else:
+                    full_content = new_content
+            else:
+                full_content = new_content
+        else:
+            full_content = new_content
+    except Exception:
+        # Fallback: just use the content without frontmatter preservation
+        full_content = new_content
+
+    # Commit to GitHub
+    try:
+        commit_file(
+            entry['file_path'],
+            full_content,
+            f"Append to {entry['title']}"
+        )
+    except Exception as e:
+        return {"error": f"Failed to update GitHub: {str(e)}"}
+
+    # Update database
+    db.execute(
+        """
+        UPDATE knowledge_entries
+        SET content = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE entry_id = ?
+        """,
+        (new_content, entry_id)
+    )
+    db.commit()
+
+    # Regenerate embedding
+    try:
+        _generate_embedding_for_entry(entry['id'], entry_id, new_content)
+    except Exception as emb_err:
+        logger.warning(f"Failed to regenerate embedding for {entry_id}: {emb_err}")
+
+    return {
+        "success": True,
+        "entry_id": entry_id,
+        "title": entry['title'],
+        "appended_length": len(append_content),
+        "new_total_length": len(new_content)
+    }
+
+
+def tool_get_related_notes(args: dict) -> dict:
+    """Find notes semantically similar to a given note."""
+    entry_id = args.get('entry_id', '').strip()
+    limit = min(args.get('limit', 10), 25)  # Cap at 25
+    category = args.get('category', '').strip() if args.get('category') else None
+    include_content = args.get('include_content', False)
+
+    if not entry_id:
+        return {"error": "entry_id is required"}
+
+    db = get_db()
+
+    # Get the source note
+    entry = db.execute(
+        """
+        SELECT entry_id, title, category, content
+        FROM knowledge_entries
+        WHERE entry_id = ?
+        """,
+        (entry_id,)
+    ).fetchone()
+
+    if not entry:
+        return {"error": f"Note not found: {entry_id}"}
+
+    # Use embedding service to find similar notes
+    service = get_embedding_service()
+    if not service:
+        return {"error": "Embedding service not available. OPENAI_API_KEY may not be configured."}
+
+    try:
+        # Use the note's title + content snippet as the query
+        query_text = entry['title'] + " " + (entry['content'][:1000] if entry['content'] else "")
+
+        search_result = service.hybrid_search(
+            query=query_text,
+            entry_type='knowledge',
+            limit=limit + 1,  # +1 to exclude self
+            include_low_confidence=False,
+        )
+
+        related = []
+        for r in search_result.get('results', []):
+            # Skip the source note itself
+            if r['entry_id'] == entry_id:
+                continue
+
+            # Filter by category if specified
+            if category and r.get('category') != category:
+                continue
+
+            note = {
+                "entry_id": r['entry_id'],
+                "title": r['title'],
+                "category": r.get('category'),
+                "similarity": round(r.get('similarity', 0), 3),
+            }
+
+            if include_content:
+                note["content"] = r.get('content')
+            else:
+                # Include a snippet
+                content = r.get('content', '')
+                note["snippet"] = (content[:300] + '...') if len(content) > 300 else content
+
+            related.append(note)
+
+            if len(related) >= limit:
+                break
+
+        return {
+            "source_note": {
+                "entry_id": entry['entry_id'],
+                "title": entry['title'],
+                "category": entry['category']
+            },
+            "related_notes": related,
+            "count": len(related)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to find related notes: {e}", exc_info=True)
+        return {"error": f"Search failed: {str(e)}"}
+
+
+def tool_get_library_stats(args: dict) -> dict:
+    """Get statistics about the library."""
+    db = get_db()
+
+    # Total notes
+    total = db.execute("SELECT COUNT(*) as count FROM knowledge_entries").fetchone()['count']
+
+    # Notes by category
+    by_category = db.execute(
+        """
+        SELECT category, COUNT(*) as count
+        FROM knowledge_entries
+        GROUP BY category
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
+    # Notes by task status
+    by_task_status = db.execute(
+        """
+        SELECT task_status, COUNT(*) as count
+        FROM knowledge_entries
+        WHERE task_status IS NOT NULL
+        GROUP BY task_status
+        ORDER BY count DESC
+        """
+    ).fetchall()
+
+    # Recent activity (notes created/updated in last 7 days)
+    recent_created = db.execute(
+        """
+        SELECT COUNT(*) as count
+        FROM knowledge_entries
+        WHERE created_at >= datetime('now', '-7 days')
+        """
+    ).fetchone()['count']
+
+    recent_updated = db.execute(
+        """
+        SELECT COUNT(*) as count
+        FROM knowledge_entries
+        WHERE updated_at >= datetime('now', '-7 days')
+          AND updated_at != created_at
+        """
+    ).fetchone()['count']
+
+    # Most recent note
+    most_recent = db.execute(
+        """
+        SELECT entry_id, title, category, created_at
+        FROM knowledge_entries
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+    # Subfolder count
+    subfolder_count = db.execute(
+        """
+        SELECT COUNT(DISTINCT subfolder) as count
+        FROM knowledge_entries
+        WHERE subfolder IS NOT NULL AND subfolder != ''
+        """
+    ).fetchone()['count']
+
+    return {
+        "total_notes": total,
+        "by_category": [{"category": r['category'], "count": r['count']} for r in by_category],
+        "by_task_status": [{"status": r['task_status'], "count": r['count']} for r in by_task_status] if by_task_status else None,
+        "subfolder_count": subfolder_count,
+        "recent_activity": {
+            "created_last_7_days": recent_created,
+            "updated_last_7_days": recent_updated
+        },
+        "most_recent_note": {
+            "entry_id": most_recent['entry_id'],
+            "title": most_recent['title'],
+            "category": most_recent['category'],
+            "created_at": most_recent['created_at']
+        } if most_recent else None
     }
 
 
