@@ -1939,6 +1939,9 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
     logger.info(f"Found user row: has_oauth={bool(row['oauth_token_encrypted'])}, expires_at={row['oauth_token_expires_at']}, has_refresh={bool(row['refresh_token_encrypted'])}")
 
     # Check if stored token is still valid
+    # GitHub OAuth tokens have an 8-hour window. Refresh at 80% (6.4h)
+    # to avoid using tokens right at expiry boundary.
+    PRE_EXPIRY_BUFFER_SECONDS = 5760  # 1.6 hours (80% of 8h = 6.4h)
     if row['oauth_token_encrypted']:
         expires_at = row['oauth_token_expires_at']
         is_expired = False
@@ -1947,7 +1950,11 @@ def _get_user_oauth_token(user_id: str) -> Optional[str]:
             try:
                 expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
                 now = datetime.now(expiry.tzinfo) if expiry.tzinfo else datetime.now()
-                is_expired = expiry < now
+                from datetime import timedelta
+                # Treat token as "expired" when within the pre-expiry buffer
+                is_expired = expiry < (now + timedelta(seconds=PRE_EXPIRY_BUFFER_SECONDS))
+                if is_expired and expiry > now:
+                    logger.info(f"Token for user {user_id} within pre-expiry buffer ({PRE_EXPIRY_BUFFER_SECONDS}s), proactively refreshing")
             except (ValueError, TypeError):
                 is_expired = False  # Can't determine, try anyway
 

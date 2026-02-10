@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 
 from flask import (
     Flask, render_template, jsonify, request, redirect,
@@ -40,6 +41,36 @@ def get_last_activity() -> float:
         return _last_activity_time
 
 
+def _get_or_create_persistent_key(env_var: str, filename: str) -> str:
+    """Get secret key from env var, or generate and persist one.
+
+    On Fly.io, /data is a persistent volume that survives restarts.
+    This prevents SECRET_KEY regeneration from invalidating all sessions
+    and JWTs on every cold start.
+    """
+    key = os.getenv(env_var)
+    if key:
+        return key
+    # Try to read from persistent storage (survives Fly.io restarts)
+    key_path = Path(os.getenv('DATA_DIR', '/data')) / filename
+    if key_path.exists():
+        try:
+            stored = key_path.read_text().strip()
+            if stored:
+                return stored
+        except OSError:
+            pass
+    # First run — generate and persist
+    key = secrets.token_hex(32)
+    try:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_text(key)
+        logger.info(f"Generated and persisted {env_var} to {key_path}")
+    except OSError:
+        logger.warning(f"Could not persist {env_var} to {key_path} — using ephemeral key")
+    return key
+
+
 def create_app():
     """Application factory."""
     static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
@@ -58,7 +89,7 @@ def create_app():
     # Security configuration
     is_production = os.getenv('FLASK_ENV') == 'production'
     app.config.update(
-        SECRET_KEY=os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32)),
+        SECRET_KEY=_get_or_create_persistent_key('FLASK_SECRET_KEY', '.flask_secret_key'),
         SESSION_COOKIE_SECURE=is_production,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
@@ -312,10 +343,31 @@ def create_app():
 
             logger.info("Chord sync loop ended (no activity for 15 min)")
 
-        # Start both threads
+        def oauth_cleanup_task():
+            """Periodic cleanup of expired OAuth auth codes and sessions.
+
+            Runs every 10 minutes regardless of user activity — OAuth
+            cleanup is a housekeeping task that shouldn't depend on
+            whether anyone is using the dashboard.
+            """
+            OAUTH_CLEANUP_INTERVAL = 600  # 10 minutes
+            time.sleep(30)  # Wait for app to initialize
+
+            while True:
+                try:
+                    with app.app_context():
+                        from .oauth_server import cleanup_expired_oauth_sessions
+                        cleanup_expired_oauth_sessions()
+                except Exception as e:
+                    logger.error(f"OAuth cleanup task failed: {e}")
+
+                time.sleep(OAUTH_CLEANUP_INTERVAL)
+
+        # Start all threads
         threading.Thread(target=library_sync_task, daemon=True).start()
         threading.Thread(target=agent_sync_task, daemon=True).start()
-        logger.info("Started background sync threads (library and chord detection every 60s while active)")
+        threading.Thread(target=oauth_cleanup_task, daemon=True).start()
+        logger.info("Started background sync threads (library, chord detection, OAuth cleanup)")
 
     start_background_sync()
 

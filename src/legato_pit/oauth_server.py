@@ -91,8 +91,13 @@ def _get_or_create_user_id(github_id: int, github_login: str) -> str:
 
 
 def get_jwt_secret() -> str:
-    """Get JWT secret key, falling back to Flask secret if not set."""
-    return os.environ.get('JWT_SECRET_KEY') or current_app.config.get('SECRET_KEY')
+    """Get JWT secret key, falling back to Flask secret if not set.
+
+    Uses persistent key storage so JWTs survive Fly.io restarts.
+    Falls back to Flask's SECRET_KEY which is also now persisted.
+    """
+    from .core import _get_or_create_persistent_key
+    return _get_or_create_persistent_key('JWT_SECRET_KEY', '.jwt_secret_key')
 
 
 def get_base_url() -> str:
@@ -841,9 +846,12 @@ def require_mcp_auth(f):
 
         if not claims:
             logger.warning(f"MCP request with invalid token: {token[:20]}...")
+            base = get_base_url()
             return jsonify({
                 "error": "invalid_token",
-                "error_description": "The access token is invalid or expired."
+                "error_description": "The access token is invalid or expired.",
+                "token_endpoint": f"{base}/oauth/token",
+                "grant_types_supported": ["authorization_code", "refresh_token"]
             }), 401, {
                 'WWW-Authenticate': 'Bearer realm="legato-pit", error="invalid_token"'
             }
@@ -869,3 +877,38 @@ def require_mcp_auth(f):
 
         return f(*args, **kwargs)
     return decorated
+
+
+# ============ OAuth Session Cleanup ============
+
+def cleanup_expired_oauth_sessions():
+    """Remove expired auth codes and refresh tokens.
+
+    Auth codes have a 5-minute TTL and are single-use, but orphans
+    can accumulate if the token exchange step is never completed.
+
+    Refresh tokens have a 30-day TTL.
+
+    This should be called periodically from a background thread.
+    """
+    try:
+        db = get_db()
+        now = datetime.utcnow().isoformat()
+
+        # Clean up expired auth codes (5-min TTL)
+        expired_codes = db.execute(
+            "DELETE FROM oauth_auth_codes WHERE expires_at < ?", (now,)
+        ).rowcount
+
+        # Clean up expired refresh tokens (30-day TTL)
+        expired_sessions = db.execute(
+            "DELETE FROM oauth_sessions WHERE expires_at < ?", (now,)
+        ).rowcount
+
+        if expired_codes > 0 or expired_sessions > 0:
+            db.commit()
+            logger.info(f"OAuth cleanup: removed {expired_codes} expired auth codes, {expired_sessions} expired sessions")
+        else:
+            db.commit()
+    except Exception as e:
+        logger.error(f"OAuth session cleanup failed: {e}")
