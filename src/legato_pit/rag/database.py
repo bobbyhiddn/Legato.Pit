@@ -305,6 +305,16 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
         "UPDATE user_categories SET color = '#6366f1' WHERE color IS NULL OR color = ''"
     )
 
+    # Migration: Fix incorrectly pluralized folder_names (e.g., 'prisms' → 'prism')
+    # Old code naively added 's' to category names for folder_name. DB defaults use singular.
+    # Fix: where folder_name == name + 's', set folder_name = name (singular).
+    cursor.execute("""
+        UPDATE user_categories
+        SET folder_name = name, updated_at = CURRENT_TIMESTAMP
+        WHERE folder_name = name || 's'
+          AND NOT (name LIKE '%s')
+    """)
+
     # OAuth clients (Dynamic Client Registration - RFC 7591)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS oauth_clients (
