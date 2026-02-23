@@ -1345,9 +1345,8 @@ def tool_create_note(args: dict) -> dict:
 
     # Build file path (including subfolder if provided)
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
-    # Fallback folder name - avoid double 's' for names ending in 's'
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    # Fallback folder name - use category name directly (singular, matching DB defaults)
+    folder = category_folders.get(category, category)
     if subfolder:
         file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
     else:
@@ -2682,8 +2681,7 @@ key_phrases: []
 
         # Build new file path
         filename = old_file_path.split('/')[-1]  # Preserve the date-slug filename
-        default_new_folder = new_category if new_category.endswith('s') else f'{new_category}s'
-        new_folder = category_folders.get(new_category, default_new_folder)
+        new_folder = category_folders.get(new_category, new_category)
         new_file_path = f'{new_folder}/{filename}'
 
         # Create new file in GitHub
@@ -2774,8 +2772,7 @@ def tool_create_subfolder(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
     subfolder_path = f'{folder}/{subfolder_name}/.gitkeep'
 
     # Get user's installation token
@@ -2835,8 +2832,7 @@ def tool_list_subfolders(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
 
     # Get user's installation token
     from .auth import get_user_installation_token
@@ -2921,7 +2917,7 @@ def tool_list_subfolder_contents(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    folder = category_folders.get(category, category if category.endswith('s') else f'{category}s')
+    folder = category_folders.get(category, category)
 
     try:
         # Query notes in this category/subfolder combination
@@ -3015,8 +3011,7 @@ def tool_move_to_subfolder(args: dict) -> dict:
     from .rag.database import get_user_categories
     categories = get_user_categories(db, user_id or 'default')
     category_folders = {c['name']: c['folder_name'] for c in categories}
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
 
     # Build new file path
     filename = old_file_path.split('/')[-1]  # Preserve the filename
@@ -3207,8 +3202,7 @@ def tool_rename_note(args: dict) -> dict:
     from .rag.database import get_user_categories
     categories = get_user_categories(db, user_id or 'default')
     category_folders = {c['name']: c['folder_name'] for c in categories}
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
 
     # Build new file path - preserve the date prefix from old filename
     old_filename = old_file_path.split('/')[-1]
@@ -3435,8 +3429,7 @@ def tool_rename_subfolder(args: dict) -> dict:
             "error": f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         }
 
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
     old_subfolder_path = f'{folder}/{old_name}'
     new_subfolder_path = f'{folder}/{new_name}'
 
@@ -4930,8 +4923,7 @@ def tool_upload_markdown_as_note(args: dict) -> dict:
     # Build file path
     slug = generate_slug(title)
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
-    default_folder = category if category.endswith('s') else f'{category}s'
-    folder = category_folders.get(category, default_folder)
+    folder = category_folders.get(category, category)
     if subfolder:
         file_path = f'{folder}/{subfolder}/{date_str}-{slug}.md'
     else:
@@ -5127,9 +5119,8 @@ def tool_create_category(args: dict) -> dict:
                 "reactivated": True,
             }
 
-    # Folder name convention: category name + 's' (matching categories.py)
-    # Avoid double 's' for names ending in 's' (e.g., 'ethics' -> 'ethics', not 'ethicss')
-    folder_name = name if name.endswith('s') else f"{name}s"
+    # Folder name convention: use category name directly (singular, matching DB defaults)
+    folder_name = name
 
     # Determine sort order (after existing categories)
     max_order = db.execute(

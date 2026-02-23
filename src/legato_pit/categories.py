@@ -137,9 +137,9 @@ def api_create_category():
     if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
         return jsonify({'error': 'color must be a valid hex color (e.g., #6366f1)'}), 400
 
-    # Default folder_name - avoid double 's' for names ending in 's'
+    # Default folder_name - use category name directly (singular, matching DB defaults)
     if not folder_name:
-        folder_name = name if name.endswith('s') else f"{name}s"
+        folder_name = name
 
     from flask import session
     from .auth import get_user_installation_token
@@ -232,7 +232,7 @@ def api_adopt_category():
 
     folder_name = data.get('folder_name', '').strip()
     if not folder_name:
-        folder_name = name if name.endswith('s') else f"{name}s"
+        folder_name = name  # Use category name directly (singular, matching DB defaults)
 
     description = data.get('description', '').strip()
     color = data.get('color', '#6366f1').strip()

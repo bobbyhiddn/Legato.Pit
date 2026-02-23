@@ -806,7 +806,7 @@ def _create_access_token(github_login: str, github_user_id: int, client_id: str,
         "client_id": client_id,
         "scope": scope,
         "iat": now,
-        "exp": now + timedelta(hours=1),
+        "exp": now + timedelta(hours=24),
         "iss": "legato-pit"
     }
 
