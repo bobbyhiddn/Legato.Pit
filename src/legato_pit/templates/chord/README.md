@@ -43,4 +43,4 @@ python -m src.main
 See [docs/architecture.md](./docs/architecture.md) for system design.
 
 ---
-*Created by [Legato](https://github.com/{{ org }}/Legato.Pit)*
+*Created by [Legate Studio](https://github.com/{{ org }}/Legato.Pit)*

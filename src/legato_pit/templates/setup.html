@@ -9,9 +9,9 @@
 
     {% if is_configured %}
     <h1>Settings</h1>
-    <p class="setup-subtitle">Manage your Legato configuration.</p>
+    <p class="setup-subtitle">Manage your Legate Studio configuration.</p>
     {% else %}
-    <h1>Welcome to Legato</h1>
+    <h1>Welcome to Legate Studio</h1>
     <p class="setup-subtitle">Set up your personal knowledge system in 2 steps.</p>
     {% endif %}
 
@@ -24,9 +24,9 @@
                 <div class="step-content">
                     <strong>Create your Library</strong>
                     <p>Click below to create a private Library repo from our template:</p>
-                    <a href="https://github.com/new?template_owner=bobbyhiddn&template_name=Legato.Library.Template&name=Legato.Library.{{ session.user.username }}&description=Personal%20knowledge%20library%20for%20Legato&visibility=private"
+                    <a href="https://github.com/new?template_owner=bobbyhiddn&template_name=Legate.Library.Template&name=Legate.Library.{{ session.user.username }}&description=Personal%20knowledge%20library%20for%20Legato&visibility=private"
                        target="_blank" class="btn btn-primary">
-                        Create Legato.Library.{{ session.user.username }}
+                        Create Legate.Library.{{ session.user.username }}
                     </a>
                 </div>
             </div>
@@ -34,7 +34,7 @@
             <div class="setup-step">
                 <span class="step-number">2</span>
                 <div class="step-content">
-                    <strong>Grant Legato access</strong>
+                    <strong>Grant Legate Studio access</strong>
                     <p>Install the GitHub App and select your Library repo (plus any repos tagged <code>legato-chord</code>):</p>
                     <a href="{{ url_for('auth.github_app_install') }}" class="btn btn-secondary">
                         Install GitHub App
@@ -51,8 +51,8 @@
                 <p>Already created your Library?</p>
                 <form method="post" action="{{ url_for('auth.setup_library') }}" class="library-manual-form">
                     <input type="text" name="repo_name"
-                           placeholder="Legato.Library.{{ session.user.username }}"
-                           value="Legato.Library.{{ session.user.username }}"
+                           placeholder="Legate.Library.{{ session.user.username }}"
+                           value="Legate.Library.{{ session.user.username }}"
                            class="library-input">
                     <button type="submit" class="btn btn-primary btn-sm">Connect Library</button>
                 </form>
@@ -183,7 +183,7 @@
             If you don't have Copilot, agent tasks will not execute.
         </p>
         <p class="help-text" style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-tertiary); font-style: italic;">
-            Legato-native agents coming soon.
+            Legate Studio-native agents coming soon.
         </p>
     </div>
     {% endif %}
@@ -197,7 +197,7 @@
                 <label for="library_repo_input">Library Repository</label>
                 <input type="hidden" name="repo_type" value="library">
                 <input type="text" name="repo_full_name" id="library_repo_input"
-                       placeholder="username/Legato.Library"
+                       placeholder="username/Legate.Library"
                        value="{{ library_repo.repo_full_name if library_repo else '' }}">
                 <select name="installation_id" id="library_installation">
                     <option value="">Select installation...</option>

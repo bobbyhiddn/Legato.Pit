@@ -331,11 +331,11 @@ def _store_installation(user_id: str, installation_id: int, installation_data: d
 
 
 def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
-    """Auto-detect and configure a Legato.Library repo.
+    """Auto-detect and configure a Legate.Library repo.
 
     Uses multiple strategies:
     1. Check repos already in GitHub App installation
-    2. Use OAuth token to search user's repos for Legato.Library pattern
+    2. Use OAuth token to search user's repos for Legate.Library pattern
     3. If found outside installation, auto-add it to the installation
 
     Args:
@@ -374,7 +374,7 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
                 repos = resp.json().get('repositories', [])
                 for repo in repos:
                     repo_name = repo['name']
-                    if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
+                    if repo_name == 'Legate.Library' or repo_name.startswith('Legate.Library.'):
                         repo_full_name = repo['full_name']
 
                         db.execute(
@@ -418,14 +418,14 @@ def _auto_detect_library(user_id: str, installations) -> Optional[dict]:
     github_login = user_row['github_login']
 
     try:
-        # Search for Legato.Library repos owned by user
+        # Search for Legate.Library repos owned by user
         headers = {
             'Authorization': f'Bearer {oauth_token}',
             'Accept': 'application/vnd.github+json'
         }
 
         # Try specific repo name first
-        for repo_name in [f'Legato.Library.{github_login}', 'Legato.Library']:
+        for repo_name in [f'Legate.Library.{github_login}', 'Legate.Library']:
             resp = requests.get(
                 f'https://api.github.com/repos/{github_login}/{repo_name}',
                 headers=headers,
@@ -699,7 +699,7 @@ def github_app_callback():
             return redirect(next_url or url_for('dashboard.index'))
         else:
             # First time user - redirect to setup (ignore next URL for new users)
-            flash(f'Welcome, {name or github_login}! Let\'s set up your Legato installation.', 'success')
+            flash(f'Welcome, {name or github_login}! Let\'s set up your Legate Studio installation.', 'success')
             return redirect(url_for('auth.setup'))
 
     except Exception as e:
@@ -792,9 +792,9 @@ def github_app_installed():
         detected = _auto_detect_library(user_id, installations)
         if detected:
             logger.info(f"Auto-detected Library repo after installation: {detected.get('repo_full_name')}")
-            flash(f'Successfully installed Legato on {account_login}! Library detected: {detected.get("repo_full_name")}', 'success')
+            flash(f'Successfully installed Legate Studio on {account_login}! Library detected: {detected.get("repo_full_name")}', 'success')
         else:
-            flash(f'Successfully installed Legato on {account_login}!', 'success')
+            flash(f'Successfully installed Legate Studio on {account_login}!', 'success')
 
         logger.info(f"Installation {installation_id} completed for user {user_id}")
 
@@ -973,7 +973,7 @@ def setup_debug():
         }
 
         # Check what repos we can see
-        for repo_name in [f'Legato.Library.{username}', 'Legato.Library']:
+        for repo_name in [f'Legate.Library.{username}', 'Legate.Library']:
             try:
                 resp = requests.get(
                     f'https://api.github.com/repos/{username}/{repo_name}',
@@ -1006,7 +1006,7 @@ def setup_debug():
 def setup_library():
     """Quick setup for Library repo.
 
-    Takes just the repo name (e.g., 'Legato.Library.username') and configures it.
+    Takes just the repo name (e.g., 'Legate.Library.username') and configures it.
     Uses the user's first installation.
     """
     if 'user' not in session:
@@ -1345,7 +1345,7 @@ def setup_disable_copilot():
 
 @auth_bp.route('/setup/create-library', methods=['POST'])
 def setup_create_library():
-    """Auto-create a Legato.Library repository for the user.
+    """Auto-create a Legate.Library repository for the user.
 
     Uses the user's first installation to create the Library repo.
     """
@@ -1392,7 +1392,7 @@ def setup_create_library():
         result = ensure_library_exists(token, org)
 
         if result.get('success'):
-            library_repo = f"{org}/Legato.Library"
+            library_repo = f"{org}/Legate.Library"
 
             # Auto-configure as Library repo
             db.execute(
@@ -1441,7 +1441,7 @@ def get_current_user() -> Optional[dict]:
 def trigger_user_library_sync(user_id: str, username: str) -> dict:
     """Trigger a Library sync for a specific user.
 
-    This syncs the user's Legato.Library to their personal database.
+    This syncs the user's Legate.Library to their personal database.
     Called after login in multi-tenant mode.
 
     Args:
@@ -1482,7 +1482,7 @@ def trigger_user_library_sync(user_id: str, username: str) -> dict:
                 library_repo = repo_row['repo_full_name']
             else:
                 # Fallback: try common patterns
-                library_repo = f"{username}/Legato.Library.{username}"
+                library_repo = f"{username}/Legate.Library.{username}"
                 logger.info(f"No configured Library for {username}, trying {library_repo}")
 
             # Set up embedding service
@@ -1656,7 +1656,7 @@ def _do_repair_user_repos(user_id: str, installation_id: int, db) -> bool:
         # Look for Library repo
         for repo in repos:
             repo_name = repo.get('name', '')
-            if repo_name == 'Legato.Library' or repo_name.startswith('Legato.Library.'):
+            if repo_name == 'Legate.Library' or repo_name.startswith('Legate.Library.'):
                 repo_full_name = repo['full_name']
                 logger.info(f"Repair: Found Library repo {repo_full_name} for user {user_id}")
 

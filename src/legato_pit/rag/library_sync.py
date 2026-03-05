@@ -1,7 +1,7 @@
 """
 Library Sync
 
-Synchronizes content from Legato.Library GitHub repository into the local SQLite database.
+Synchronizes content from Legate.Library GitHub repository into the local SQLite database.
 Supports both GitHub API fetching and local filesystem sync.
 """
 
@@ -233,7 +233,7 @@ def generate_entry_id(category: str, title: str, content_hash: str = None) -> st
 
 
 class LibrarySync:
-    """Synchronizes Legato.Library content to SQLite database."""
+    """Synchronizes Legate.Library content to SQLite database."""
 
     def __init__(self, db_conn, embedding_service=None):
         """Initialize the sync service.
@@ -247,7 +247,7 @@ class LibrarySync:
 
     def sync_from_github(
         self,
-        repo: str = "bobbyhiddn/Legato.Library",
+        repo: str = "bobbyhiddn/Legate.Library",
         token: Optional[str] = None,
         branch: str = "main",
     ) -> Dict:
@@ -630,7 +630,7 @@ class LibrarySync:
         """Sync content from local filesystem.
 
         Args:
-            library_path: Path to Legato.Library directory
+            library_path: Path to Legate.Library directory
 
         Returns:
             Dict with sync statistics
@@ -950,7 +950,7 @@ class LibrarySync:
 
     def sync_assets_from_github(
         self,
-        repo: str = "bobbyhiddn/Legato.Library",
+        repo: str = "bobbyhiddn/Legate.Library",
         token: Optional[str] = None,
         branch: str = "main",
     ) -> Dict:

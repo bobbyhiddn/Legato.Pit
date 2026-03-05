@@ -220,7 +220,7 @@ def normalize_category(category: str) -> str:
 # ============ Validation ============
 
 def validate_library(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     tenant_id: str = "default"
 ) -> ValidationReport:
@@ -379,7 +379,7 @@ def validate_library(
 # ============ Recovery Operations ============
 
 def fix_double_frontmatter(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     dry_run: bool = True
 ) -> RecoveryResult:
@@ -491,7 +491,7 @@ def fix_double_frontmatter(
 
 
 def normalize_ids(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     dry_run: bool = True,
     tenant_id: str = None
@@ -625,7 +625,7 @@ def normalize_ids(
 
 
 def rebuild_content_hashes(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     dry_run: bool = True
 ) -> RecoveryResult:
@@ -718,7 +718,7 @@ def rebuild_content_hashes(
 
 
 def sync_category_descriptions(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     dry_run: bool = True
 ) -> RecoveryResult:
@@ -804,7 +804,7 @@ sort_order: {cat['sort_order']}
 
 
 def rebuild_database_from_library(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
 ) -> RecoveryResult:
     """Rebuild the Pit database by re-syncing from Library.
@@ -845,7 +845,7 @@ def rebuild_database_from_library(
 
 
 def full_recovery(
-    repo: str = "bobbyhiddn/Legato.Library",
+    repo: str = "bobbyhiddn/Legate.Library",
     token: Optional[str] = None,
     dry_run: bool = True,
     tenant_id: str = None
@@ -913,7 +913,7 @@ def main():
         'validate', 'fix_frontmatter', 'normalize_ids',
         'rebuild_hashes', 'sync_categories', 'rebuild_database', 'full_recovery'
     ])
-    parser.add_argument('--repo', default='bobbyhiddn/Legato.Library')
+    parser.add_argument('--repo', default='bobbyhiddn/Legate.Library')
     parser.add_argument('--token', help='GitHub PAT (or set SYSTEM_PAT env var)')
     parser.add_argument('--tenant', help='Tenant ID for multi-tenant')
     parser.add_argument('--dry-run', action='store_true', help='Preview changes without applying')

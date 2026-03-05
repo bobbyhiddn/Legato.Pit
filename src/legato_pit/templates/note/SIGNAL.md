@@ -18,7 +18,7 @@
 
 - **Origin**: {{ source_entry_id }}
 - **Created**: {{ created_date }}
-- **Spawned by**: Legato
+- **Spawned by**: Legate Studio
 
 ---
-*This file is managed by Legato.*
+*This file is managed by Legate Studio.*

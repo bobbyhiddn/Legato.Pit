@@ -2,7 +2,7 @@
 Assets Blueprint - Library Asset Management
 
 Provides API for uploading, listing, and managing assets (images, files)
-that are stored in per-category assets folders in the Legato.Library repo.
+that are stored in per-category assets folders in the Legate.Library repo.
 
 Asset folder structure:
   category/

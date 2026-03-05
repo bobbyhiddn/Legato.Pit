@@ -109,7 +109,7 @@ EXTRACTOR_PROMPT = '''You are extracting structured knowledge artifacts from cla
 
 ## Your Task
 
-Given a classified KNOWLEDGE thread, produce a complete markdown artifact suitable for the Legato.Library.
+Given a classified KNOWLEDGE thread, produce a complete markdown artifact suitable for the Legate.Library.
 
 ## Artifact Structure
 

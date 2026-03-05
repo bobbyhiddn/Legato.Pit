@@ -27,4 +27,4 @@ python -m src.main
 ```
 
 ---
-*Created by [Legato](https://github.com/{{ org }}/Legato.Pit)*
+*Created by [Legate Studio](https://github.com/{{ org }}/Legato.Pit)*

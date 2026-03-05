@@ -19,7 +19,7 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 # Repository names
 REPOS = {
     'conduct': 'Legato.Conduct',
-    'library': 'Legato.Library',
+    'library': 'Legate.Library',
     'listen': 'Legato.Listen'
 }
 

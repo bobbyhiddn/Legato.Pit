@@ -150,8 +150,8 @@ def create_app():
         SYSTEM_PAT=os.getenv('SYSTEM_PAT'),  # Only needed for single-tenant
 
         # App metadata
-        APP_NAME='Legato.Pit',
-        APP_DESCRIPTION='Dashboard & Motif for LEGATO'
+        APP_NAME='Legate Studio',
+        APP_DESCRIPTION='Dashboard & Motif for Legate Studio'
     )
 
     # Rate limiting — binds the module-level limiter to this app.
@@ -248,7 +248,7 @@ def create_app():
         def library_sync_task():
             """Periodic library sync - runs every minute while user is active.
 
-            Syncs knowledge entries from Legato.Library GitHub repo to local DB.
+            Syncs knowledge entries from Legate.Library GitHub repo to local DB.
             Continues as long as there's been user activity within the last 15 minutes.
 
             NOTE: Only runs in single-tenant mode. Multi-tenant uses per-user sync on login.
@@ -819,7 +819,7 @@ def get_user_library_repo(user_id: str = None) -> str:
         user_id: User ID to look up. If None, uses current session user.
 
     Returns:
-        Full repo name (e.g., 'username/Legato.Library.username')
+        Full repo name (e.g., 'username/Legate.Library.username')
     """
     from flask import current_app
 
@@ -844,8 +844,8 @@ def get_user_library_repo(user_id: str = None) -> str:
 
     # Fallback: use default pattern
     if username:
-        return f"{username}/Legato.Library.{username}"
+        return f"{username}/Legate.Library.{username}"
 
     # Last resort: env var or hardcoded default
     import os
-    return os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legato.Library')
+    return os.environ.get('LIBRARY_REPO', 'bobbyhiddn/Legate.Library')

@@ -1136,7 +1136,7 @@ def api_sync():
     Request body (optional):
     {
         "source": "github",  # or "filesystem"
-        "repo": "bobbyhiddn/Legato.Library",
+        "repo": "bobbyhiddn/Legate.Library",
         "path": "/path/to/library"  # for filesystem
     }
 
@@ -1171,7 +1171,7 @@ def api_sync():
         sync = LibrarySync(db, embedding_service)
 
         if source == 'filesystem':
-            path = data.get('path', '/mnt/d/Code/Legato/Legato.Library')
+            path = data.get('path', '/mnt/d/Code/Legato/Legate.Library')
             stats = sync.sync_from_filesystem(path)
         else:
             from .core import get_user_library_repo
@@ -2735,7 +2735,7 @@ def api_delete_entry(entry_id: str):
     """Delete an entry from the Library.
 
     Removes from:
-    - GitHub (Legato.Library repo)
+    - GitHub (Legate.Library repo)
     - Local database
     - Embeddings
 

@@ -807,7 +807,7 @@ def _create_access_token(github_login: str, github_user_id: int, client_id: str,
         "scope": scope,
         "iat": now,
         "exp": now + timedelta(hours=24),
-        "iss": "legato-pit"
+        "iss": "legate-studio"
     }
 
     return jwt.encode(payload, get_jwt_secret(), algorithm="HS256")
@@ -838,7 +838,7 @@ def require_mcp_auth(f):
                 "error": "unauthorized",
                 "error_description": "Access token is missing. Include Authorization: Bearer <token> header."
             }), 401, {
-                'WWW-Authenticate': 'Bearer realm="legato-pit"'
+                'WWW-Authenticate': 'Bearer realm="legate-studio"'
             }
 
         token = auth_header[7:]

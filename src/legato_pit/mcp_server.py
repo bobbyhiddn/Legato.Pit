@@ -248,7 +248,7 @@ def handle_initialize(params: dict) -> dict:
             "prompts": {"listChanged": False}
         },
         "serverInfo": {
-            "name": "legato-pit",
+            "name": "legate-studio",
             "version": "1.0.0"
         }
     }
@@ -270,7 +270,7 @@ def handle_ping(params: dict) -> dict:
 TOOLS = [
     {
         "name": "search_library",
-        "description": "Hybrid search across Legato library notes using AI embeddings AND keyword matching. Returns results in two buckets: high-confidence matches and 'maybe related' lower-confidence matches.",
+        "description": "Hybrid search across Legate Studio library notes using AI embeddings AND keyword matching. Returns results in two buckets: high-confidence matches and 'maybe related' lower-confidence matches.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -303,7 +303,7 @@ TOOLS = [
     },
     {
         "name": "create_note",
-        "description": "Create a new note in the Legato library. The note will be saved to GitHub and indexed for search. To create a task, include task_status (pending/in_progress/blocked/done) and optionally due_date.",
+        "description": "Create a new note in the Legate Studio library. The note will be saved to GitHub and indexed for search. To create a task, include task_status (pending/in_progress/blocked/done) and optionally due_date.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -338,7 +338,7 @@ TOOLS = [
     },
     {
         "name": "list_categories",
-        "description": "List all available note categories in the Legato library.",
+        "description": "List all available note categories in the Legate Studio library.",
         "inputSchema": {
             "type": "object",
             "properties": {},
@@ -520,7 +520,7 @@ TOOLS = [
     },
     {
         "name": "update_note",
-        "description": "Update an existing note in the Legato library. Supports two content update modes: (1) full replacement via 'content' parameter, or (2) precise diff-based edits via 'edits' parameter. The 'edits' mode is preferred for targeted changes as it requires less context and is more precise. Cannot use both 'content' and 'edits' together.",
+        "description": "Update an existing note in the Legate Studio library. Supports two content update modes: (1) full replacement via 'content' parameter, or (2) precise diff-based edits via 'edits' parameter. The 'edits' mode is preferred for targeted changes as it requires less context and is more precise. Cannot use both 'content' and 'edits' together.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -695,7 +695,7 @@ TOOLS = [
     },
     {
         "name": "delete_note",
-        "description": "Delete a note from the Legato library. Removes from both GitHub and local database. Requires confirmation flag.",
+        "description": "Delete a note from the Legate Studio library. Removes from both GitHub and local database. Requires confirmation flag.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1041,7 +1041,7 @@ TOOLS = [
     },
     {
         "name": "create_category",
-        "description": "Create a new category in the Legato library. Categories organize notes by type/purpose. Creates the category folder in GitHub.",
+        "description": "Create a new category in the Legate Studio library. Categories organize notes by type/purpose. Creates the category folder in GitHub.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -2277,7 +2277,7 @@ def tool_spawn_agent(args: dict) -> dict:
             "project_type": project_type,
             "notes_linked": len(notes),
             "note_ids": [n['entry_id'] for n in notes],
-            "message": f"Project '{project_name}' queued for approval. Visit /agents in Legato Pit to approve."
+            "message": f"Project '{project_name}' queued for approval. Visit /agents in Legate Studio to approve."
         }
 
     except Exception as e:
@@ -4217,7 +4217,7 @@ def tool_check_connection(args: dict) -> dict:
             result["recommendations"].append("GitHub App token is invalid - the installation may have been removed. Re-install the GitHub App via the web interface.")
     else:
         result["github_app"]["library_configured"] = False
-        result["recommendations"].append(f"No library repo configured for user {user_id}. Complete GitHub App setup via the Legato web interface.")
+        result["recommendations"].append(f"No library repo configured for user {user_id}. Complete GitHub App setup via the Legate Studio web interface.")
 
         # Check if there's a user record at all
         user_record = auth_db.execute(
@@ -4240,7 +4240,7 @@ def tool_check_connection(args: dict) -> dict:
             result["database"]["anthropic_api_key_set"] = True
         else:
             result["database"]["anthropic_api_key_set"] = False
-            result["recommendations"].append("Anthropic API key not configured. Add it in Legato Settings to enable process_motif.")
+            result["recommendations"].append("Anthropic API key not configured. Add it in Legate Studio Settings to enable process_motif.")
     except Exception as e:
         result["database"]["anthropic_api_key_set"] = False
         result["database"]["api_key_error"] = str(e)
@@ -5080,7 +5080,7 @@ def tool_upload_markdown_as_note(args: dict) -> dict:
 
 
 def tool_create_category(args: dict) -> dict:
-    """Create a new category in the Legato library.
+    """Create a new category in the Legate Studio library.
 
     This is consistent with the categories.py web UI endpoint.
     Uses the same validation, folder naming conventions, and helper functions.
@@ -5529,7 +5529,7 @@ RESOURCES = [
     {
         "uri": "legato://library/stats",
         "name": "Library Statistics",
-        "description": "Overview of the Legato library - note counts, categories, etc.",
+        "description": "Overview of the Legate Studio library - note counts, categories, etc.",
         "mimeType": "application/json"
     }
 ]

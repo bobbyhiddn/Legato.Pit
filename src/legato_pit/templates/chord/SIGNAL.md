@@ -18,7 +18,7 @@
 
 - **Origin**: {{ source_entry_id }}
 - **Created**: {{ created_date }}
-- **Spawned by**: Legato
+- **Spawned by**: Legate Studio
 
 ## Phases
 
@@ -33,4 +33,4 @@
 Related knowledge entries and projects will be linked here as they're discovered.
 
 ---
-*This file is managed by Legato. Manual edits may be overwritten.*
+*This file is managed by Legate Studio. Manual edits may be overwritten.*

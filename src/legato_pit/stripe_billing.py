@@ -21,14 +21,14 @@ billing_bp = Blueprint('billing', __name__, url_prefix='/billing')
 # Stripe product configuration
 STRIPE_PRODUCTS = {
     'byok': {
-        'name': 'Legato BYOK',
+        'name': 'Legate Studio BYOK',
         'description': 'Bring your own API keys - full features',
         'price_cents': 99,
         'interval': 'month',
         'tier': 'byok'
     },
     'managed': {
-        'name': 'Legato Managed',
+        'name': 'Legate Studio Managed',
         'description': 'Platform API keys included - full features',
         'price_cents': 1000,
         'interval': 'month',

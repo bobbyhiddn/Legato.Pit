@@ -1,6 +1,6 @@
 # Copilot Instructions
 
-This project was created by Legato. Follow these guidelines when implementing.
+This project was created by Legate Studio. Follow these guidelines when implementing.
 
 ## Project Context
 
