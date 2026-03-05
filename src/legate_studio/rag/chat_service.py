@@ -2,7 +2,7 @@
 Chat Service
 
 Handles LLM interactions for RAG-enabled chat.
-Supports Claude and OpenAI with model selection.
+Supports Claude, OpenAI, and Google Gemini with model selection.
 """
 
 import logging
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class ChatProvider(Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
+    GEMINI = "gemini"
 
 
 class ChatService:
@@ -23,6 +24,7 @@ class ChatService:
     # Default models
     DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514"
     DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+    DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 
     def __init__(
         self,
@@ -40,6 +42,9 @@ class ChatService:
         if provider == ChatProvider.CLAUDE:
             self.model = model or self.DEFAULT_CLAUDE_MODEL
             self._init_claude()
+        elif provider == ChatProvider.GEMINI:
+            self.model = model or self.DEFAULT_GEMINI_MODEL
+            self._init_gemini()
         else:
             self.model = model or self.DEFAULT_OPENAI_MODEL
             self._init_openai()
@@ -66,6 +71,17 @@ class ChatService:
 
         self.client = openai.OpenAI(api_key=api_key)
 
+    def _init_gemini(self):
+        """Initialize Google Gemini client."""
+        import google.generativeai as genai
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+
+        genai.configure(api_key=api_key)
+        self.client = genai.GenerativeModel(self.model)
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -84,6 +100,8 @@ class ChatService:
         """
         if self.provider == ChatProvider.CLAUDE:
             return self._chat_claude(messages, max_tokens, temperature)
+        elif self.provider == ChatProvider.GEMINI:
+            return self._chat_gemini(messages, max_tokens, temperature)
         else:
             return self._chat_openai(messages, max_tokens, temperature)
 
@@ -173,6 +191,61 @@ class ChatService:
             logger.error(f"OpenAI chat failed: {e}")
             raise
 
+    def _chat_gemini(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        """Chat via Google Gemini API."""
+        import google.generativeai as genai
+
+        # Convert messages to Gemini format
+        # Gemini uses 'user' and 'model' roles, and system instruction is separate
+        system_parts = []
+        chat_history = []
+
+        for msg in messages:
+            if msg["role"] == "system":
+                system_parts.append(msg["content"])
+            elif msg["role"] == "assistant":
+                chat_history.append({"role": "model", "parts": [msg["content"]]})
+            else:
+                chat_history.append({"role": "user", "parts": [msg["content"]]})
+
+        try:
+            # Recreate model with system instruction if needed
+            model = genai.GenerativeModel(
+                self.model,
+                system_instruction=(
+                    "\n\n".join(system_parts) if system_parts else None
+                ),
+            )
+
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            # Use chat for multi-turn, or generate_content for single turn
+            if len(chat_history) == 1:
+                response = model.generate_content(
+                    chat_history[0]["parts"][0],
+                    generation_config=generation_config,
+                )
+            else:
+                chat = model.start_chat(history=chat_history[:-1])
+                response = chat.send_message(
+                    chat_history[-1]["parts"][0],
+                    generation_config=generation_config,
+                )
+
+            return response.text
+
+        except Exception as e:
+            logger.error(f"Gemini chat failed: {e}")
+            raise
+
     # Fallback Anthropic models if API fetch fails
     ANTHROPIC_MODELS_FALLBACK = [
         {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
@@ -182,17 +255,27 @@ class ChatService:
         {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus"},
     ]
 
+    # Fallback Gemini models if API fetch fails
+    GEMINI_MODELS_FALLBACK = [
+        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
+        {"id": "gemini-2.5-flash-preview-05-20", "name": "Gemini 2.5 Flash"},
+        {"id": "gemini-2.5-pro-preview-05-06", "name": "Gemini 2.5 Pro"},
+        {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+    ]
+
     @classmethod
     def get_available_models(cls, provider: ChatProvider) -> list[dict[str, str]]:
         """Get list of available models for a provider.
 
-        Fetches dynamically from API for both providers.
+        Fetches dynamically from API for all providers.
 
         Returns:
             List of dicts with 'id' and 'name' keys
         """
         if provider == ChatProvider.CLAUDE:
             return cls.fetch_anthropic_models()
+        elif provider == ChatProvider.GEMINI:
+            return cls.fetch_gemini_models()
         else:
             return cls.fetch_openai_models()
 
@@ -281,6 +364,39 @@ class ChatService:
             ]
 
     @classmethod
+    def fetch_gemini_models(cls) -> list[dict[str, str]]:
+        """Fetch available models from Google Gemini API."""
+        import google.generativeai as genai
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not set, returning fallback models")
+            return cls.GEMINI_MODELS_FALLBACK
+
+        try:
+            genai.configure(api_key=api_key)
+            models = []
+            for model in genai.list_models():
+                # Only include models that support generateContent (chat-capable)
+                if "generateContent" in model.supported_generation_methods:
+                    model_id = model.name.removeprefix("models/")
+                    display_name = model.display_name or model_id
+                    models.append({"id": model_id, "name": display_name})
+
+            # Sort by ID so the list is stable
+            models.sort(key=lambda x: x["id"])
+
+            if models:
+                logger.info(f"Fetched {len(models)} Gemini models")
+                return models
+            else:
+                return cls.GEMINI_MODELS_FALLBACK
+
+        except Exception as e:
+            logger.error(f"Failed to fetch Gemini models: {e}")
+            return cls.GEMINI_MODELS_FALLBACK
+
+    @classmethod
     def from_config(cls, config: dict) -> "ChatService":
         """Create a ChatService from configuration dict.
 
@@ -291,7 +407,14 @@ class ChatService:
             Configured ChatService instance
         """
         provider_str = config.get("provider", "claude").lower()
-        provider = ChatProvider.CLAUDE if provider_str == "claude" else ChatProvider.OPENAI
+
+        if provider_str == "gemini":
+            provider = ChatProvider.GEMINI
+        elif provider_str == "openai":
+            provider = ChatProvider.OPENAI
+        else:
+            provider = ChatProvider.CLAUDE
+
         model = config.get("model")
 
         return cls(provider=provider, model=model)
