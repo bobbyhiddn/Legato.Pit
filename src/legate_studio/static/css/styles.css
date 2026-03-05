@@ -53,40 +53,74 @@
 }
 
 /* ===== Light Theme — Warm Canvas ===== */
-@media (prefers-color-scheme: light) {
-    :root {
-        --bg-primary:   #faf7f2;    /* warm canvas */
-        --bg-secondary: #f0ebe3;    /* sidebar, nav */
-        --bg-tertiary:  #e8e2d8;    /* cards, inputs */
-        --bg-elevated:  #ffffff;    /* dropdowns, modals */
+/* Applied via JS: <html data-theme="light"> */
+[data-theme="light"] {
+    --bg-primary:   #faf7f2;    /* warm canvas */
+    --bg-secondary: #f0ebe3;    /* sidebar, nav */
+    --bg-tertiary:  #e8e2d8;    /* cards, inputs */
+    --bg-elevated:  #ffffff;    /* dropdowns, modals */
 
-        --border-color:  rgba(0, 0, 0, 0.08);
-        --border-subtle: rgba(0, 0, 0, 0.04);
-        --border-strong: rgba(0, 0, 0, 0.15);
+    --border-color:  rgba(0, 0, 0, 0.08);
+    --border-subtle: rgba(0, 0, 0, 0.04);
+    --border-strong: rgba(0, 0, 0, 0.15);
 
-        --text-primary:   #1a1a2e;   /* deep navy text */
-        --text-secondary: #4a4a5a;
-        --text-muted:     #8a8a96;
-        --text-tertiary:  #6a6a78;
+    --text-primary:   #1a1a2e;   /* deep navy text */
+    --text-secondary: #4a4a5a;
+    --text-muted:     #8a8a96;
+    --text-tertiary:  #6a6a78;
 
-        --accent-color: #1a1a2e;
+    --accent-color: #1a1a2e;
 
-        --hover-tint:  rgba(0, 0, 0, 0.04);
-        --active-tint: rgba(0, 0, 0, 0.06);
+    --hover-tint:  rgba(0, 0, 0, 0.04);
+    --active-tint: rgba(0, 0, 0, 0.06);
 
-        --accent-blue:   #4a4a5a;
-        --accent-purple: #6a6a78;
+    --accent-blue:   #4a4a5a;
+    --accent-purple: #6a6a78;
 
-        --card-bg: transparent;
-    }
+    --card-bg: transparent;
 }
 
 /* ===== Logo Light/Dark Awareness ===== */
-@media (prefers-color-scheme: light) {
-    .sidebar-logo,
-    .mobile-topbar .nav-brand img {
-        filter: invert(1);
-    }
+/* Logos swap via JS — dark logo shown in dark mode, light logo (inverted) in light mode */
+[data-theme="light"] .sidebar-logo,
+[data-theme="light"] .mobile-topbar .nav-brand img,
+[data-theme="light"] .login-logo {
+    filter: invert(1);
+}
+
+/* ===== Theme Toggle Button ===== */
+.theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    transition: border-color var(--transition), color var(--transition), background var(--transition);
+    flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+    background: var(--hover-tint);
+}
+
+.theme-toggle svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* Login page theme toggle — positioned top-right of page */
+.login-theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
 }
 
 /* ===== Reset & Base ===== */
@@ -219,6 +253,14 @@ img {
     padding: 0.625rem 0.875rem;
     border-top: 1px solid var(--border-color);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sidebar-footer .user-menu {
+    flex: 1;
+    min-width: 0;
 }
 
 /* Sidebar backdrop (mobile) */

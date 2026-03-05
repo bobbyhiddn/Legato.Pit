@@ -39,11 +39,7 @@
         border-radius: 12px;
     }
 
-    @media (prefers-color-scheme: light) {
-        .login-logo {
-            filter: invert(1);
-        }
-    }
+    /* Logo light mode handled by global [data-theme="light"] .login-logo rule in styles.css */
 
     .login-brand {
         text-align: center;
@@ -113,36 +109,34 @@
         text-align: center;
     }
 
-    /* Light mode overrides for login page — uses global CSS variables */
-    @media (prefers-color-scheme: light) {
-        .login-page {
-            background: var(--bg-primary);
-        }
-        .login-card {
-            background: var(--bg-elevated);
-            border-color: var(--border-color);
-        }
-        .login-brand h1 {
-            color: var(--text-primary);
-        }
-        .login-subtitle {
-            color: var(--text-secondary);
-        }
-        .btn-github-login {
-            color: var(--text-primary);
-            border-color: var(--border-color);
-        }
-        .btn-github-login:hover {
-            border-color: var(--border-strong);
-            background: var(--hover-tint);
-            color: var(--text-primary);
-        }
-        .login-footer {
-            color: var(--text-muted);
-        }
-        .login-divider {
-            background: var(--border-color);
-        }
+    /* Light mode overrides for login page — driven by [data-theme="light"] on <html> */
+    [data-theme="light"] .login-page {
+        background: var(--bg-primary);
+    }
+    [data-theme="light"] .login-card {
+        background: var(--bg-elevated);
+        border-color: var(--border-color);
+    }
+    [data-theme="light"] .login-brand h1 {
+        color: var(--text-primary);
+    }
+    [data-theme="light"] .login-subtitle {
+        color: var(--text-secondary);
+    }
+    [data-theme="light"] .btn-github-login {
+        color: var(--text-primary);
+        border-color: var(--border-color);
+    }
+    [data-theme="light"] .btn-github-login:hover {
+        border-color: var(--border-strong);
+        background: var(--hover-tint);
+        color: var(--text-primary);
+    }
+    [data-theme="light"] .login-footer {
+        color: var(--text-muted);
+    }
+    [data-theme="light"] .login-divider {
+        background: var(--border-color);
     }
 
     /* Suppress the sidebar entirely on the login page */
@@ -160,9 +154,16 @@
 {% endblock %}
 
 {% block content %}
+<!-- Login page theme toggle — fixed top-right -->
+<button class="theme-toggle login-theme-toggle" id="loginThemeToggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle light/dark mode">
+    <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+    <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
 <div class="login-page">
     <div class="login-card">
-        <img src="{{ url_for('static', filename='img/logo.png') }}" alt="{{ app_name }} logo" class="login-logo">
+        <img src="{{ url_for('static', filename='img/logo-dark.png') }}" alt="{{ app_name }} logo" class="login-logo app-logo"
+             data-logo-dark="{{ url_for('static', filename='img/logo-dark.png') }}"
+             data-logo-light="{{ url_for('static', filename='img/logo-light.png') }}">
 
         <div class="login-brand">
             <h1>{{ app_name }}</h1>
@@ -187,4 +188,16 @@
         <p class="login-footer">{{ app_name }} &middot; {{ now.year }}</p>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Login page: init theme icons and logos on load.
+    // toggleTheme(), updateThemeIcon(), updateLogos() are all defined in base.html.
+    document.addEventListener('DOMContentLoaded', function() {
+        var theme = document.documentElement.getAttribute('data-theme') || 'dark';
+        if (typeof updateThemeIcon === 'function') updateThemeIcon(theme);
+        if (typeof updateLogos === 'function') updateLogos(theme);
+    });
+</script>
 {% endblock %}
