@@ -13,12 +13,11 @@ Archive databases (for future):
 - chat_archive.db: Old chat sessions
 """
 
+import logging
 import os
 import sqlite3
-import logging
 import threading
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +59,11 @@ def get_user_db_path(user_id: str) -> Path:
         Path to user's database file (e.g., legato_abc123.db)
     """
     # Sanitize user_id to prevent path traversal
-    safe_id = "".join(c for c in user_id if c.isalnum() or c in '-_')
+    safe_id = "".join(c for c in user_id if c.isalnum() or c in "-_")
     return get_db_dir() / f"legato_{safe_id}.db"
 
 
-def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Get a database connection with proper settings."""
     path = db_path or get_db_path()
     conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
@@ -90,7 +89,7 @@ def checkpoint_all_databases():
     This is important for data persistence when running on Fly.io with
     auto_stop_machines enabled.
     """
-    for db_name in ['legato.db', 'agents.db', 'chat.db']:
+    for db_name in ["legato.db", "agents.db", "chat.db"]:
         try:
             path = get_db_path(db_name)
             if path.exists():
@@ -104,7 +103,8 @@ def checkpoint_all_databases():
 
 # ============ Legato DB (Knowledge/Embeddings) ============
 
-def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sqlite3.Connection:
+
+def init_db(db_path: Path | None = None, user_id: str | None = None) -> sqlite3.Connection:
     """Initialize legato database with knowledge entries and embeddings.
 
     In multi-tenant mode, pass user_id to get a user-specific database.
@@ -298,12 +298,10 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     for name, color in default_color_map.items():
         cursor.execute(
             "UPDATE user_categories SET color = ? WHERE name = ? AND (color IS NULL OR color = '')",
-            (color, name)
+            (color, name),
         )
     # For any other categories without colors, set a default
-    cursor.execute(
-        "UPDATE user_categories SET color = '#6366f1' WHERE color IS NULL OR color = ''"
-    )
+    cursor.execute("UPDATE user_categories SET color = '#6366f1' WHERE color IS NULL OR color = ''")
 
     # Migration: Fix incorrectly pluralized folder_names (e.g., 'prisms' → 'prism')
     # Old code naively added 's' to category names for folder_name. DB defaults use singular.
@@ -428,7 +426,9 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     # Create indexes for common queries
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_entry_id ON knowledge_entries(entry_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_needs_chord ON knowledge_entries(needs_chord, chord_status)")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_needs_chord ONknowledge_entries(needs_chord, chord_status)"
+    )
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_task_status ON knowledge_entries(task_status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_entry ON embeddings(entry_id, entry_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_hash ON transcript_hashes(content_hash)")
@@ -445,17 +445,17 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
 
     # Migration: Add user_id to processing_jobs for multi-tenant support
     for column, col_type in [
-        ('user_id', 'TEXT'),
-        ('current_stage', 'TEXT'),
-        ('progress_pct', 'INTEGER DEFAULT 0'),
-        ('threads_total', 'INTEGER DEFAULT 0'),
-        ('threads_completed', 'INTEGER DEFAULT 0'),
-        ('threads_failed', 'INTEGER DEFAULT 0'),
-        ('worker_id', 'TEXT'),
-        ('locked_until', 'DATETIME'),
-        ('started_at', 'DATETIME'),
-        ('retry_count', 'INTEGER DEFAULT 0'),
-        ('source_id', 'TEXT'),
+        ("user_id", "TEXT"),
+        ("current_stage", "TEXT"),
+        ("progress_pct", "INTEGER DEFAULT 0"),
+        ("threads_total", "INTEGER DEFAULT 0"),
+        ("threads_completed", "INTEGER DEFAULT 0"),
+        ("threads_failed", "INTEGER DEFAULT 0"),
+        ("worker_id", "TEXT"),
+        ("locked_until", "DATETIME"),
+        ("started_at", "DATETIME"),
+        ("retry_count", "INTEGER DEFAULT 0"),
+        ("source_id", "TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE processing_jobs ADD COLUMN {column} {col_type}")
@@ -503,8 +503,8 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
     """)
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_threads_job ON processing_threads(job_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_threads_status ON processing_threads(job_id, status)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_locked ON processing_jobs(status, locked_until)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_threads_status ONprocessing_threads(job_id, status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_locked ON processing_jobs(status,locked_until)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_user ON processing_jobs(user_id)")
 
     # ============ Multi-Tenant Tables ============
@@ -762,16 +762,51 @@ def init_db(db_path: Optional[Path] = None, user_id: Optional[str] = None) -> sq
 # (name, display_name, description, folder_name, sort_order, color)
 # Using singular folder names for consistency with category names
 DEFAULT_CATEGORIES = [
-    ('epiphany', 'Epiphany', 'Major breakthrough or insight - genuine "aha" moments', 'epiphany', 1, '#f59e0b'),      # Amber
-    ('concept', 'Concept', 'Technical definition, explanation, or implementation idea', 'concept', 2, '#6366f1'),     # Indigo
-    ('reflection', 'Reflection', 'Personal thought, observation, or musing', 'reflection', 3, '#8b5cf6'),             # Violet
-    ('glimmer', 'Glimmer', 'A captured moment - photographing a feeling. Poetic, evocative, sensory', 'glimmer', 4, '#ec4899'),  # Pink
-    ('reminder', 'Reminder', 'Note to self about something to remember', 'reminder', 5, '#14b8a6'),                   # Teal
-    ('worklog', 'Worklog', 'Summary of work already completed', 'worklog', 6, '#64748b'),                             # Slate
+    (
+        "epiphany",
+        "Epiphany",
+        'Major breakthrough or insight - genuine "aha" moments',
+        "epiphany",
+        1,
+        "#f59e0b",
+    ),  # Amber
+    (
+        "concept",
+        "Concept",
+        "Technical definition, explanation, or implementation idea",
+        "concept",
+        2,
+        "#6366f1",
+    ),  # Indigo
+    (
+        "reflection",
+        "Reflection",
+        "Personal thought, observation, or musing",
+        "reflection",
+        3,
+        "#8b5cf6",
+    ),  # Violet
+    (
+        "glimmer",
+        "Glimmer",
+        "A captured moment - photographing a feeling. Poetic, evocative, sensory",
+        "glimmer",
+        4,
+        "#ec4899",
+    ),  # Pink
+    (
+        "reminder",
+        "Reminder",
+        "Note to self about something to remember",
+        "reminder",
+        5,
+        "#14b8a6",
+    ),  # Teal
+    ("worklog", "Worklog", "Summary of work already completed", "worklog", 6, "#64748b"),  # Slate
 ]
 
 
-def seed_default_categories(conn: sqlite3.Connection, user_id: str = 'default') -> int:
+def seed_default_categories(conn: sqlite3.Connection, user_id: str = "default") -> int:
     """Seed default categories for a user if they don't exist.
 
     Args:
@@ -786,10 +821,13 @@ def seed_default_categories(conn: sqlite3.Connection, user_id: str = 'default') 
 
     for name, display_name, description, folder_name, sort_order, color in DEFAULT_CATEGORIES:
         try:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO user_categories (user_id, name, display_name, description, folder_name, sort_order, color)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, name, display_name, description, folder_name, sort_order, color))
+            """,
+                (user_id, name, display_name, description, folder_name, sort_order, color),
+            )
             created += 1
         except sqlite3.IntegrityError:
             pass  # Already exists
@@ -800,7 +838,7 @@ def seed_default_categories(conn: sqlite3.Connection, user_id: str = 'default') 
     return created
 
 
-def get_user_categories(conn: sqlite3.Connection, user_id: str = 'default') -> list[dict]:
+def get_user_categories(conn: sqlite3.Connection, user_id: str = "default") -> list[dict]:
     """Get all active categories for a user, seeding defaults if needed.
 
     Args:
@@ -812,26 +850,29 @@ def get_user_categories(conn: sqlite3.Connection, user_id: str = 'default') -> l
     """
     # Check if user has any categories
     count = conn.execute(
-        "SELECT COUNT(*) FROM user_categories WHERE user_id = ? AND is_active = 1",
-        (user_id,)
+        "SELECT COUNT(*) FROM user_categories WHERE user_id = ? AND is_active = 1", (user_id,)
     ).fetchone()[0]
 
     if count == 0:
         seed_default_categories(conn, user_id)
 
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT id, name, display_name, description, folder_name, sort_order, color
         FROM user_categories
         WHERE user_id = ? AND is_active = 1
         ORDER BY sort_order, name
-    """, (user_id,)).fetchall()
+    """,
+        (user_id,),
+    ).fetchall()
 
     return [dict(row) for row in rows]
 
 
 # ============ Agents DB ============
 
-def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+
+def init_agents_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Initialize agents.db for agent queue management.
 
     Contains:
@@ -880,11 +921,11 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     cursor.execute("PRAGMA table_info(agent_queue)")
     columns = [row[1] for row in cursor.fetchall()]
 
-    if 'comments' not in columns:
+    if "comments" not in columns:
         cursor.execute("ALTER TABLE agent_queue ADD COLUMN comments TEXT DEFAULT '[]'")
         logger.info("Added comments column to agent_queue")
 
-    if 'user_id' not in columns:
+    if "user_id" not in columns:
         cursor.execute("ALTER TABLE agent_queue ADD COLUMN user_id TEXT")
         logger.info("Added user_id column to agent_queue")
 
@@ -932,7 +973,8 @@ def init_agents_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
 # ============ Chat DB ============
 
-def init_chat_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+
+def init_chat_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Initialize chat.db for chat sessions and messages.
 
     Contains:
@@ -995,22 +1037,23 @@ def backup_to_tigris(conn: sqlite3.Connection, bucket_name: str, db_name: str = 
         bucket_name: Tigris bucket name
         db_name: Name prefix for backup file (e.g., 'legato', 'agents', 'chat')
     """
-    import boto3
     from datetime import datetime
+
+    import boto3
 
     try:
         # Get Tigris credentials from environment
         s3 = boto3.client(
-            's3',
-            endpoint_url=os.environ.get('AWS_ENDPOINT_URL_S3'),
-            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
-            region_name=os.environ.get('AWS_REGION', 'auto')
+            "s3",
+            endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.environ.get("AWS_REGION", "auto"),
         )
 
         # Create backup
         db_dir = get_db_dir()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = db_dir / f"{db_name}_backup_{timestamp}.db"
 
         # SQLite online backup
@@ -1059,6 +1102,7 @@ def backup_all_to_tigris(bucket_name: str) -> dict:
 
 # ============ Flask Request-Scoped Database Access ============
 
+
 def get_user_legato_db():
     """Get the legato database for the current authenticated user.
 
@@ -1078,30 +1122,28 @@ def get_user_legato_db():
     from flask import g, session
 
     # Check if we already have a connection for this request
-    if 'user_legato_db' in g:
+    if "user_legato_db" in g:
         return g.user_legato_db
 
     user_id = None
 
     # Try session first (web routes)
-    user = session.get('user')
-    if user and user.get('user_id'):
-        user_id = user['user_id']
+    user = session.get("user")
+    if user and user.get("user_id"):
+        user_id = user["user_id"]
 
     # Try MCP context (API routes)
-    if not user_id and hasattr(g, 'mcp_user') and g.mcp_user:
-        mcp_user_id = g.mcp_user.get('user_id')
-        github_id = g.mcp_user.get('github_id')
+    if not user_id and hasattr(g, "mcp_user") and g.mcp_user:
+        mcp_user_id = g.mcp_user.get("user_id")
+        github_id = g.mcp_user.get("github_id")
 
         # CRITICAL: Look up canonical user_id by github_id to prevent stale JWT issues
         # The JWT may contain an old user_id if the user record was recreated
         if github_id:
             shared_db = init_db()  # Shared database has users table
-            canonical = shared_db.execute(
-                "SELECT user_id FROM users WHERE github_id = ?", (github_id,)
-            ).fetchone()
+            canonical = shared_db.execute("SELECT user_id FROM users WHERE github_id = ?", (github_id,)).fetchone()
             if canonical:
-                canonical_user_id = canonical['user_id']
+                canonical_user_id = canonical["user_id"]
                 if canonical_user_id != mcp_user_id:
                     # Expected when token was issued with old user_id - resolved correctly
                     logger.debug(f"MCP user_id resolved: jwt={mcp_user_id} -> canonical={canonical_user_id}")
@@ -1145,17 +1187,17 @@ def delete_user_data(user_id: str) -> dict:
     Returns:
         Dict with deletion status
     """
-    results = {'user_id': user_id, 'deleted': []}
+    results = {"user_id": user_id, "deleted": []}
 
     # Delete user's database file if it exists
     user_db_path = get_user_db_path(user_id)
     if user_db_path.exists():
         # Also delete WAL and SHM files
-        for suffix in ['', '-wal', '-shm']:
+        for suffix in ["", "-wal", "-shm"]:
             p = Path(str(user_db_path) + suffix)
             if p.exists():
                 p.unlink()
-                results['deleted'].append(str(p.name))
+                results["deleted"].append(str(p.name))
 
     logger.info(f"Deleted user data for {user_id}: {results}")
     return results

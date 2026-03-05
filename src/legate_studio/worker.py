@@ -18,7 +18,6 @@ import secrets
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +66,17 @@ class MotifWorker:
             # These are likely from crashed workers or database lock issues
             one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
 
-            cursor = db.execute("""
+            cursor = db.execute(
+                """
                 UPDATE processing_jobs
                 SET status = 'failed',
                     error_message = 'Job timed out - stuck in processing state',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE status = 'processing'
                   AND updated_at < ?
-            """, (one_hour_ago,))
+            """,
+                (one_hour_ago,),
+            )
             db.commit()
 
             if cursor.rowcount > 0:
@@ -108,10 +110,10 @@ class MotifWorker:
                 logger.error(f"Worker error: {e}")
 
                 # Back off on repeated errors
-                backoff = min(POLL_INTERVAL * (2 ** consecutive_errors), 60)
+                backoff = min(POLL_INTERVAL * (2**consecutive_errors), 60)
                 time.sleep(backoff)
 
-    def _claim_job(self) -> Optional[dict]:
+    def _claim_job(self) -> dict | None:
         """Attempt to claim an available job using optimistic locking.
 
         Uses an atomic UPDATE with subquery to prevent race conditions
@@ -130,7 +132,8 @@ class MotifWorker:
         # Jobs are claimable if:
         # - status is 'pending', or
         # - status is 'processing' but lock has expired (crashed worker)
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             UPDATE processing_jobs
             SET worker_id = ?,
                 locked_until = ?,
@@ -144,7 +147,9 @@ class MotifWorker:
                 ORDER BY created_at ASC
                 LIMIT 1
             )
-        """, (self.worker_id, lock_until, now, now, now))
+        """,
+            (self.worker_id, lock_until, now, now, now),
+        )
 
         db.commit()
 
@@ -152,12 +157,15 @@ class MotifWorker:
             return None
 
         # Fetch the claimed job
-        row = db.execute("""
+        row = db.execute(
+            """
             SELECT * FROM processing_jobs
             WHERE worker_id = ? AND status = 'processing'
             ORDER BY updated_at DESC
             LIMIT 1
-        """, (self.worker_id,)).fetchone()
+        """,
+            (self.worker_id,),
+        ).fetchone()
 
         if row:
             logger.info(f"Worker {self.worker_id} claimed job {row['job_id']} for user {row['user_id']}")
@@ -173,8 +181,8 @@ class MotifWorker:
         """
         from .motif_processor import MotifProcessor
 
-        job_id = job['job_id']
-        user_id = job['user_id']
+        job_id = job["job_id"]
+        user_id = job["user_id"]
 
         if not user_id:
             logger.error(f"Job {job_id} has no user_id, marking as failed")
@@ -186,19 +194,12 @@ class MotifWorker:
 
             # Set up lock renewal thread
             stop_renewal = threading.Event()
-            renewal_thread = threading.Thread(
-                target=self._lock_renewal_loop,
-                args=(job_id, stop_renewal),
-                daemon=True
-            )
+            renewal_thread = threading.Thread(target=self._lock_renewal_loop, args=(job_id, stop_renewal), daemon=True)
             renewal_thread.start()
 
             try:
                 processor = MotifProcessor(job_id, user_id, self.app)
-                processor.process(
-                    job['input_content'],
-                    job.get('source_id')
-                )
+                processor.process(job["input_content"], job.get("source_id"))
             finally:
                 # Stop lock renewal
                 stop_renewal.set()
@@ -210,7 +211,7 @@ class MotifWorker:
             logger.error(f"Job {job_id} failed: {e}")
 
             # Check if we should retry
-            retry_count = job.get('retry_count', 0)
+            retry_count = job.get("retry_count", 0)
             if retry_count < MAX_RETRIES and self._is_retryable(e):
                 self._mark_job_for_retry(job_id, retry_count + 1, str(e))
             else:
@@ -242,11 +243,14 @@ class MotifWorker:
         db = init_db()
         lock_until = datetime.utcnow() + timedelta(seconds=LOCK_DURATION)
 
-        db.execute("""
+        db.execute(
+            """
             UPDATE processing_jobs
             SET locked_until = ?, updated_at = CURRENT_TIMESTAMP
             WHERE job_id = ? AND worker_id = ?
-        """, (lock_until, job_id, self.worker_id))
+        """,
+            (lock_until, job_id, self.worker_id),
+        )
         db.commit()
 
     def _is_retryable(self, error: Exception) -> bool:
@@ -262,22 +266,22 @@ class MotifWorker:
 
         # These errors are NOT retryable - they indicate permanent failures
         permanent_errors = [
-            'unique constraint',
-            'database is locked',  # SQLite contention - backing off won't help if stuck
+            "unique constraint",
+            "database is locked",  # SQLite contention - backing off won't help if stuck
         ]
         if any(pattern in error_str for pattern in permanent_errors):
             return False
 
         retryable_patterns = [
-            'rate_limit',
-            'rate limit',
-            'timeout',
-            'timed out',
-            'connection',
-            'temporary',
-            'overloaded',
-            '529',  # Anthropic overloaded
-            '503',  # Service unavailable
+            "rate_limit",
+            "rate limit",
+            "timeout",
+            "timed out",
+            "connection",
+            "temporary",
+            "overloaded",
+            "529",  # Anthropic overloaded
+            "503",  # Service unavailable
         ]
         return any(pattern in error_str for pattern in retryable_patterns)
 
@@ -292,7 +296,8 @@ class MotifWorker:
         from .rag.database import init_db
 
         db = init_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE processing_jobs
             SET status = 'pending',
                 retry_count = ?,
@@ -301,7 +306,9 @@ class MotifWorker:
                 locked_until = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE job_id = ?
-        """, (retry_count, f"Retry {retry_count}: {error}", job_id))
+        """,
+            (retry_count, f"Retry {retry_count}: {error}", job_id),
+        )
         db.commit()
 
         logger.info(f"Job {job_id} marked for retry (attempt {retry_count})")
@@ -316,14 +323,17 @@ class MotifWorker:
         from .rag.database import init_db
 
         db = init_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE processing_jobs
             SET status = 'failed',
                 error_message = ?,
                 updated_at = CURRENT_TIMESTAMP,
                 completed_at = CURRENT_TIMESTAMP
             WHERE job_id = ?
-        """, (error, job_id))
+        """,
+            (error, job_id),
+        )
         db.commit()
 
 
@@ -354,15 +364,15 @@ def start_worker_if_needed(app):
 
     # Check if we're the web process or a dedicated worker
     # In Fly.io, FLY_PROCESS_GROUP indicates which process we are
-    process_group = os.environ.get('FLY_PROCESS_GROUP', 'app')
+    process_group = os.environ.get("FLY_PROCESS_GROUP", "app")
 
-    if process_group == 'worker':
+    if process_group == "worker":
         # We're the dedicated worker process, worker_main.py handles this
         return None
 
     # Check if we should run an in-process worker
     # This is useful for local development or single-process deployments
-    run_inline = os.environ.get('MOTIF_WORKER_INLINE', '').lower() in ('1', 'true', 'yes')
+    run_inline = os.environ.get("MOTIF_WORKER_INLINE", "").lower() in ("1", "true", "yes")
 
     if run_inline:
         logger.info("Starting inline motif worker")

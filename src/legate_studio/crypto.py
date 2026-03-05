@@ -10,10 +10,9 @@ All user-specific sensitive data is encrypted with a key derived from
 their user_id, so even database access doesn't expose other users' data.
 """
 
-import os
 import base64
 import logging
-from typing import Optional
+import os
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -22,7 +21,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 logger = logging.getLogger(__name__)
 
 # Master key - cached after first load
-_master_key: Optional[str] = None
+_master_key: str | None = None
 
 
 def _get_master_key() -> str:
@@ -40,7 +39,7 @@ def _get_master_key() -> str:
         return _master_key
 
     # Check environment variable first (allows manual override)
-    env_key = os.environ.get('LEGATO_MASTER_KEY')
+    env_key = os.environ.get("LEGATO_MASTER_KEY")
     if env_key:
         _master_key = env_key
         return _master_key
@@ -56,12 +55,12 @@ def _load_or_create_master_key() -> str:
     from pathlib import Path
 
     # Get database path (same location as other DBs)
-    db_dir = Path(os.environ.get('LEGATO_DB_DIR', '/data'))
+    db_dir = Path(os.environ.get("LEGATO_DB_DIR", "/data"))
     if not db_dir.exists():
-        db_dir = Path('./data')
+        db_dir = Path("./data")
     db_dir.mkdir(parents=True, exist_ok=True)
 
-    db_path = db_dir / 'legato.db'
+    db_path = db_dir / "legato.db"
 
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -86,20 +85,18 @@ def _load_or_create_master_key() -> str:
         conn.commit()
 
         # Try to load existing key
-        row = conn.execute(
-            "SELECT value FROM system_config WHERE key = 'master_encryption_key'"
-        ).fetchone()
+        row = conn.execute("SELECT value FROM system_config WHERE key = 'master_encryption_key'").fetchone()
 
         if row:
             logger.info("Loaded master encryption key from database")
-            return row['value']
+            return row["value"]
 
         # Generate new key
         new_key = generate_master_key()
 
         conn.execute(
             "INSERT INTO system_config (key, value) VALUES (?, ?)",
-            ('master_encryption_key', new_key)
+            ("master_encryption_key", new_key),
         )
         conn.commit()
 
@@ -129,10 +126,10 @@ def derive_user_key(user_id: str) -> bytes:
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=user_id.encode('utf-8'),
+        salt=user_id.encode("utf-8"),
         iterations=100_000,
     )
-    derived = kdf.derive(master.encode('utf-8'))
+    derived = kdf.derive(master.encode("utf-8"))
     return base64.urlsafe_b64encode(derived)
 
 
@@ -148,10 +145,10 @@ def encrypt_for_user(user_id: str, plaintext: str) -> bytes:
     """
     key = derive_user_key(user_id)
     f = Fernet(key)
-    return f.encrypt(plaintext.encode('utf-8'))
+    return f.encrypt(plaintext.encode("utf-8"))
 
 
-def decrypt_for_user(user_id: str, ciphertext: bytes) -> Optional[str]:
+def decrypt_for_user(user_id: str, ciphertext: bytes) -> str | None:
     """Decrypt user's data.
 
     Args:
@@ -164,7 +161,7 @@ def decrypt_for_user(user_id: str, ciphertext: bytes) -> Optional[str]:
     try:
         key = derive_user_key(user_id)
         f = Fernet(key)
-        return f.decrypt(ciphertext).decode('utf-8')
+        return f.decrypt(ciphertext).decode("utf-8")
     except InvalidToken:
         logger.error(f"Failed to decrypt data for user {user_id}: invalid token")
         return None
@@ -189,7 +186,7 @@ def encrypt_api_key(user_id: str, api_key: str) -> tuple[bytes, str]:
     return encrypted, hint
 
 
-def decrypt_api_key(user_id: str, encrypted_key: bytes) -> Optional[str]:
+def decrypt_api_key(user_id: str, encrypted_key: bytes) -> str | None:
     """Decrypt an API key.
 
     Args:
@@ -208,10 +205,10 @@ def generate_master_key() -> str:
     Returns:
         A URL-safe base64-encoded 32-byte key
     """
-    return base64.urlsafe_b64encode(os.urandom(32)).decode('utf-8')
+    return base64.urlsafe_b64encode(os.urandom(32)).decode("utf-8")
 
 
 # Convenience function for generating keys during setup
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("Generated master key (add to LEGATO_MASTER_KEY env var):")
     print(generate_master_key())

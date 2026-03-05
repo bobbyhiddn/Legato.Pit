@@ -6,7 +6,6 @@ Retrieves relevant context from the knowledge base and formats it for the LLM.
 """
 
 import logging
-from typing import List, Dict, Optional
 
 from .embedding_service import EmbeddingService
 
@@ -43,7 +42,7 @@ class ContextBuilder:
         self.max_context_length = max_context_length
         self.use_hybrid_search = use_hybrid_search
 
-    def retrieve_context(self, query: str, include_low_confidence: bool = True) -> Dict:
+    def retrieve_context(self, query: str, include_low_confidence: bool = True) -> dict:
         """Retrieve relevant context for a query using hybrid search.
 
         Args:
@@ -56,7 +55,7 @@ class ContextBuilder:
         if self.use_hybrid_search:
             return self.embedding_service.hybrid_search(
                 query=query,
-                entry_type='knowledge',
+                entry_type="knowledge",
                 limit=self.max_entries,
                 semantic_threshold=self.threshold,
                 include_low_confidence=include_low_confidence,
@@ -68,9 +67,9 @@ class ContextBuilder:
                 limit=self.max_entries,
                 threshold=self.threshold,
             )
-            return {'results': results, 'maybe_related': []}
+            return {"results": results, "maybe_related": []}
 
-    def format_context(self, entries: List[Dict], section_label: str = "") -> str:
+    def format_context(self, entries: list[dict], section_label: str = "") -> str:
         """Format retrieved entries as context text.
 
         Args:
@@ -93,13 +92,13 @@ class ContextBuilder:
         for entry in entries:
             # Format each entry with match type info
             match_info = ""
-            if entry.get('match_types'):
+            if entry.get("match_types"):
                 match_info = f" [matched via: {', '.join(entry['match_types'])}]"
 
-            entry_text = f"""--- Entry: {entry['title']} (relevance: {entry.get('similarity', 0):.2f}){match_info} ---
-Category: {entry.get('category', 'N/A')}
+            entry_text = f"""--- Entry: {entry["title"]} (relevance: {entry.get("similarity", 0):.2f}){match_info} ---
+Category: {entry.get("category", "N/A")}
 
-{entry.get('content', '')}
+{entry.get("content", "")}
 --- End Entry ---"""
 
             # Check if adding this would exceed limit
@@ -119,10 +118,10 @@ Category: {entry.get('category', 'N/A')}
     def build_prompt(
         self,
         query: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         include_context: bool = True,
         include_low_confidence: bool = True,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Build a complete prompt with retrieved context.
 
         Args:
@@ -137,22 +136,23 @@ Category: {entry.get('category', 'N/A')}
         default_system = """You are a helpful AI assistant for the LEGATO knowledge management system.
 You have access to a knowledge base of concepts, procedures, and references.
 Use the provided context to answer questions accurately.
-The context includes high-confidence matches and optionally "Maybe Related" lower-confidence matches that might still be relevant.
+The context includes high-confidence matches and optionally
+"Maybe Related" lower-confidence matches that might still be relevant.
 If the context doesn't contain relevant information, say so and provide general guidance.
 Be concise and direct in your responses."""
 
         result = {
-            'system': system_prompt or default_system,
-            'context': '',
-            'user': query,
-            'context_entries': [],
-            'maybe_related_entries': [],
+            "system": system_prompt or default_system,
+            "context": "",
+            "user": query,
+            "context_entries": [],
+            "maybe_related_entries": [],
         }
 
         if include_context:
             search_result = self.retrieve_context(query, include_low_confidence=include_low_confidence)
-            high_confidence = search_result.get('results', [])
-            maybe_related = search_result.get('maybe_related', [])
+            high_confidence = search_result.get("results", [])
+            maybe_related = search_result.get("maybe_related", [])
 
             # Format high-confidence results
             context_parts = []
@@ -161,24 +161,26 @@ Be concise and direct in your responses."""
 
             # Format low-confidence results if present
             if include_low_confidence and maybe_related:
-                context_parts.append(self.format_context(maybe_related, section_label="Maybe Related (lower confidence)"))
+                context_parts.append(
+                    self.format_context(maybe_related, section_label="Maybe Related (lower confidence)")
+                )
 
-            result['context'] = "\n\n".join(context_parts)
-            result['context_entries'] = [
+            result["context"] = "\n\n".join(context_parts)
+            result["context_entries"] = [
                 {
-                    'entry_id': e['entry_id'],
-                    'title': e['title'],
-                    'similarity': e.get('similarity', 0),
-                    'match_types': e.get('match_types', []),
+                    "entry_id": e["entry_id"],
+                    "title": e["title"],
+                    "similarity": e.get("similarity", 0),
+                    "match_types": e.get("match_types", []),
                 }
                 for e in high_confidence
             ]
-            result['maybe_related_entries'] = [
+            result["maybe_related_entries"] = [
                 {
-                    'entry_id': e['entry_id'],
-                    'title': e['title'],
-                    'similarity': e.get('similarity', 0),
-                    'match_types': e.get('match_types', []),
+                    "entry_id": e["entry_id"],
+                    "title": e["title"],
+                    "similarity": e.get("similarity", 0),
+                    "match_types": e.get("match_types", []),
                 }
                 for e in maybe_related
             ]
@@ -188,9 +190,9 @@ Be concise and direct in your responses."""
     def build_messages(
         self,
         query: str,
-        history: Optional[List[Dict]] = None,
-        system_prompt: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
+        history: list[dict] | None = None,
+        system_prompt: str | None = None,
+    ) -> list[dict[str, str]]:
         """Build a complete message list for chat APIs.
 
         Args:
@@ -204,33 +206,39 @@ Be concise and direct in your responses."""
         prompt_data = self.build_prompt(query, system_prompt)
 
         messages = [
-            {'role': 'system', 'content': prompt_data['system']},
+            {"role": "system", "content": prompt_data["system"]},
         ]
 
         # Add context as a system message if present
-        if prompt_data['context']:
-            messages.append({
-                'role': 'system',
-                'content': f"CONTEXT INFORMATION (from knowledge base):\n\n{prompt_data['context']}",
-            })
+        if prompt_data["context"]:
+            messages.append(
+                {
+                    "role": "system",
+                    ("content"): f"CONTEXT INFORMATION (from knowledge base):\n\n{prompt_data['context']}",
+                }
+            )
 
         # Add conversation history
         if history:
             for msg in history:
-                messages.append({
-                    'role': msg['role'],
-                    'content': msg['content'],
-                })
+                messages.append(
+                    {
+                        "role": msg["role"],
+                        "content": msg["content"],
+                    }
+                )
 
         # Add current query
-        messages.append({
-            'role': 'user',
-            'content': query,
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": query,
+            }
+        )
 
         return messages
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get statistics about the knowledge base.
 
         Returns:
@@ -238,22 +246,18 @@ Be concise and direct in your responses."""
         """
         conn = self.embedding_service.conn
 
-        knowledge_count = conn.execute(
-            "SELECT COUNT(*) FROM knowledge_entries"
-        ).fetchone()[0]
+        knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge_entries").fetchone()[0]
 
-        project_count = conn.execute(
-            "SELECT COUNT(*) FROM project_entries"
-        ).fetchone()[0]
+        project_count = conn.execute("SELECT COUNT(*) FROM project_entries").fetchone()[0]
 
         embedding_count = conn.execute(
             "SELECT COUNT(*) FROM embeddings WHERE vector_version = ?",
-            (self.embedding_service.provider.model_identifier(),)
+            (self.embedding_service.provider.model_identifier(),),
         ).fetchone()[0]
 
         return {
-            'knowledge_entries': knowledge_count,
-            'project_entries': project_count,
-            'embeddings': embedding_count,
-            'provider': self.embedding_service.provider.model_identifier(),
+            "knowledge_entries": knowledge_count,
+            "project_entries": project_count,
+            "embeddings": embedding_count,
+            "provider": self.embedding_service.provider.model_identifier(),
         }

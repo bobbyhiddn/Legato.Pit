@@ -9,26 +9,27 @@ Solves SQLite locking issues in multi-machine deployments by:
 """
 
 import json
-import time
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Singleton instance
-_manager: Optional['ChatSessionManager'] = None
+_manager: Optional["ChatSessionManager"] = None
 _manager_lock = threading.Lock()
 
 
 @dataclass
 class CachedSession:
     """An in-memory cached chat session."""
+
     session_id: str
     user_id: str
-    title: Optional[str] = None
-    messages: List[dict] = field(default_factory=list)  # Buffered messages not yet in DB
+    title: str | None = None
+    messages: list[dict] = field(default_factory=list)  # Buffered messages not yet in DB
     last_activity: float = field(default_factory=time.time)
     created_in_db: bool = False  # Whether session row exists in DB
 
@@ -52,9 +53,9 @@ class ChatSessionManager:
     CLEANUP_INTERVAL = 30  # Check for inactive sessions every 30s
 
     def __init__(self):
-        self._sessions: Dict[str, CachedSession] = {}
+        self._sessions: dict[str, CachedSession] = {}
         self._lock = threading.Lock()
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: threading.Thread | None = None
         self._shutdown = False
 
     # ============ Session Lifecycle ============
@@ -80,16 +81,16 @@ class ChatSessionManager:
         # Not in memory - check DB
         row = db_conn.execute(
             "SELECT session_id, user_id, title FROM chat_sessions WHERE session_id = ?",
-            (session_id,)
+            (session_id,),
         ).fetchone()
 
         with self._lock:
             if row:
                 # Load from DB into memory
                 session = CachedSession(
-                    session_id=row['session_id'],
-                    user_id=row['user_id'],
-                    title=row['title'],
+                    session_id=row["session_id"],
+                    user_id=row["user_id"],
+                    title=row["title"],
                     created_in_db=True,
                 )
                 self._sessions[session_id] = session
@@ -101,7 +102,7 @@ class ChatSessionManager:
                     INSERT INTO chat_sessions (session_id, user_id)
                     VALUES (?, ?)
                     """,
-                    (session_id, user_id)
+                    (session_id, user_id),
                 )
                 db_conn.commit()
 
@@ -115,7 +116,7 @@ class ChatSessionManager:
 
             return session
 
-    def get_session(self, session_id: str, db_conn) -> Optional[CachedSession]:
+    def get_session(self, session_id: str, db_conn) -> CachedSession | None:
         """Get existing session without creating."""
         with self._lock:
             if session_id in self._sessions:
@@ -126,15 +127,15 @@ class ChatSessionManager:
         # Check DB
         row = db_conn.execute(
             "SELECT session_id, user_id, title FROM chat_sessions WHERE session_id = ?",
-            (session_id,)
+            (session_id,),
         ).fetchone()
 
         if row:
             with self._lock:
                 session = CachedSession(
-                    session_id=row['session_id'],
-                    user_id=row['user_id'],
-                    title=row['title'],
+                    session_id=row["session_id"],
+                    user_id=row["user_id"],
+                    title=row["title"],
                     created_in_db=True,
                 )
                 self._sessions[session_id] = session
@@ -156,8 +157,8 @@ class ChatSessionManager:
         session_id: str,
         role: str,
         content: str,
-        context: Optional[List[dict]],
-        model: Optional[str],
+        context: list[dict] | None,
+        model: str | None,
         db_conn,
     ) -> None:
         """
@@ -171,13 +172,15 @@ class ChatSessionManager:
                 logger.warning(f"Adding message to unknown session: {session_id}")
                 return
 
-            session.messages.append({
-                'role': role,
-                'content': content,
-                'context_used': json.dumps(context) if context else None,
-                'model_used': model,
-                'created_at': time.time(),
-            })
+            session.messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "context_used": json.dumps(context) if context else None,
+                    "model_used": model,
+                    "created_at": time.time(),
+                }
+            )
             session.touch()
 
             buffer_count = len(session.messages)
@@ -191,7 +194,7 @@ class ChatSessionManager:
         session_id: str,
         limit: int,
         db_conn,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Get messages for a session, combining DB and buffered messages.
 
@@ -206,21 +209,21 @@ class ChatSessionManager:
             ORDER BY id DESC
             LIMIT ?
             """,
-            (session_id, limit)
+            (session_id, limit),
         ).fetchall()
 
         db_messages = []
         for row in reversed(rows):  # Reverse to chronological order
             msg = {
-                'role': row['role'],
-                'content': row['content'],
-                'model_used': row['model_used'],
+                "role": row["role"],
+                "content": row["content"],
+                "model_used": row["model_used"],
             }
-            if row['context_used']:
+            if row["context_used"]:
                 try:
-                    msg['context_used'] = json.loads(row['context_used'])
+                    msg["context_used"] = json.loads(row["context_used"])
                 except json.JSONDecodeError:
-                    msg['context_used'] = None
+                    msg["context_used"] = None
             db_messages.append(msg)
 
         # Add buffered messages
@@ -229,10 +232,10 @@ class ChatSessionManager:
             if session:
                 buffered = [
                     {
-                        'role': m['role'],
-                        'content': m['content'],
-                        'model_used': m.get('model_used'),
-                        'context_used': json.loads(m['context_used']) if m.get('context_used') else None,
+                        "role": m["role"],
+                        "content": m["content"],
+                        "model_used": m.get("model_used"),
+                        "context_used": json.loads(m["context_used"]) if m.get("context_used") else None,
                     }
                     for m in session.messages
                 ]
@@ -270,11 +273,11 @@ class ChatSessionManager:
                     """,
                     (
                         session_id,
-                        msg['role'],
-                        msg['content'],
-                        msg.get('context_used'),
-                        msg.get('model_used'),
-                    )
+                        msg["role"],
+                        msg["content"],
+                        msg.get("context_used"),
+                        msg.get("model_used"),
+                    ),
                 )
             db_conn.commit()
             logger.debug(f"Flushed {len(messages_to_flush)} messages for session {session_id}")
@@ -351,6 +354,7 @@ class ChatSessionManager:
                 try:
                     with app.app_context():
                         from .database import init_chat_db
+
                         db = init_chat_db()
                         self.flush_inactive(db)
                 except Exception as e:
@@ -374,12 +378,13 @@ class ChatSessionManager:
         with self._lock:
             total_buffered = sum(len(s.messages) for s in self._sessions.values())
             return {
-                'active_sessions': len(self._sessions),
-                'buffered_messages': total_buffered,
+                "active_sessions": len(self._sessions),
+                "buffered_messages": total_buffered,
             }
 
 
 # ============ Module-level Functions ============
+
 
 def init_chat_manager(app) -> ChatSessionManager:
     """Initialize the global chat session manager."""

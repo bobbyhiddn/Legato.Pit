@@ -1,1 +1,2 @@
+legate_studio
 legato_pit

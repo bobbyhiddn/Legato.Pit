@@ -6,4 +6,4 @@
 venv/
 *.log
 *.pem
-data/
+data/src/legate_studio.egg-info/

@@ -6,14 +6,13 @@ Following the pattern from Llore.
 """
 
 from abc import ABC, abstractmethod
-from typing import List
 
 
 class EmbeddingProvider(ABC):
     """Abstract base class for embedding providers."""
 
     @abstractmethod
-    def create_embedding(self, text: str) -> List[float]:
+    def create_embedding(self, text: str) -> list[float]:
         """Generate an embedding vector for the given text.
 
         Args:
@@ -46,7 +45,7 @@ class EmbeddingProvider(ABC):
         """
         pass
 
-    def create_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+    def create_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embedding vectors for multiple texts in a single API call.
 
         Args:

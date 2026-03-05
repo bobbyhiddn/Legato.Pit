@@ -8,18 +8,19 @@ Fetches repos with 'legato-chord' topic from GitHub.
 import logging
 
 import requests
-from flask import Blueprint, render_template, jsonify, current_app, g
+from flask import Blueprint, current_app, jsonify, render_template
 
-from .core import login_required, library_required, copilot_required
+from .core import copilot_required, library_required, login_required
 
 logger = logging.getLogger(__name__)
 
-chords_bp = Blueprint('chords', __name__, url_prefix='/chords')
+chords_bp = Blueprint("chords", __name__, url_prefix="/chords")
 
 
 def get_legato_db():
     """Get legato database connection for current user."""
     from .rag.database import get_user_legato_db
+
     return get_user_legato_db()
 
 
@@ -59,6 +60,7 @@ def fetch_chord_repos(token: str, org: str) -> list[dict]:
 
         # Get linked notes from database
         from .rag.database import get_user_legato_db
+
         try:
             legato_db = get_user_legato_db()
         except Exception:
@@ -133,15 +135,17 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
         if issues_resp.ok:
             for issue in issues_resp.json():
                 if "pull_request" not in issue:
-                    details["issues"].append({
-                        "number": issue["number"],
-                        "title": issue["title"],
-                        "state": issue["state"],
-                        "html_url": issue["html_url"],
-                        "created_at": issue["created_at"],
-                        "labels": [l["name"] for l in issue.get("labels", [])],
-                        "assignee": issue["assignee"]["login"] if issue.get("assignee") else None,
-                    })
+                    details["issues"].append(
+                        {
+                            "number": issue["number"],
+                            "title": issue["title"],
+                            "state": issue["state"],
+                            "html_url": issue["html_url"],
+                            "created_at": issue["created_at"],
+                            "labels": [lbl["name"] for lbl in issue.get("labels", [])],
+                            "assignee": issue["assignee"]["login"] if issue.get("assignee") else None,
+                        }
+                    )
 
         # Fetch open PRs
         prs_resp = requests.get(
@@ -152,15 +156,17 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
         )
         if prs_resp.ok:
             for pr in prs_resp.json():
-                details["pull_requests"].append({
-                    "number": pr["number"],
-                    "title": pr["title"],
-                    "state": pr["state"],
-                    "html_url": pr["html_url"],
-                    "created_at": pr["created_at"],
-                    "user": pr["user"]["login"],
-                    "draft": pr.get("draft", False),
-                })
+                details["pull_requests"].append(
+                    {
+                        "number": pr["number"],
+                        "title": pr["title"],
+                        "state": pr["state"],
+                        "html_url": pr["html_url"],
+                        "created_at": pr["created_at"],
+                        "user": pr["user"]["login"],
+                        "draft": pr.get("draft", False),
+                    }
+                )
 
         # Fetch recent commits
         commits_resp = requests.get(
@@ -171,13 +177,15 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
         )
         if commits_resp.ok:
             for commit in commits_resp.json():
-                details["recent_commits"].append({
-                    "sha": commit["sha"][:7],
-                    "message": commit["commit"]["message"].split("\n")[0][:80],
-                    "author": commit["commit"]["author"]["name"],
-                    "date": commit["commit"]["author"]["date"],
-                    "html_url": commit["html_url"],
-                })
+                details["recent_commits"].append(
+                    {
+                        "sha": commit["sha"][:7],
+                        "message": commit["commit"]["message"].split("\n")[0][:80],
+                        "author": commit["commit"]["author"]["name"],
+                        "date": commit["commit"]["author"]["date"],
+                        "html_url": commit["html_url"],
+                    }
+                )
 
     except requests.RequestException as e:
         logger.error(f"Failed to fetch repo details for {repo_full_name}: {e}")
@@ -185,19 +193,20 @@ def fetch_repo_details(token: str, repo_full_name: str) -> dict:
     return details
 
 
-@chords_bp.route('/')
+@chords_bp.route("/")
 @library_required
 @copilot_required
 def index():
     """Chords overview - list all Chord repos."""
     from flask import session
+
     from .auth import get_user_installation_token
 
-    user = session.get('user', {})
-    user_id = user.get('user_id')
-    org = user.get('username')  # User's GitHub username
+    user = session.get("user", {})
+    user_id = user.get("user_id")
+    org = user.get("username")  # User's GitHub username
 
-    token = get_user_installation_token(user_id, 'library') if user_id else None
+    token = get_user_installation_token(user_id, "library") if user_id else None
 
     # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
     # which would show the wrong user's chords
@@ -205,58 +214,62 @@ def index():
     if token and org:
         repos = fetch_chord_repos(token, org)
 
-    return render_template('chords.html', repos=repos)
+    return render_template("chords.html", repos=repos)
 
 
-@chords_bp.route('/api/repos')
+@chords_bp.route("/api/repos")
 @login_required
 @copilot_required
 def api_list_repos():
     """API endpoint to list Chord repos."""
     from flask import session
+
     from .auth import get_user_installation_token
 
-    user = session.get('user', {})
-    user_id = user.get('user_id')
-    org = user.get('username')
+    user = session.get("user", {})
+    user_id = user.get("user_id")
+    org = user.get("username")
 
-    token = get_user_installation_token(user_id, 'library') if user_id else None
+    token = get_user_installation_token(user_id, "library") if user_id else None
 
     # Don't fall back to SYSTEM_PAT - would show wrong user's chords
     if not token:
-        return jsonify({'error': 'GitHub authorization required'}), 401
+        return jsonify({"error": "GitHub authorization required"}), 401
 
     repos = fetch_chord_repos(token, org) if org else []
 
-    return jsonify({
-        'repos': repos,
-        'count': len(repos),
-    })
+    return jsonify(
+        {
+            "repos": repos,
+            "count": len(repos),
+        }
+    )
 
 
-@chords_bp.route('/api/repo/<path:repo_name>')
+@chords_bp.route("/api/repo/<path:repo_name>")
 @login_required
 @copilot_required
 def api_repo_details(repo_name: str):
     """API endpoint to get details for a specific repo."""
     from flask import session
+
     from .auth import get_user_installation_token
 
-    user = session.get('user', {})
-    user_id = user.get('user_id')
+    user = session.get("user", {})
+    user_id = user.get("user_id")
 
-    token = get_user_installation_token(user_id, 'library') if user_id else None
+    token = get_user_installation_token(user_id, "library") if user_id else None
     # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
 
     if not token:
-        return jsonify({'error': 'GitHub authorization required'}), 401
+        return jsonify({"error": "GitHub authorization required"}), 401
 
     details = fetch_repo_details(token, repo_name)
 
     return jsonify(details)
 
 
-@chords_bp.route('/api/repo/<path:repo_name>', methods=['DELETE'])
+@chords_bp.route("/api/repo/<path:repo_name>", methods=["DELETE"])
 @login_required
 @copilot_required
 def api_delete_repo(repo_name: str):
@@ -276,25 +289,26 @@ def api_delete_repo(repo_name: str):
     }
     """
     from flask import session
+
     from .auth import get_user_installation_token
 
-    user = session.get('user', {})
-    user_id = user.get('user_id')
+    user = session.get("user", {})
+    user_id = user.get("user_id")
 
-    token = get_user_installation_token(user_id, 'library') if user_id else None
+    token = get_user_installation_token(user_id, "library") if user_id else None
     # In multi-tenant mode, require user token - don't fall back to SYSTEM_PAT
 
     if not token:
-        return jsonify({'error': 'GitHub authorization required'}), 401
+        return jsonify({"error": "GitHub authorization required"}), 401
 
     try:
         # First, delete the GitHub repository
         response = requests.delete(
-            f'https://api.github.com/repos/{repo_name}',
+            f"https://api.github.com/repos/{repo_name}",
             headers={
-                'Authorization': f'Bearer {token}',
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
             },
             timeout=15,
         )
@@ -304,15 +318,19 @@ def api_delete_repo(repo_name: str):
         elif response.status_code == 404:
             logger.warning(f"Repository not found (may already be deleted): {repo_name}")
         elif response.status_code == 403:
-            return jsonify({
-                'error': 'Insufficient permissions to delete repository',
-                'detail': 'Your GitHub installation needs delete_repo scope'
-            }), 403
+            return jsonify(
+                {
+                    "error": "Insufficient permissions to delete repository",
+                    "detail": "Your GitHub installation needs delete_repo scope",
+                }
+            ), 403
         else:
-            return jsonify({
-                'error': f'Failed to delete repository: HTTP {response.status_code}',
-                'detail': response.text
-            }), response.status_code
+            return jsonify(
+                {
+                    "error": f"Failed to delete repository: HTTP {response.status_code}",
+                    "detail": response.text,
+                }
+            ), response.status_code
 
         # Get linked Library entries before resetting
         db = get_legato_db()
@@ -321,7 +339,7 @@ def api_delete_repo(repo_name: str):
             SELECT entry_id, file_path, title FROM knowledge_entries
             WHERE chord_repo = ?
             """,
-            (repo_name,)
+            (repo_name,),
         ).fetchall()
 
         # Reset linked entries in local DB - set needs_chord = 0 so they don't re-queue
@@ -335,48 +353,50 @@ def api_delete_repo(repo_name: str):
                 updated_at = CURRENT_TIMESTAMP
             WHERE chord_repo = ?
             """,
-            (repo_name,)
+            (repo_name,),
         )
         notes_reset = result.rowcount
         db.commit()
 
         # Update GitHub frontmatter for each linked entry
         from .core import get_user_library_repo
+
         library_repo = get_user_library_repo()
         frontmatter_updated = 0
 
         for entry in linked_entries:
-            file_path = entry['file_path']
+            file_path = entry["file_path"]
             if not file_path:
                 continue
 
             try:
-                from .rag.github_service import get_file_content, commit_file
                 import re
 
+                from .rag.github_service import commit_file, get_file_content
+
                 content = get_file_content(library_repo, file_path, token)
-                if content and content.startswith('---'):
-                    parts = content.split('---', 2)
+                if content and content.startswith("---"):
+                    parts = content.split("---", 2)
                     if len(parts) >= 3:
                         frontmatter = parts[1]
                         body = parts[2]
 
                         # Remove all chord-related fields from frontmatter
-                        new_frontmatter = re.sub(r'^needs_chord:.*\n?', '', frontmatter, flags=re.MULTILINE)
-                        new_frontmatter = re.sub(r'^chord_name:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
-                        new_frontmatter = re.sub(r'^chord_scope:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
-                        new_frontmatter = re.sub(r'^chord_status:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
-                        new_frontmatter = re.sub(r'^chord_repo:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
-                        new_frontmatter = re.sub(r'^chord_id:.*\n?', '', new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^needs_chord:.*\n?", "", frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^chord_name:.*\n?", "", new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^chord_scope:.*\n?", "", new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^chord_status:.*\n?", "", new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^chord_repo:.*\n?", "", new_frontmatter, flags=re.MULTILINE)
+                        new_frontmatter = re.sub(r"^chord_id:.*\n?", "", new_frontmatter, flags=re.MULTILINE)
 
                         if new_frontmatter != frontmatter:
-                            new_content = f'---{new_frontmatter}---{body}'
+                            new_content = f"---{new_frontmatter}---{body}"
                             commit_file(
                                 repo=library_repo,
                                 path=file_path,
                                 content=new_content,
-                                message=f'Reset chord fields: chord deleted',
-                                token=token
+                                message="Reset chord fields: chord deleted",
+                                token=token,
                             )
                             frontmatter_updated += 1
 
@@ -384,23 +404,27 @@ def api_delete_repo(repo_name: str):
                 logger.warning(f"Could not update frontmatter for {entry['entry_id']}: {e}")
 
         if notes_reset > 0:
-            logger.info(f"Reset chord status on {notes_reset} library entries, {frontmatter_updated} frontmatter updated")
+            logger.info(
+                f"Reset chord status on {notes_reset} library entries, {frontmatter_updated} frontmatter updated"
+            )
 
-        return jsonify({
-            'success': True,
-            'repo': repo_name,
-            'notes_reset': notes_reset,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "repo": repo_name,
+                "notes_reset": notes_reset,
+            }
+        )
 
     except requests.RequestException as e:
         logger.error(f"Failed to delete repository {repo_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
     except Exception as e:
         logger.error(f"Error deleting chord {repo_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-@chords_bp.route('/api/linked-notes/<path:repo_name>')
+@chords_bp.route("/api/linked-notes/<path:repo_name>")
 @login_required
 @copilot_required
 def api_linked_notes(repo_name: str):
@@ -413,20 +437,22 @@ def api_linked_notes(repo_name: str):
             FROM knowledge_entries
             WHERE chord_repo = ?
             """,
-            (repo_name,)
+            (repo_name,),
         ).fetchall()
 
-        return jsonify({
-            'notes': [dict(row) for row in rows],
-            'count': len(rows),
-        })
+        return jsonify(
+            {
+                "notes": [dict(row) for row in rows],
+                "count": len(rows),
+            }
+        )
 
     except Exception as e:
         logger.error(f"Failed to get linked notes for {repo_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-@chords_bp.route('/api/repo/<path:repo_name>/incident', methods=['POST'])
+@chords_bp.route("/api/repo/<path:repo_name>/incident", methods=["POST"])
 @login_required
 @copilot_required
 def api_create_incident(repo_name: str):
@@ -449,33 +475,35 @@ def api_create_incident(repo_name: str):
         "dispatched": true
     }
     """
-    from flask import request, session
-    from .auth import get_user_installation_token
     import secrets
 
-    user = session.get('user', {})
-    user_id = user.get('user_id')
-    org = user.get('username')
+    from flask import request, session
 
-    token = get_user_installation_token(user_id, 'library') if user_id else None
+    from .auth import get_user_installation_token
+
+    user = session.get("user", {})
+    user_id = user.get("user_id")
+    org = user.get("username")
+
+    token = get_user_installation_token(user_id, "library") if user_id else None
 
     # Don't fall back to SYSTEM_PAT - would use wrong org for incident dispatch
     if not token:
-        return jsonify({'error': 'GitHub authorization required'}), 401
+        return jsonify({"error": "GitHub authorization required"}), 401
 
-    conduct_repo = current_app.config.get('CONDUCT_REPO', 'Legato.Conduct')
+    conduct_repo = current_app.config.get("CONDUCT_REPO", "Legato.Conduct")
 
     data = request.get_json()
 
     if not data:
-        return jsonify({'error': 'JSON body required'}), 400
+        return jsonify({"error": "JSON body required"}), 400
 
-    title = data.get('title', '').strip()
-    description = data.get('description', '').strip()
-    note_ids = data.get('note_ids', [])
+    title = data.get("title", "").strip()
+    description = data.get("description", "").strip()
+    note_ids = data.get("note_ids", [])
 
     if not title:
-        return jsonify({'error': 'title is required'}), 400
+        return jsonify({"error": "title is required"}), 400
 
     # Look up linked notes if provided
     notes_section = ""
@@ -484,8 +512,7 @@ def api_create_incident(repo_name: str):
         notes = []
         for nid in note_ids:
             entry = db.execute(
-                "SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?",
-                (nid.strip(),)
+                "SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?", (nid.strip(),)
             ).fetchone()
             if entry:
                 notes.append(dict(entry))
@@ -510,23 +537,23 @@ def api_create_incident(repo_name: str):
 
     # Dispatch to Conduct with target_repo
     payload = {
-        'event_type': 'spawn-agent',
-        'client_payload': {
-            'queue_id': queue_id,
-            'target_repo': repo_name,
-            'issue_title': title,
-            'tasker_body': tasker_body,
-        }
+        "event_type": "spawn-agent",
+        "client_payload": {
+            "queue_id": queue_id,
+            "target_repo": repo_name,
+            "issue_title": title,
+            "tasker_body": tasker_body,
+        },
     }
 
     try:
         response = requests.post(
-            f'https://api.github.com/repos/{org}/{conduct_repo}/dispatches',
+            f"https://api.github.com/repos/{org}/{conduct_repo}/dispatches",
             json=payload,
             headers={
-                'Authorization': f'Bearer {token}',
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
             },
             timeout=15,
         )
@@ -535,19 +562,23 @@ def api_create_incident(repo_name: str):
         if response.status_code == 204:
             logger.info(f"Dispatched incident to Conduct for {repo_name}: {queue_id}")
 
-            return jsonify({
-                'success': True,
-                'queue_id': queue_id,
-                'dispatched': True,
-                'message': f'Incident dispatched to Conduct. Copilot will create and work the issue.',
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "queue_id": queue_id,
+                    "dispatched": True,
+                    "message": ("Incident dispatched to Conduct. Copilot will create and work the issue."),
+                }
+            )
         else:
             logger.error(f"Dispatch failed: {response.status_code} - {response.text}")
-            return jsonify({
-                'error': f'Failed to dispatch incident: HTTP {response.status_code}',
-                'detail': response.text,
-            }), response.status_code
+            return jsonify(
+                {
+                    "error": f"Failed to dispatch incident: HTTP {response.status_code}",
+                    "detail": response.text,
+                }
+            ), response.status_code
 
     except requests.RequestException as e:
         logger.error(f"Failed to dispatch incident for {repo_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500

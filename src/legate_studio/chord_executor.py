@@ -8,13 +8,12 @@ create issues for Copilot.
 Supports both single-tenant and multi-tenant modes with user installation tokens.
 """
 
+import logging
 import os
 import re
-import logging
-from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime
+from pathlib import Path
 
 import requests
 
@@ -34,10 +33,10 @@ class ChordSpec:
     description: str
     domain_tags: list[str]
     key_phrases: list[str]
-    source_entry_id: Optional[str] = None
-    tasker_body: Optional[str] = None
-    source_note_content: Optional[str] = None  # Full markdown content of source note
-    source_note_title: Optional[str] = None    # Note title for filename
+    source_entry_id: str | None = None
+    tasker_body: str | None = None
+    source_note_content: str | None = None  # Full markdown content of source note
+    source_note_title: str | None = None  # Note title for filename
 
     def get_repo_name(self, org: str) -> str:
         """Get the full repository name."""
@@ -69,7 +68,11 @@ class ChordExecutor:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        logger.info(f"ChordExecutor initialized: org={org}, token_len={len(token) if token else 0}, token_prefix={token[:10] if token and len(token) > 10 else 'N/A'}...")
+        logger.info(
+            f"ChordExecutor initialized: org={org}, "
+            f"token_len={len(token) if token else 0}, "
+            f"token_prefix={token[:10] if token and len(token) > 10 else 'N/A'}..."
+        )
 
     def spawn(self, spec: ChordSpec, assign_copilot: bool = True) -> dict:
         """
@@ -108,9 +111,9 @@ class ChordExecutor:
             if assign_copilot:
                 assigned = self._assign_to_copilot(repo_name, issue_number)
                 if assigned:
-                    logger.info(f"Assigned issue to Copilot")
+                    logger.info("Assigned issue to Copilot")
                 else:
-                    logger.warning(f"Could not assign to Copilot (may not be enabled)")
+                    logger.warning("Could not assign to Copilot (may not be enabled)")
 
             return {
                 "success": True,
@@ -192,12 +195,7 @@ class ChordExecutor:
             current_topics.append(topic)
 
             # Update topics
-            resp = requests.put(
-                url,
-                headers=self.headers,
-                json={"names": current_topics},
-                timeout=10
-            )
+            resp = requests.put(url, headers=self.headers, json={"names": current_topics}, timeout=10)
 
             if resp.ok:
                 logger.info(f"Added topic '{topic}' to {repo_name}")
@@ -221,12 +219,7 @@ class ChordExecutor:
                 content = self._substitute_variables(content, spec)
 
                 # Push to repo
-                self._create_or_update_file(
-                    repo_name,
-                    str(rel_path),
-                    content,
-                    f"Add {rel_path}"
-                )
+                self._create_or_update_file(repo_name, str(rel_path), content, f"Add {rel_path}")
 
     def _substitute_variables(self, content: str, spec: ChordSpec) -> str:
         """Replace {{ variable }} placeholders in template content."""
@@ -306,7 +299,7 @@ class ChordExecutor:
 
 This project was spawned from a Legate Studio knowledge entry.
 
-**Source**: {spec.source_entry_id or 'N/A'}
+**Source**: {spec.source_entry_id or "N/A"}
 
 ### Objective
 
@@ -353,9 +346,9 @@ This project was spawned from a Legate Studio knowledge entry.
                 headers=self.headers,
                 json={
                     "query": query,
-                    "variables": {"owner": owner, "repo": repo, "number": issue_number}
+                    "variables": {"owner": owner, "repo": repo, "number": issue_number},
                 },
-                timeout=30
+                timeout=30,
             )
 
             if resp.status_code != 200:
@@ -387,11 +380,8 @@ This project was spawned from a Legate Studio knowledge entry.
             resp = requests.post(
                 f"{self.api_base}/graphql",
                 headers=self.headers,
-                json={
-                    "query": actors_query,
-                    "variables": {"owner": owner, "repo": repo}
-                },
-                timeout=30
+                json={"query": actors_query, "variables": {"owner": owner, "repo": repo}},
+                timeout=30,
             )
 
             if resp.status_code != 200:
@@ -430,14 +420,20 @@ This project was spawned from a Legate Studio knowledge entry.
                 headers=self.headers,
                 json={
                     "query": assign_mutation,
-                    "variables": {"issueId": issue_id, "actorIds": [copilot_id]}
+                    "variables": {"issueId": issue_id, "actorIds": [copilot_id]},
                 },
-                timeout=30
+                timeout=30,
             )
 
             if resp.status_code == 200:
                 data = resp.json()
-                assignees = data.get("data", {}).get("replaceActorsForAssignable", {}).get("assignable", {}).get("assignees", {}).get("nodes", [])
+                assignees = (
+                    data.get("data", {})
+                    .get("replaceActorsForAssignable", {})
+                    .get("assignable", {})
+                    .get("assignees", {})
+                    .get("nodes", [])
+                )
                 return any(a.get("login") == "copilot-swe-agent" for a in assignees)
 
             return False
@@ -460,8 +456,8 @@ This project was spawned from a Legate Studio knowledge entry.
             return
 
         # Sanitize filename - remove special chars, replace spaces with dashes
-        safe_title = re.sub(r'[^\w\s-]', '', spec.source_note_title)
-        safe_title = re.sub(r'\s+', '-', safe_title).strip('-')
+        safe_title = re.sub(r"[^\w\s-]", "", spec.source_note_title)
+        safe_title = re.sub(r"\s+", "-", safe_title).strip("-")
         if not safe_title:
             safe_title = "source-note"
 
@@ -472,14 +468,14 @@ This project was spawned from a Legate Studio knowledge entry.
                 repo_name,
                 filename,
                 spec.source_note_content,
-                f"Add source note: {spec.source_note_title}"
+                f"Add source note: {spec.source_note_title}",
             )
             logger.info(f"Pushed source note to {repo_name}/{filename}")
         except Exception as e:
             logger.warning(f"Failed to push source note to {repo_name}: {e}")
 
 
-def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
+def get_executor(user_id: str | None = None) -> ChordExecutor:
     """
     Get a ChordExecutor for the current context.
 
@@ -505,19 +501,13 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
         db = init_db()  # Shared DB for user lookups
 
         # Get user's org from their configured repos
-        row = db.execute(
-            "SELECT repo_full_name FROM user_repos WHERE user_id = ? LIMIT 1",
-            (user_id,)
-        ).fetchone()
+        row = db.execute("SELECT repo_full_name FROM user_repos WHERE user_id = ? LIMIT 1", (user_id,)).fetchone()
 
         if row:
             org = row["repo_full_name"].split("/")[0]
         else:
             # Fall back to their GitHub login
-            user_row = db.execute(
-                "SELECT github_login FROM users WHERE user_id = ?",
-                (user_id,)
-            ).fetchone()
+            user_row = db.execute("SELECT github_login FROM users WHERE user_id = ?", (user_id,)).fetchone()
             org = user_row["github_login"] if user_row else "unknown"
 
         # Use OAuth token for repo creation (has public_repo scope)
@@ -528,10 +518,11 @@ def get_executor(user_id: Optional[str] = None) -> ChordExecutor:
 
         # Validate token before creating executor
         import requests
+
         test_resp = requests.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-            timeout=10
+            timeout=10,
         )
         if test_resp.status_code != 200:
             logger.error(f"Token validation failed: {test_resp.status_code} - {test_resp.text[:200]}")
@@ -657,9 +648,18 @@ when you interact with Claude through the Legate Studio MCP tools.
 
     # Create category directories with .gitkeep
     categories = [
-        "epiphany", "concept", "reflection", "glimmer", "reminder",
-        "worklog", "tech-thought", "research-topic", "theology",
-        "writing", "agent-thought", "article-idea"
+        "epiphany",
+        "concept",
+        "reflection",
+        "glimmer",
+        "reminder",
+        "worklog",
+        "tech-thought",
+        "research-topic",
+        "theology",
+        "writing",
+        "agent-thought",
+        "article-idea",
     ]
 
     for category in categories:

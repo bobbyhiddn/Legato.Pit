@@ -5,9 +5,8 @@ Handles LLM interactions for RAG-enabled chat.
 Supports Claude and OpenAI with model selection.
 """
 
-import os
 import logging
-from typing import List, Dict, Optional, Any
+import os
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ class ChatService:
     def __init__(
         self,
         provider: ChatProvider = ChatProvider.CLAUDE,
-        model: Optional[str] = None,
+        model: str | None = None,
     ):
         """Initialize the chat service.
 
@@ -69,7 +68,7 @@ class ChatService:
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 2048,
         temperature: float = 0.7,
     ) -> str:
@@ -90,7 +89,7 @@ class ChatService:
 
     def _chat_claude(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
     ) -> str:
@@ -100,8 +99,8 @@ class ChatService:
         chat_messages = []
 
         for msg in messages:
-            if msg['role'] == 'system':
-                system_parts.append(msg['content'])
+            if msg["role"] == "system":
+                system_parts.append(msg["content"])
             else:
                 chat_messages.append(msg)
 
@@ -124,7 +123,7 @@ class ChatService:
 
     def _chat_openai(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
     ) -> str:
@@ -134,10 +133,10 @@ class ChatService:
         # Newer/reasoning models require max_completion_tokens instead of max_tokens
         model_lower = self.model.lower()
         uses_new_param = (
-            model_lower.startswith('o1') or
-            model_lower.startswith('o3') or
-            model_lower.startswith('o4') or
-            model_lower.startswith('gpt-5')
+            model_lower.startswith("o1")
+            or model_lower.startswith("o3")
+            or model_lower.startswith("o4")
+            or model_lower.startswith("gpt-5")
         )
 
         try:
@@ -184,7 +183,7 @@ class ChatService:
     ]
 
     @classmethod
-    def get_available_models(cls, provider: ChatProvider) -> List[Dict[str, str]]:
+    def get_available_models(cls, provider: ChatProvider) -> list[dict[str, str]]:
         """Get list of available models for a provider.
 
         Fetches dynamically from API for both providers.
@@ -198,7 +197,7 @@ class ChatService:
             return cls.fetch_openai_models()
 
     @classmethod
-    def fetch_anthropic_models(cls) -> List[Dict[str, str]]:
+    def fetch_anthropic_models(cls) -> list[dict[str, str]]:
         """Fetch available models from Anthropic API."""
         import requests
 
@@ -238,7 +237,7 @@ class ChatService:
             return cls.ANTHROPIC_MODELS_FALLBACK
 
     @classmethod
-    def fetch_openai_models(cls) -> List[Dict[str, str]]:
+    def fetch_openai_models(cls) -> list[dict[str, str]]:
         """Fetch available models from OpenAI API."""
         import openai
 
@@ -282,7 +281,7 @@ class ChatService:
             ]
 
     @classmethod
-    def from_config(cls, config: Dict) -> "ChatService":
+    def from_config(cls, config: dict) -> "ChatService":
         """Create a ChatService from configuration dict.
 
         Args:
@@ -291,8 +290,8 @@ class ChatService:
         Returns:
             Configured ChatService instance
         """
-        provider_str = config.get('provider', 'claude').lower()
-        provider = ChatProvider.CLAUDE if provider_str == 'claude' else ChatProvider.OPENAI
-        model = config.get('model')
+        provider_str = config.get("provider", "claude").lower()
+        provider = ChatProvider.CLAUDE if provider_str == "claude" else ChatProvider.OPENAI
+        model = config.get("model")
 
         return cls(provider=provider, model=model)

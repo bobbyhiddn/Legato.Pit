@@ -4,10 +4,8 @@ GitHub Service
 Handles GitHub API operations for committing files.
 """
 
-import os
 import base64
 import logging
-from typing import Optional
 
 import requests
 
@@ -113,7 +111,7 @@ def get_file_content(
     path: str,
     token: str,
     branch: str = "main",
-) -> Optional[str]:
+) -> str | None:
     """Get file content from GitHub.
 
     Args:
@@ -280,7 +278,7 @@ def move_file(
     deleted = delete_file(repo, old_path, f"Remove {old_path} (moved)", token, branch)
 
     logger.info(f"Moved {old_path} -> {new_path} in {repo}")
-    return {'created': created, 'deleted': deleted}
+    return {"created": created, "deleted": deleted}
 
 
 def create_file(
@@ -394,7 +392,7 @@ def get_binary_file(
     path: str,
     token: str,
     branch: str = "main",
-) -> Optional[bytes]:
+) -> bytes | None:
     """Get binary file content from GitHub.
 
     Args:

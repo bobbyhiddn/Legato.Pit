@@ -7,14 +7,13 @@ Core RAG logic including:
 - Correlation checking
 """
 
-import struct
 import logging
 import sqlite3
-from typing import List, Dict, Optional, Tuple
+import struct
 from threading import Lock
 
-from .embedding_provider import EmbeddingProvider
 from .database import get_connection
+from .embedding_provider import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 class EmbeddingService:
     """Service for managing embeddings and similarity search."""
 
-    def __init__(self, provider: EmbeddingProvider, db_conn: Optional[sqlite3.Connection] = None):
+    def __init__(self, provider: EmbeddingProvider, db_conn: sqlite3.Connection | None = None):
         """Initialize the embedding service.
 
         Args:
@@ -35,23 +34,23 @@ class EmbeddingService:
 
         logger.info(f"EmbeddingService initialized with {provider.model_identifier()}")
 
-    def _serialize_embedding(self, embedding: List[float]) -> bytes:
+    def _serialize_embedding(self, embedding: list[float]) -> bytes:
         """Convert float list to binary blob for storage.
 
         Uses little-endian float32 format (same as Llore).
         """
-        return struct.pack(f'<{len(embedding)}f', *embedding)
+        return struct.pack(f"<{len(embedding)}f", *embedding)
 
-    def _deserialize_embedding(self, blob: bytes) -> List[float]:
+    def _deserialize_embedding(self, blob: bytes) -> list[float]:
         """Convert binary blob back to float list."""
         count = len(blob) // 4  # 4 bytes per float32
-        return list(struct.unpack(f'<{count}f', blob))
+        return list(struct.unpack(f"<{count}f", blob))
 
     def store_embedding(
         self,
         entry_id: int,
         entry_type: str,
-        embedding: List[float],
+        embedding: list[float],
     ) -> bool:
         """Store an embedding in the database.
 
@@ -85,7 +84,7 @@ class EmbeddingService:
                 logger.error(f"Failed to store embedding: {e}")
                 return False
 
-    def get_embedding(self, entry_id: int, entry_type: str = 'knowledge') -> Optional[List[float]]:
+    def get_embedding(self, entry_id: int, entry_type: str = "knowledge") -> list[float] | None:
         """Retrieve an embedding from the database.
 
         Args:
@@ -114,7 +113,7 @@ class EmbeddingService:
         entry_id: int,
         entry_type: str,
         text: str,
-    ) -> Optional[List[float]]:
+    ) -> list[float] | None:
         """Generate an embedding for text and store it.
 
         Args:
@@ -134,7 +133,7 @@ class EmbeddingService:
             return None
 
     @staticmethod
-    def cosine_similarity(a: List[float], b: List[float]) -> float:
+    def cosine_similarity(a: list[float], b: list[float]) -> float:
         """Calculate cosine similarity between two vectors.
 
         Args:
@@ -148,7 +147,7 @@ class EmbeddingService:
             raise ValueError(f"Vector dimension mismatch: {len(a)} vs {len(b)}")
 
         # Use float64 for precision (like Llore)
-        dot_product = sum(x * y for x, y in zip(a, b))
+        dot_product = sum(x * y for x, y in zip(a, b, strict=False))
         norm_a = sum(x * x for x in a) ** 0.5
         norm_b = sum(x * x for x in b) ** 0.5
 
@@ -163,10 +162,10 @@ class EmbeddingService:
     def find_similar(
         self,
         query_text: str,
-        entry_type: str = 'knowledge',
+        entry_type: str = "knowledge",
         limit: int = 10,
         threshold: float = 0.4,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Find entries similar to the query text.
 
         Args:
@@ -188,7 +187,7 @@ class EmbeddingService:
         version = self.provider.model_identifier()
 
         # Get all embeddings for comparison
-        if entry_type == 'knowledge':
+        if entry_type == "knowledge":
             rows = self.conn.execute(
                 """
                 SELECT e.entry_id, e.embedding, k.entry_id as eid, k.title, k.category, k.content
@@ -212,21 +211,23 @@ class EmbeddingService:
         # Calculate similarities
         results = []
         for row in rows:
-            stored_embedding = self._deserialize_embedding(row['embedding'])
+            stored_embedding = self._deserialize_embedding(row["embedding"])
             similarity = self.cosine_similarity(query_embedding, stored_embedding)
 
             if similarity >= threshold:
-                results.append({
-                    'id': row['entry_id'],
-                    'entry_id': row['eid'],
-                    'title': row['title'],
-                    'category': row['category'] if entry_type == 'knowledge' else row['status'],
-                    'content': row['content'] if entry_type == 'knowledge' else row['description'],
-                    'similarity': similarity,
-                })
+                results.append(
+                    {
+                        "id": row["entry_id"],
+                        "entry_id": row["eid"],
+                        "title": row["title"],
+                        "category": row["category"] if entry_type == "knowledge" else row["status"],
+                        "content": row["content"] if entry_type == "knowledge" else row["description"],
+                        "similarity": similarity,
+                    }
+                )
 
         # Sort by similarity (descending) and limit
-        results.sort(key=lambda x: x['similarity'], reverse=True)
+        results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:limit]
 
     def correlate(
@@ -235,7 +236,7 @@ class EmbeddingService:
         content: str,
         threshold_skip: float = 0.90,
         threshold_suggest: float = 0.70,
-    ) -> Dict:
+    ) -> dict:
         """Check if similar content already exists.
 
         Args:
@@ -254,34 +255,34 @@ class EmbeddingService:
 
         if not similar:
             return {
-                'action': 'CREATE',
-                'score': 0.0,
-                'matches': [],
+                "action": "CREATE",
+                "score": 0.0,
+                "matches": [],
             }
 
-        top_score = similar[0]['similarity']
+        top_score = similar[0]["similarity"]
 
         if top_score >= threshold_skip:
-            action = 'SKIP'
+            action = "SKIP"
         elif top_score >= threshold_suggest:
-            action = 'SUGGEST'
+            action = "SUGGEST"
         else:
-            action = 'CREATE'
+            action = "CREATE"
 
         return {
-            'action': action,
-            'score': top_score,
-            'matches': [
+            "action": action,
+            "score": top_score,
+            "matches": [
                 {
-                    'entry_id': m['entry_id'],
-                    'title': m['title'],
-                    'similarity': round(m['similarity'], 3),
+                    "entry_id": m["entry_id"],
+                    "title": m["title"],
+                    "similarity": round(m["similarity"], 3),
                 }
                 for m in similar
             ],
         }
 
-    def get_entries_without_embeddings(self, entry_type: str = 'knowledge') -> List[Tuple[int, str]]:
+    def get_entries_without_embeddings(self, entry_type: str = "knowledge") -> list[tuple[int, str]]:
         """Find entries that don't have embeddings yet.
 
         Returns:
@@ -289,7 +290,7 @@ class EmbeddingService:
         """
         version = self.provider.model_identifier()
 
-        if entry_type == 'knowledge':
+        if entry_type == "knowledge":
             rows = self.conn.execute(
                 """
                 SELECT k.id, k.title, k.content
@@ -301,7 +302,7 @@ class EmbeddingService:
                 """,
                 (version,),
             ).fetchall()
-            return [(r['id'], f"Title: {r['title']}\n\nContent: {r['content']}") for r in rows]
+            return [(r["id"], f"Title: {r['title']}\n\nContent: {r['content']}") for r in rows]
 
         else:
             rows = self.conn.execute(
@@ -315,9 +316,11 @@ class EmbeddingService:
                 """,
                 (version,),
             ).fetchall()
-            return [(r['id'], f"Title: {r['title']}\n\nDescription: {r['description'] or ''}") for r in rows]
+            return [(r["id"], f"Title: {r['title']}\n\nDescription: {r['description'] or ''}") for r in rows]
 
-    def generate_missing_embeddings(self, entry_type: str = 'knowledge', delay: float = 0.1, batch_size: int = 100) -> int:
+    def generate_missing_embeddings(
+        self, entry_type: str = "knowledge", delay: float = 0.1, batch_size: int = 100
+    ) -> int:
         """Generate embeddings for all entries that don't have them.
 
         Uses batch API calls for efficiency when processing many entries.
@@ -342,7 +345,7 @@ class EmbeddingService:
 
         # Process in batches
         for i in range(0, len(entries), batch_size):
-            batch = entries[i:i + batch_size]
+            batch = entries[i : i + batch_size]
             entry_ids = [e[0] for e in batch]
             texts = [e[1] for e in batch]
 
@@ -353,7 +356,7 @@ class EmbeddingService:
                 # Store all embeddings from this batch
                 version = self.provider.model_identifier()
                 with self._lock:
-                    for entry_id, embedding in zip(entry_ids, embeddings):
+                    for entry_id, embedding in zip(entry_ids, embeddings, strict=False):
                         blob = self._serialize_embedding(embedding)
                         self.conn.execute(
                             """
@@ -385,9 +388,9 @@ class EmbeddingService:
     def keyword_search(
         self,
         query: str,
-        entry_type: str = 'knowledge',
+        entry_type: str = "knowledge",
         limit: int = 20,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Search entries using keyword matching on title, content, and tags.
 
         Args:
@@ -398,7 +401,7 @@ class EmbeddingService:
         Returns:
             List of matching entries with match_type='keyword'
         """
-        if entry_type != 'knowledge':
+        if entry_type != "knowledge":
             return []
 
         # Split query into terms and create LIKE patterns
@@ -409,7 +412,7 @@ class EmbeddingService:
         results = []
 
         for term in terms:
-            pattern = f'%{term}%'
+            pattern = f"%{term}%"
 
             rows = self.conn.execute(
                 """
@@ -430,35 +433,37 @@ class EmbeddingService:
                 term_hits = sum(1 for t in terms if t in text)
                 score = term_hits / len(terms)  # 0.0 to 1.0
 
-                results.append({
-                    'id': row['id'],
-                    'entry_id': row['entry_id'],
-                    'title': row['title'],
-                    'category': row['category'],
-                    'content': row['content'],
-                    'similarity': score,
-                    'match_type': 'keyword',
-                })
+                results.append(
+                    {
+                        "id": row["id"],
+                        "entry_id": row["entry_id"],
+                        "title": row["title"],
+                        "category": row["category"],
+                        "content": row["content"],
+                        "similarity": score,
+                        "match_type": "keyword",
+                    }
+                )
 
         # Deduplicate by entry_id, keeping highest score
         seen = {}
         for r in results:
-            eid = r['entry_id']
-            if eid not in seen or r['similarity'] > seen[eid]['similarity']:
+            eid = r["entry_id"]
+            if eid not in seen or r["similarity"] > seen[eid]["similarity"]:
                 seen[eid] = r
 
-        results = sorted(seen.values(), key=lambda x: x['similarity'], reverse=True)
+        results = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
         return results[:limit]
 
     def hybrid_search(
         self,
         query: str,
-        entry_type: str = 'knowledge',
+        entry_type: str = "knowledge",
         limit: int = 10,
         semantic_threshold: float = 0.25,
         keyword_boost: float = 0.15,
         include_low_confidence: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Hybrid search combining semantic and keyword matching.
 
         Args:
@@ -477,7 +482,7 @@ class EmbeddingService:
             query_text=query,
             entry_type=entry_type,
             limit=limit * 3,  # Get more than we need
-            threshold=0.15,   # Very low threshold to not miss anything
+            threshold=0.15,  # Very low threshold to not miss anything
         )
 
         # Get keyword results
@@ -492,36 +497,36 @@ class EmbeddingService:
 
         # Add semantic results
         for r in semantic_results:
-            eid = r['entry_id']
+            eid = r["entry_id"]
             combined[eid] = {
                 **r,
-                'semantic_score': r['similarity'],
-                'keyword_score': 0.0,
-                'match_types': ['semantic'],
+                "semantic_score": r["similarity"],
+                "keyword_score": 0.0,
+                "match_types": ["semantic"],
             }
 
         # Merge keyword results
         for r in keyword_results:
-            eid = r['entry_id']
+            eid = r["entry_id"]
             if eid in combined:
                 # Entry found by both - boost the score
-                combined[eid]['keyword_score'] = r['similarity']
-                combined[eid]['match_types'].append('keyword')
+                combined[eid]["keyword_score"] = r["similarity"]
+                combined[eid]["match_types"].append("keyword")
                 # Combined score with keyword boost
-                combined[eid]['similarity'] = min(1.0,
-                    combined[eid]['semantic_score'] + (r['similarity'] * keyword_boost)
+                combined[eid]["similarity"] = min(
+                    1.0, combined[eid]["semantic_score"] + (r["similarity"] * keyword_boost)
                 )
             else:
                 # Only found by keyword
                 combined[eid] = {
                     **r,
-                    'semantic_score': 0.0,
-                    'keyword_score': r['similarity'],
-                    'match_types': ['keyword'],
+                    "semantic_score": 0.0,
+                    "keyword_score": r["similarity"],
+                    "match_types": ["keyword"],
                 }
 
         # Sort by combined similarity
-        all_results = sorted(combined.values(), key=lambda x: x['similarity'], reverse=True)
+        all_results = sorted(combined.values(), key=lambda x: x["similarity"], reverse=True)
 
         # Split into high-confidence and low-confidence
         high_confidence = []
@@ -530,7 +535,7 @@ class EmbeddingService:
         for r in all_results:
             # High confidence if semantic score is above threshold
             # OR if keyword score is strong (> 0.5 = more than half the terms matched)
-            if r.get('semantic_score', 0) >= semantic_threshold or r.get('keyword_score', 0) >= 0.5:
+            if r.get("semantic_score", 0) >= semantic_threshold or r.get("keyword_score", 0) >= 0.5:
                 if len(high_confidence) < limit:
                     high_confidence.append(r)
                 elif include_low_confidence:
@@ -542,12 +547,12 @@ class EmbeddingService:
         low_confidence = low_confidence[:limit]
 
         return {
-            'results': high_confidence,
-            'maybe_related': low_confidence if include_low_confidence else [],
-            'total_found': len(all_results),
+            "results": high_confidence,
+            "maybe_related": low_confidence if include_low_confidence else [],
+            "total_found": len(all_results),
         }
 
-    def expand_query(self, query: str, max_expansions: int = 5) -> List[str]:
+    def expand_query(self, query: str, max_expansions: int = 5) -> list[str]:
         """Expand query with synonyms and related terms using Claude.
 
         Args:
@@ -558,13 +563,14 @@ class EmbeddingService:
             List of expanded queries (includes original)
         """
         import os
+
         try:
             import anthropic
         except ImportError:
             logger.warning("anthropic package not installed, skipping query expansion")
             return [query]
 
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             return [query]
 
@@ -574,16 +580,19 @@ class EmbeddingService:
             response = client.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": f"""Generate {max_expansions} alternative search queries for: "{query}"
+                messages=[
+                    {
+                        "role": "user",
+                        ("content"): f"""Generate {max_expansions} alternative search queries for: "{query}"
 
-Return ONLY the alternative queries, one per line. Include synonyms, related concepts, and rephrased versions. Be concise."""
-                }]
+Return ONLY the alternative queries, one per line.
+Include synonyms, related concepts, and rephrased versions. Be concise.""",
+                    }
+                ],
             )
 
             text = response.content[0].text
-            expansions = [line.strip() for line in text.strip().split('\n') if line.strip()]
+            expansions = [line.strip() for line in text.strip().split("\n") if line.strip()]
             expansions = expansions[:max_expansions]
 
             # Include original query first
@@ -596,10 +605,10 @@ Return ONLY the alternative queries, one per line. Include synonyms, related con
     def search_with_expansion(
         self,
         query: str,
-        entry_type: str = 'knowledge',
+        entry_type: str = "knowledge",
         limit: int = 10,
         expand: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Search with optional query expansion for better recall.
 
         Args:
@@ -625,20 +634,20 @@ Return ONLY the alternative queries, one per line. Include synonyms, related con
             )
 
             # Merge results, keeping best scores
-            for r in result['results'] + result['maybe_related']:
-                eid = r['entry_id']
-                if eid not in all_results or r['similarity'] > all_results[eid]['similarity']:
+            for r in result["results"] + result["maybe_related"]:
+                eid = r["entry_id"]
+                if eid not in all_results or r["similarity"] > all_results[eid]["similarity"]:
                     all_results[eid] = r
 
         # Sort and split
-        sorted_results = sorted(all_results.values(), key=lambda x: x['similarity'], reverse=True)
+        sorted_results = sorted(all_results.values(), key=lambda x: x["similarity"], reverse=True)
 
-        high = [r for r in sorted_results if r.get('semantic_score', 0) >= 0.25 or r.get('keyword_score', 0) >= 0.5]
+        high = [r for r in sorted_results if r.get("semantic_score", 0) >= 0.25 or r.get("keyword_score", 0) >= 0.5]
         low = [r for r in sorted_results if r not in high]
 
         return {
-            'results': high[:limit],
-            'maybe_related': low[:limit],
-            'queries_used': queries,
-            'total_found': len(sorted_results),
+            "results": high[:limit],
+            "maybe_related": low[:limit],
+            "queries_used": queries,
+            "total_found": len(sorted_results),
         }

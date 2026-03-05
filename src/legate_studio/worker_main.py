@@ -13,22 +13,22 @@ Configuration via environment:
 - WORKER_LOCK_DURATION: Lock timeout in seconds (default: 300)
 """
 
-import os
+import logging
 import signal
 import sys
 import time
-import logging
 
 # Configure logging before imports
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
 )
 logger = logging.getLogger(__name__)
 
 # Load environment
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
+
 load_dotenv()
 
 
@@ -82,5 +82,5 @@ def main():
     logger.info("Worker shutdown complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

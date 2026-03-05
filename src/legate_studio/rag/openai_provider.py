@@ -4,9 +4,8 @@ OpenAI Embedding Provider
 Uses OpenAI's text-embedding-3-small model for generating embeddings.
 """
 
-import os
 import logging
-from typing import List, Optional
+import os
 
 import requests
 
@@ -26,7 +25,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         "text-embedding-ada-002": 1536,
     }
 
-    def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL):
+    def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL):
         """Initialize the OpenAI embedding provider.
 
         Args:
@@ -41,7 +40,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._dimension = self.DIMENSIONS.get(model, 1536)
         logger.info(f"OpenAI embedding provider initialized with model: {model}")
 
-    def create_embedding(self, text: str) -> List[float]:
+    def create_embedding(self, text: str) -> list[float]:
         """Generate an embedding using OpenAI API.
 
         Args:
@@ -85,7 +84,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
         except requests.exceptions.RequestException as e:
             logger.error(f"OpenAI embedding request failed: {e}")
-            raise RuntimeError(f"Failed to create embedding: {e}")
+            raise RuntimeError(f"Failed to create embedding: {e}") from e
 
     def model_identifier(self) -> str:
         """Return the provider:model identifier."""
@@ -96,7 +95,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Return the embedding dimension."""
         return self._dimension
 
-    def create_embeddings_batch(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
+    def create_embeddings_batch(self, texts: list[str], batch_size: int = 100) -> list[list[float]]:
         """Generate embeddings for multiple texts in batched API calls.
 
         OpenAI supports up to 2048 texts per request, but we batch at 100
@@ -120,7 +119,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
         # Process in batches
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
+            batch = texts[i : i + batch_size]
 
             # Truncate long texts
             processed_batch = []
@@ -154,10 +153,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                 for item in batch_embeddings:
                     all_embeddings.append(item["embedding"])
 
-                logger.info(f"Generated batch of {len(batch)} embeddings ({i+len(batch)}/{len(texts)})")
+                logger.info(f"Generated batch of {len(batch)} embeddings ({i + len(batch)}/{len(texts)})")
 
             except requests.exceptions.RequestException as e:
                 logger.error(f"OpenAI batch embedding request failed: {e}")
-                raise RuntimeError(f"Failed to create batch embeddings: {e}")
+                raise RuntimeError(f"Failed to create batch embeddings: {e}") from e
 
         return all_embeddings

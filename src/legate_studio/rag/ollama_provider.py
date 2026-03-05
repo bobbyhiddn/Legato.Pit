@@ -5,9 +5,8 @@ Uses local Ollama for generating embeddings.
 Supports models like nomic-embed-text, mxbai-embed-large, etc.
 """
 
-import os
 import logging
-from typing import List, Optional
+import os
 
 import requests
 
@@ -33,7 +32,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
-        host: Optional[str] = None,
+        host: str | None = None,
     ):
         """Initialize the Ollama embedding provider.
 
@@ -47,7 +46,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
 
         logger.info(f"Ollama embedding provider initialized: {model} @ {self.host}")
 
-    def create_embedding(self, text: str) -> List[float]:
+    def create_embedding(self, text: str) -> list[float]:
         """Generate an embedding using local Ollama.
 
         Args:
@@ -86,12 +85,12 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             logger.debug(f"Generated Ollama embedding with {len(embedding)} dimensions")
             return embedding
 
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
             logger.error(f"Cannot connect to Ollama at {self.host}. Is it running?")
-            raise RuntimeError(f"Ollama not available at {self.host}")
+            raise RuntimeError(f"Ollama not available at {self.host}") from e
         except requests.exceptions.RequestException as e:
             logger.error(f"Ollama embedding request failed: {e}")
-            raise RuntimeError(f"Failed to create embedding: {e}")
+            raise RuntimeError(f"Failed to create embedding: {e}") from e
 
     def model_identifier(self) -> str:
         """Return the provider:model identifier."""

@@ -7,10 +7,19 @@ License: MIT
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: flask>=3.0.0
+Requires-Dist: flask-limiter>=3.5.0
 Requires-Dist: requests>=2.31.0
 Requires-Dist: anthropic>=0.18.0
 Requires-Dist: openai>=1.0.0
 Requires-Dist: numpy>=1.24.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: gunicorn>=21.2.0
+Requires-Dist: boto3>=1.34.0
+Requires-Dist: markdown>=3.5.0
+Requires-Dist: pygments>=2.17.0
+Requires-Dist: PyJWT>=2.8.0
+Requires-Dist: cryptography>=41.0.0
+Requires-Dist: stripe>=7.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"

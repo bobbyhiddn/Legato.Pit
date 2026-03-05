@@ -5,20 +5,18 @@ Synchronizes content from Legate.Library GitHub repository into the local SQLite
 Supports both GitHub API fetching and local filesystem sync.
 """
 
-import os
-import re
-import logging
 import hashlib
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+import logging
+import re
 from datetime import datetime
+from pathlib import Path
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_frontmatter_date(date_value) -> Optional[str]:
+def _parse_frontmatter_date(date_value) -> str | None:
     """Parse a frontmatter date value to ISO format string.
 
     Handles various formats:
@@ -38,10 +36,10 @@ def _parse_frontmatter_date(date_value) -> Optional[str]:
 
     if isinstance(date_value, str):
         # Already looks like ISO format
-        if 'T' in date_value or len(date_value) == 10:
+        if "T" in date_value or len(date_value) == 10:
             return date_value
         # Try parsing common formats
-        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d']:
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"]:
             try:
                 return datetime.strptime(date_value, fmt).isoformat()
             except ValueError:
@@ -50,7 +48,7 @@ def _parse_frontmatter_date(date_value) -> Optional[str]:
     return None
 
 
-def parse_markdown_frontmatter(content: str) -> Tuple[Dict, str]:
+def parse_markdown_frontmatter(content: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from markdown content.
 
     Args:
@@ -63,21 +61,21 @@ def parse_markdown_frontmatter(content: str) -> Tuple[Dict, str]:
     body = content
 
     # Check for YAML frontmatter (--- delimited)
-    if content.startswith('---'):
-        parts = content.split('---', 2)
+    if content.startswith("---"):
+        parts = content.split("---", 2)
         if len(parts) >= 3:
             try:
                 # Simple YAML parsing (key: value)
-                for line in parts[1].strip().split('\n'):
-                    if ':' in line:
-                        key, value = line.split(':', 1)
-                        value = value.strip().strip('"\'')
+                for line in parts[1].strip().split("\n"):
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        value = value.strip().strip("\"'")
                         # Parse boolean values
-                        if value.lower() == 'true':
+                        if value.lower() == "true":
                             value = True
-                        elif value.lower() == 'false':
+                        elif value.lower() == "false":
                             value = False
-                        elif value.lower() == 'null':
+                        elif value.lower() == "null":
                             value = None
                         frontmatter[key.strip()] = value
                 body = parts[2].strip()
@@ -98,56 +96,56 @@ def extract_title_from_content(content: str, filename: str) -> str:
         Extracted title
     """
     # Try to find first H1 heading
-    match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+    match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     if match:
         return match.group(1).strip()
 
     # Fall back to filename
     name = Path(filename).stem
     # Remove date prefix if present (e.g., 2026-01-08-title)
-    name = re.sub(r'^\d{4}-\d{2}-\d{2}-', '', name)
+    name = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", name)
     # Convert kebab-case to title case
-    return name.replace('-', ' ').title()
+    return name.replace("-", " ").title()
 
 
 # Category normalization map - shared between functions
 CATEGORY_MAP = {
     # Singular (canonical)
-    'concept': 'concept',
-    'epiphany': 'epiphany',
-    'reflection': 'reflection',
-    'glimmer': 'glimmer',
-    'reminder': 'reminder',
-    'worklog': 'worklog',
-    'tech-thought': 'tech-thought',
-    'research-topic': 'research-topic',
-    'theology': 'theology',
-    'agent-thought': 'agent-thought',
-    'article-idea': 'article-idea',
-    'writing': 'writing',
+    "concept": "concept",
+    "epiphany": "epiphany",
+    "reflection": "reflection",
+    "glimmer": "glimmer",
+    "reminder": "reminder",
+    "worklog": "worklog",
+    "tech-thought": "tech-thought",
+    "research-topic": "research-topic",
+    "theology": "theology",
+    "agent-thought": "agent-thought",
+    "article-idea": "article-idea",
+    "writing": "writing",
     # Plural (legacy)
-    'concepts': 'concept',
-    'epiphanies': 'epiphany',
-    'reflections': 'reflection',
-    'glimmers': 'glimmer',
-    'reminders': 'reminder',
-    'worklogs': 'worklog',
-    'tech-thoughts': 'tech-thought',
-    'research-topics': 'research-topic',
-    'theologies': 'theology',
-    'agent-thoughts': 'agent-thought',
-    'article-ideas': 'article-idea',
-    'writings': 'writing',
+    "concepts": "concept",
+    "epiphanies": "epiphany",
+    "reflections": "reflection",
+    "glimmers": "glimmer",
+    "reminders": "reminder",
+    "worklogs": "worklog",
+    "tech-thoughts": "tech-thought",
+    "research-topics": "research-topic",
+    "theologies": "theology",
+    "agent-thoughts": "agent-thought",
+    "article-ideas": "article-idea",
+    "writings": "writing",
     # Typos
-    'epiphanys': 'epiphany',
-    'theologys': 'theology',
-    'tech-thoughtss': 'tech-thought',
-    'research-topicss': 'research-topic',
+    "epiphanys": "epiphany",
+    "theologys": "theology",
+    "tech-thoughtss": "tech-thought",
+    "research-topicss": "research-topic",
     # Other
-    'procedures': 'procedure',
-    'procedure': 'procedure',
-    'references': 'reference',
-    'reference': 'reference',
+    "procedures": "procedure",
+    "procedure": "procedure",
+    "references": "reference",
+    "reference": "reference",
 }
 
 
@@ -161,7 +159,7 @@ def normalize_category(category: str) -> str:
         Canonical category string (singular form)
     """
     if not category:
-        return 'general'
+        return "general"
     return CATEGORY_MAP.get(category.lower(), category.lower())
 
 
@@ -181,7 +179,7 @@ def categorize_from_path(path: str) -> str:
     if len(parts) > 0:
         folder = parts[0].lower()
         return CATEGORY_MAP.get(folder, folder)
-    return 'general'
+    return "general"
 
 
 def compute_content_hash(content: str) -> str:
@@ -207,8 +205,8 @@ def generate_slug(title: str) -> str:
     Returns:
         Slug like "my-note-title"
     """
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower())[:50].strip('-')
-    return slug or 'untitled'
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:50].strip("-")
+    return slug or "untitled"
 
 
 def generate_entry_id(category: str, title: str, content_hash: str = None) -> str:
@@ -248,9 +246,9 @@ class LibrarySync:
     def sync_from_github(
         self,
         repo: str = "bobbyhiddn/Legate.Library",
-        token: Optional[str] = None,
+        token: str | None = None,
         branch: str = "main",
-    ) -> Dict:
+    ) -> dict:
         """Sync content from GitHub repository.
 
         Args:
@@ -266,16 +264,16 @@ class LibrarySync:
             raise ValueError("GitHub token required for sync - callers must provide user token")
 
         headers = {
-            'Authorization': f'Bearer {token}',
-            'Accept': 'application/vnd.github+json',
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
         }
 
         stats = {
-            'files_found': 0,
-            'entries_created': 0,
-            'entries_updated': 0,
-            'errors': 0,
-            'embeddings_generated': 0,
+            "files_found": 0,
+            "entries_created": 0,
+            "entries_updated": 0,
+            "errors": 0,
+            "embeddings_generated": 0,
         }
 
         try:
@@ -284,12 +282,12 @@ class LibrarySync:
             repo_response = requests.get(repo_info_url, headers=headers, timeout=10)
             if repo_response.ok:
                 repo_data = repo_response.json()
-                branch = repo_data.get('default_branch', branch)
+                branch = repo_data.get("default_branch", branch)
                 # Check if repo is empty (no commits)
-                if repo_data.get('size', 0) == 0:
+                if repo_data.get("size", 0) == 0:
                     logger.warning(f"Repository {repo} appears to be empty (no commits)")
-                    stats['errors'] = 0
-                    stats['message'] = 'Repository is empty - please add initial content'
+                    stats["errors"] = 0
+                    stats["message"] = "Repository is empty - please add initial content"
                     return stats
 
             # Get repository tree
@@ -300,65 +298,71 @@ class LibrarySync:
 
             # Filter for markdown files (exclude README.md and description.md)
             md_files = [
-                item for item in tree_data.get('tree', [])
-                if item['type'] == 'blob' and item['path'].endswith('.md')
-                and not item['path'].startswith('.')
-                and item['path'] != 'README.md'
-                and not item['path'].endswith('/description.md')
+                item
+                for item in tree_data.get("tree", [])
+                if item["type"] == "blob"
+                and item["path"].endswith(".md")
+                and not item["path"].startswith(".")
+                and item["path"] != "README.md"
+                and not item["path"].endswith("/description.md")
             ]
 
-            stats['files_found'] = len(md_files)
+            stats["files_found"] = len(md_files)
             logger.info(f"Found {len(md_files)} markdown files in {repo}")
 
             # Build set of current file paths for move detection
-            current_github_paths = {item['path'] for item in md_files}
+            current_github_paths = {item["path"] for item in md_files}
 
             # Process each file
             for item in md_files:
                 try:
                     result = self._process_github_file(
-                        repo, item['path'], item['sha'], headers,
-                        current_github_paths=current_github_paths
+                        repo,
+                        item["path"],
+                        item["sha"],
+                        headers,
+                        current_github_paths=current_github_paths,
                     )
-                    if result == 'created':
-                        stats['entries_created'] += 1
-                    elif result == 'updated':
-                        stats['entries_updated'] += 1
+                    if result == "created":
+                        stats["entries_created"] += 1
+                    elif result == "updated":
+                        stats["entries_updated"] += 1
                 except Exception as e:
                     logger.error(f"Error processing {item['path']}: {e}")
-                    stats['errors'] += 1
+                    stats["errors"] += 1
 
             # Generate embeddings only if we created/updated entries
-            if self.embedding_service and (stats['entries_created'] > 0 or stats['entries_updated'] > 0):
-                stats['embeddings_generated'] = self.embedding_service.generate_missing_embeddings(
-                    'knowledge', delay=0.1
+            if self.embedding_service and (stats["entries_created"] > 0 or stats["entries_updated"] > 0):
+                stats["embeddings_generated"] = self.embedding_service.generate_missing_embeddings(
+                    "knowledge", delay=0.1
                 )
 
             # Also sync assets from */assets/ folders
             asset_files = [
-                item for item in tree_data.get('tree', [])
-                if item['type'] == 'blob'
-                and '/assets/' in item['path']
-                and not item['path'].endswith('.gitkeep')
-                and not item['path'].startswith('.')
+                item
+                for item in tree_data.get("tree", [])
+                if item["type"] == "blob"
+                and "/assets/" in item["path"]
+                and not item["path"].endswith(".gitkeep")
+                and not item["path"].startswith(".")
             ]
 
-            stats['assets_found'] = len(asset_files)
-            stats['assets_created'] = 0
-            stats['assets_updated'] = 0
+            stats["assets_found"] = len(asset_files)
+            stats["assets_created"] = 0
+            stats["assets_updated"] = 0
 
             for item in asset_files:
                 try:
-                    result = self._process_asset_file(item['path'], item.get('size', 0))
-                    if result == 'created':
-                        stats['assets_created'] += 1
-                    elif result == 'updated':
-                        stats['assets_updated'] += 1
+                    result = self._process_asset_file(item["path"], item.get("size", 0))
+                    if result == "created":
+                        stats["assets_created"] += 1
+                    elif result == "updated":
+                        stats["assets_updated"] += 1
                 except Exception as e:
                     logger.error(f"Error processing asset {item['path']}: {e}")
-                    stats['errors'] += 1
+                    stats["errors"] += 1
 
-            if stats['assets_found'] > 0:
+            if stats["assets_found"] > 0:
                 logger.info(f"Synced {stats['assets_created']} new, {stats['assets_updated']} updated assets")
 
             # Log sync
@@ -375,8 +379,8 @@ class LibrarySync:
         repo: str,
         path: str,
         sha: str,
-        headers: Dict,
-        current_github_paths: Optional[set] = None,
+        headers: dict,
+        current_github_paths: set | None = None,
     ) -> str:
         """Process a single file from GitHub.
 
@@ -397,14 +401,15 @@ class LibrarySync:
 
         file_data = response.json()
         import base64
-        content = base64.b64decode(file_data['content']).decode('utf-8')
+
+        content = base64.b64decode(file_data["content"]).decode("utf-8")
 
         # Parse frontmatter and content
         frontmatter, body = parse_markdown_frontmatter(content)
 
         # Extract metadata
-        title = frontmatter.get('title') or extract_title_from_content(body, path)
-        raw_category = frontmatter.get('category') or categorize_from_path(path)
+        title = frontmatter.get("title") or extract_title_from_content(body, path)
+        raw_category = frontmatter.get("category") or categorize_from_path(path)
         # Always normalize category to handle plurals, typos, etc.
         category = normalize_category(raw_category)
 
@@ -419,46 +424,46 @@ class LibrarySync:
         # This handles long titles that truncate to the same slug
         collision = self.conn.execute(
             "SELECT id, file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
-            (entry_id, path)
+            (entry_id, path),
         ).fetchone()
         moved_from_entry_id = None  # Track if this is a file move
         if collision:
-            old_file_path = collision['file_path']
+            old_file_path = collision["file_path"]
             # Check if this is a file move: old path no longer exists in GitHub
             if current_github_paths and old_file_path not in current_github_paths:
                 # This is a file move! The old file doesn't exist in GitHub anymore.
                 # Update the existing entry's file_path instead of creating a duplicate.
                 logger.info(f"File move detected: {old_file_path} -> {path}")
-                moved_from_entry_id = collision['id']
+                moved_from_entry_id = collision["id"]
             else:
                 # True collision: both paths exist, disambiguate with content hash
                 logger.info(f"Entry ID collision detected for {path}, disambiguating with content hash")
                 entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
-        needs_chord = 1 if frontmatter.get('needs_chord') else 0
-        chord_name = frontmatter.get('chord_name')
-        chord_scope = frontmatter.get('chord_scope')
-        chord_id = frontmatter.get('chord_id')
-        chord_status = frontmatter.get('chord_status')
-        chord_repo = frontmatter.get('chord_repo')
+        needs_chord = 1 if frontmatter.get("needs_chord") else 0
+        chord_name = frontmatter.get("chord_name")
+        chord_scope = frontmatter.get("chord_scope")
+        chord_id = frontmatter.get("chord_id")
+        chord_status = frontmatter.get("chord_status")
+        chord_repo = frontmatter.get("chord_repo")
 
         # Extract source transcript for tracking
-        source_transcript = frontmatter.get('source_transcript')
+        source_transcript = frontmatter.get("source_transcript")
 
         # Extract task fields from frontmatter
-        task_status = frontmatter.get('task_status')
-        due_date = frontmatter.get('due_date')
+        task_status = frontmatter.get("task_status")
+        due_date = frontmatter.get("due_date")
 
         # Validate task_status if present
-        valid_task_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+        valid_task_statuses = {"pending", "in_progress", "blocked", "done"}
         if task_status and task_status not in valid_task_statuses:
             logger.warning(f"Invalid task_status '{task_status}' in {path}, ignoring")
             task_status = None
 
         # Extract created/updated dates from frontmatter (use as source of truth)
-        created_at = frontmatter.get('created') or frontmatter.get('created_at')
-        updated_at = frontmatter.get('updated') or frontmatter.get('updated_at')
+        created_at = frontmatter.get("created") or frontmatter.get("created_at")
+        updated_at = frontmatter.get("updated") or frontmatter.get("updated_at")
 
         # Parse date strings to ISO format if needed
         created_at = _parse_frontmatter_date(created_at)
@@ -466,11 +471,12 @@ class LibrarySync:
 
         # Extract topic tags - stored as JSON strings
         import json
-        domain_tags_raw = frontmatter.get('domain_tags')
-        key_phrases_raw = frontmatter.get('key_phrases')
+
+        domain_tags_raw = frontmatter.get("domain_tags")
+        key_phrases_raw = frontmatter.get("key_phrases")
 
         # Parse JSON arrays or keep as-is if already parsed
-        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith('['):
+        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith("["):
             try:
                 domain_tags = json.dumps(json.loads(domain_tags_raw))
             except json.JSONDecodeError:
@@ -480,7 +486,7 @@ class LibrarySync:
         else:
             domain_tags = None
 
-        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith('['):
+        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith("["):
             try:
                 key_phrases = json.dumps(json.loads(key_phrases_raw))
             except json.JSONDecodeError:
@@ -491,7 +497,7 @@ class LibrarySync:
             key_phrases = None
 
         # Extract subfolder from path (e.g., "rocks-cry-outs/chapters/file.md" -> "chapters")
-        path_parts = path.split('/')
+        path_parts = path.split("/")
         if len(path_parts) >= 3:  # folder/subfolder/file.md
             # Check if the middle part is actually a subfolder (not just the category folder)
             subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
@@ -500,13 +506,12 @@ class LibrarySync:
 
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
-            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
-            (path,)
+            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?", (path,)
         ).fetchone()
 
         # Handle file move: if we detected a move, treat it as an update to the existing entry
         if moved_from_entry_id and not existing:
-            existing = {'id': moved_from_entry_id, 'entry_id': entry_id}
+            existing = {"id": moved_from_entry_id, "entry_id": entry_id}
 
         if existing:
             # Update existing entry (including entry_id if changed)
@@ -518,13 +523,13 @@ class LibrarySync:
             # For file moves, query by id; for normal updates, query by file_path
             if moved_from_entry_id:
                 existing_data = self.conn.execute(
-                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE id = ?",
-                    (moved_from_entry_id,)
+                    ("SELECT chord_status, chord_repo, chord_id, subfolder FROMknowledge_entries WHERE id = ?"),
+                    (moved_from_entry_id,),
                 ).fetchone()
             else:
                 existing_data = self.conn.execute(
-                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE file_path = ?",
-                    (path,)
+                    ("SELECT chord_status, chord_repo, chord_id, subfolder FROMknowledge_entries WHERE file_path = ?"),
+                    (path,),
                 ).fetchone()
 
             # Chord status logic:
@@ -537,17 +542,21 @@ class LibrarySync:
                 final_chord_status = chord_status
                 final_chord_repo = chord_repo
                 final_chord_id = chord_id
-            elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+            elif existing_data and existing_data["chord_status"] in (
+                "pending",
+                "active",
+                "rejected",
+            ):
                 # Preserve existing chord status from DB
                 # (GitHub frontmatter may not have propagated yet after agent approval/rejection)
-                final_chord_status = existing_data['chord_status']
-                final_chord_repo = existing_data['chord_repo']
-                final_chord_id = existing_data['chord_id']
-            elif existing_data and existing_data['chord_repo']:
+                final_chord_status = existing_data["chord_status"]
+                final_chord_repo = existing_data["chord_repo"]
+                final_chord_id = existing_data["chord_id"]
+            elif existing_data and existing_data["chord_repo"]:
                 # Has a chord_repo but no status - keep it
-                final_chord_status = existing_data['chord_status']
-                final_chord_repo = existing_data['chord_repo']
-                final_chord_id = existing_data['chord_id']
+                final_chord_status = existing_data["chord_status"]
+                final_chord_repo = existing_data["chord_repo"]
+                final_chord_id = existing_data["chord_id"]
             elif needs_chord:
                 # Needs a chord but doesn't have one yet - ready to be queued
                 final_chord_status = None
@@ -573,16 +582,32 @@ class LibrarySync:
                         updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                     WHERE id = ?
                     """,
-                    (entry_id, title, category, body,
-                     path, subfolder,
-                     needs_chord, chord_name, chord_scope,
-                     final_chord_id, final_chord_status, final_chord_repo,
-                     domain_tags, key_phrases, source_transcript,
-                     task_status, due_date, content_hash, updated_at, moved_from_entry_id)
+                    (
+                        entry_id,
+                        title,
+                        category,
+                        body,
+                        path,
+                        subfolder,
+                        needs_chord,
+                        chord_name,
+                        chord_scope,
+                        final_chord_id,
+                        final_chord_status,
+                        final_chord_repo,
+                        domain_tags,
+                        key_phrases,
+                        source_transcript,
+                        task_status,
+                        due_date,
+                        content_hash,
+                        updated_at,
+                        moved_from_entry_id,
+                    ),
                 )
                 self.conn.commit()
                 logger.info(f"Updated (file moved): {entry_id} - {title}")
-                return 'updated'
+                return "updated"
             else:
                 self.conn.execute(
                     """
@@ -596,16 +621,31 @@ class LibrarySync:
                         updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                     WHERE file_path = ?
                     """,
-                    (entry_id, title, category, body,
-                     subfolder,
-                     needs_chord, chord_name, chord_scope,
-                     final_chord_id, final_chord_status, final_chord_repo,
-                     domain_tags, key_phrases, source_transcript,
-                     task_status, due_date, content_hash, updated_at, path)
+                    (
+                        entry_id,
+                        title,
+                        category,
+                        body,
+                        subfolder,
+                        needs_chord,
+                        chord_name,
+                        chord_scope,
+                        final_chord_id,
+                        final_chord_status,
+                        final_chord_repo,
+                        domain_tags,
+                        key_phrases,
+                        source_transcript,
+                        task_status,
+                        due_date,
+                        content_hash,
+                        updated_at,
+                        path,
+                    ),
                 )
                 self.conn.commit()
                 logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
-                return 'updated'
+                return "updated"
         else:
             # Create new entry - use frontmatter dates if available
             self.conn.execute(
@@ -615,18 +655,42 @@ class LibrarySync:
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
-                (entry_id, title, category, body, path, subfolder,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, created_at, updated_at)
+                (
+                    entry_id,
+                    title,
+                    category,
+                    body,
+                    path,
+                    subfolder,
+                    needs_chord,
+                    chord_name,
+                    chord_scope,
+                    chord_id,
+                    chord_status,
+                    chord_repo,
+                    domain_tags,
+                    key_phrases,
+                    source_transcript,
+                    task_status,
+                    due_date,
+                    content_hash,
+                    created_at,
+                    updated_at,
+                ),
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else "") + (f" [subfolder:{subfolder}]" if subfolder else ""))
-            return 'created'
+            logger.info(
+                f"Created: {entry_id} - {title}"
+                + (" [needs_chord]" if needs_chord else "")
+                + (f" [task:{task_status}]" if task_status else "")
+                + (f" [subfolder:{subfolder}]" if subfolder else "")
+            )
+            return "created"
 
-    def sync_from_filesystem(self, library_path: str) -> Dict:
+    def sync_from_filesystem(self, library_path: str) -> dict:
         """Sync content from local filesystem.
 
         Args:
@@ -640,18 +704,20 @@ class LibrarySync:
             raise ValueError(f"Library path does not exist: {library_path}")
 
         stats = {
-            'files_found': 0,
-            'entries_created': 0,
-            'entries_updated': 0,
-            'errors': 0,
-            'embeddings_generated': 0,
+            "files_found": 0,
+            "entries_created": 0,
+            "entries_updated": 0,
+            "errors": 0,
+            "embeddings_generated": 0,
         }
 
         # Find all markdown files (exclude README.md and description.md)
-        md_files = list(library_path.glob('**/*.md'))
-        md_files = [f for f in md_files if f.name != 'README.md' and f.name != 'description.md' and not f.name.startswith('.')]
+        md_files = list(library_path.glob("**/*.md"))
+        md_files = [
+            f for f in md_files if f.name != "README.md" and f.name != "description.md" and not f.name.startswith(".")
+        ]
 
-        stats['files_found'] = len(md_files)
+        stats["files_found"] = len(md_files)
         logger.info(f"Found {len(md_files)} markdown files in {library_path}")
 
         # Build set of current file paths for move detection
@@ -659,26 +725,21 @@ class LibrarySync:
 
         for file_path in md_files:
             try:
-                result = self._process_local_file(
-                    file_path, library_path,
-                    current_local_paths=current_local_paths
-                )
-                if result == 'created':
-                    stats['entries_created'] += 1
-                elif result == 'updated':
-                    stats['entries_updated'] += 1
+                result = self._process_local_file(file_path, library_path, current_local_paths=current_local_paths)
+                if result == "created":
+                    stats["entries_created"] += 1
+                elif result == "updated":
+                    stats["entries_updated"] += 1
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {e}")
-                stats['errors'] += 1
+                stats["errors"] += 1
 
         # Generate embeddings only if we created/updated entries
-        if self.embedding_service and (stats['entries_created'] > 0 or stats['entries_updated'] > 0):
-            stats['embeddings_generated'] = self.embedding_service.generate_missing_embeddings(
-                'knowledge', delay=0.1
-            )
+        if self.embedding_service and (stats["entries_created"] > 0 or stats["entries_updated"] > 0):
+            stats["embeddings_generated"] = self.embedding_service.generate_missing_embeddings("knowledge", delay=0.1)
 
         # Log sync
-        self._log_sync(str(library_path), 'filesystem', stats)
+        self._log_sync(str(library_path), "filesystem", stats)
 
         return stats
 
@@ -686,7 +747,7 @@ class LibrarySync:
         self,
         file_path: Path,
         base_path: Path,
-        current_local_paths: Optional[set] = None,
+        current_local_paths: set | None = None,
     ) -> str:
         """Process a single local file.
 
@@ -698,15 +759,15 @@ class LibrarySync:
         Returns:
             'created', 'updated', or 'skipped'
         """
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
         relative_path = str(file_path.relative_to(base_path))
 
         # Parse frontmatter and content
         frontmatter, body = parse_markdown_frontmatter(content)
 
         # Extract metadata
-        title = frontmatter.get('title') or extract_title_from_content(body, file_path.name)
-        raw_category = frontmatter.get('category') or categorize_from_path(relative_path)
+        title = frontmatter.get("title") or extract_title_from_content(body, file_path.name)
+        raw_category = frontmatter.get("category") or categorize_from_path(relative_path)
         # Always normalize category to handle plurals, typos, etc.
         category = normalize_category(raw_category)
 
@@ -721,46 +782,46 @@ class LibrarySync:
         # This handles long titles that truncate to the same slug
         collision = self.conn.execute(
             "SELECT id, file_path FROM knowledge_entries WHERE entry_id = ? AND file_path != ?",
-            (entry_id, relative_path)
+            (entry_id, relative_path),
         ).fetchone()
         moved_from_entry_id = None  # Track if this is a file move
         if collision:
-            old_file_path = collision['file_path']
+            old_file_path = collision["file_path"]
             # Check if this is a file move: old path no longer exists in filesystem
             if current_local_paths and old_file_path not in current_local_paths:
                 # This is a file move! The old file doesn't exist anymore.
                 # Update the existing entry's file_path instead of creating a duplicate.
                 logger.info(f"File move detected: {old_file_path} -> {relative_path}")
-                moved_from_entry_id = collision['id']
+                moved_from_entry_id = collision["id"]
             else:
                 # True collision: both paths exist, disambiguate with content hash
                 logger.info(f"Entry ID collision detected for {relative_path}, disambiguating with content hash")
                 entry_id = generate_entry_id(category, title, content_hash)
 
         # Extract chord fields
-        needs_chord = 1 if frontmatter.get('needs_chord') else 0
-        chord_name = frontmatter.get('chord_name')
-        chord_scope = frontmatter.get('chord_scope')
-        chord_id = frontmatter.get('chord_id')
-        chord_status = frontmatter.get('chord_status')
-        chord_repo = frontmatter.get('chord_repo')
+        needs_chord = 1 if frontmatter.get("needs_chord") else 0
+        chord_name = frontmatter.get("chord_name")
+        chord_scope = frontmatter.get("chord_scope")
+        chord_id = frontmatter.get("chord_id")
+        chord_status = frontmatter.get("chord_status")
+        chord_repo = frontmatter.get("chord_repo")
 
         # Extract source transcript for tracking
-        source_transcript = frontmatter.get('source_transcript')
+        source_transcript = frontmatter.get("source_transcript")
 
         # Extract task fields from frontmatter
-        task_status = frontmatter.get('task_status')
-        due_date = frontmatter.get('due_date')
+        task_status = frontmatter.get("task_status")
+        due_date = frontmatter.get("due_date")
 
         # Validate task_status if present
-        valid_task_statuses = {'pending', 'in_progress', 'blocked', 'done'}
+        valid_task_statuses = {"pending", "in_progress", "blocked", "done"}
         if task_status and task_status not in valid_task_statuses:
             logger.warning(f"Invalid task_status '{task_status}' in {relative_path}, ignoring")
             task_status = None
 
         # Extract created/updated dates from frontmatter (use as source of truth)
-        created_at = frontmatter.get('created') or frontmatter.get('created_at')
-        updated_at = frontmatter.get('updated') or frontmatter.get('updated_at')
+        created_at = frontmatter.get("created") or frontmatter.get("created_at")
+        updated_at = frontmatter.get("updated") or frontmatter.get("updated_at")
 
         # Parse date strings to ISO format if needed
         created_at = _parse_frontmatter_date(created_at)
@@ -768,10 +829,11 @@ class LibrarySync:
 
         # Extract topic tags - stored as JSON strings
         import json
-        domain_tags_raw = frontmatter.get('domain_tags')
-        key_phrases_raw = frontmatter.get('key_phrases')
 
-        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith('['):
+        domain_tags_raw = frontmatter.get("domain_tags")
+        key_phrases_raw = frontmatter.get("key_phrases")
+
+        if isinstance(domain_tags_raw, str) and domain_tags_raw.startswith("["):
             try:
                 domain_tags = json.dumps(json.loads(domain_tags_raw))
             except json.JSONDecodeError:
@@ -781,7 +843,7 @@ class LibrarySync:
         else:
             domain_tags = None
 
-        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith('['):
+        if isinstance(key_phrases_raw, str) and key_phrases_raw.startswith("["):
             try:
                 key_phrases = json.dumps(json.loads(key_phrases_raw))
             except json.JSONDecodeError:
@@ -792,7 +854,7 @@ class LibrarySync:
             key_phrases = None
 
         # Extract subfolder from path (e.g., "rocks-cry-outs/chapters/file.md" -> "chapters")
-        path_parts = relative_path.split('/')
+        path_parts = relative_path.split("/")
         if len(path_parts) >= 3:  # folder/subfolder/file.md
             # Check if the middle part is actually a subfolder (not just the category folder)
             subfolder = path_parts[-2] if path_parts[-2] != path_parts[0] else None
@@ -801,26 +863,25 @@ class LibrarySync:
 
         # Check if entry exists by file_path (more reliable than entry_id)
         existing = self.conn.execute(
-            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?",
-            (relative_path,)
+            "SELECT id, entry_id FROM knowledge_entries WHERE file_path = ?", (relative_path,)
         ).fetchone()
 
         # Handle file move: if we detected a move, treat it as an update to the existing entry
         if moved_from_entry_id and not existing:
-            existing = {'id': moved_from_entry_id, 'entry_id': entry_id}
+            existing = {"id": moved_from_entry_id, "entry_id": entry_id}
 
         if existing:
             # Same chord status logic as GitHub sync
             # For file moves, query by id; for normal updates, query by file_path
             if moved_from_entry_id:
                 existing_data = self.conn.execute(
-                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE id = ?",
-                    (moved_from_entry_id,)
+                    ("SELECT chord_status, chord_repo, chord_id, subfolder FROMknowledge_entries WHERE id = ?"),
+                    (moved_from_entry_id,),
                 ).fetchone()
             else:
                 existing_data = self.conn.execute(
-                    "SELECT chord_status, chord_repo, chord_id, subfolder FROM knowledge_entries WHERE file_path = ?",
-                    (relative_path,)
+                    ("SELECT chord_status, chord_repo, chord_id, subfolder FROMknowledge_entries WHERE file_path = ?"),
+                    (relative_path,),
                 ).fetchone()
 
             # Chord status logic - preserve existing chord relationships
@@ -829,16 +890,20 @@ class LibrarySync:
                 final_chord_status = chord_status
                 final_chord_repo = chord_repo
                 final_chord_id = chord_id
-            elif existing_data and existing_data['chord_status'] in ('pending', 'active', 'rejected'):
+            elif existing_data and existing_data["chord_status"] in (
+                "pending",
+                "active",
+                "rejected",
+            ):
                 # Preserve existing chord status from DB
-                final_chord_status = existing_data['chord_status']
-                final_chord_repo = existing_data['chord_repo']
-                final_chord_id = existing_data['chord_id']
-            elif existing_data and existing_data['chord_repo']:
+                final_chord_status = existing_data["chord_status"]
+                final_chord_repo = existing_data["chord_repo"]
+                final_chord_id = existing_data["chord_id"]
+            elif existing_data and existing_data["chord_repo"]:
                 # Has a chord_repo but no status - keep it
-                final_chord_status = existing_data['chord_status']
-                final_chord_repo = existing_data['chord_repo']
-                final_chord_id = existing_data['chord_id']
+                final_chord_status = existing_data["chord_status"]
+                final_chord_repo = existing_data["chord_repo"]
+                final_chord_id = existing_data["chord_id"]
             elif needs_chord:
                 # Needs a chord but doesn't have one yet
                 final_chord_status = None
@@ -864,16 +929,32 @@ class LibrarySync:
                         updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                     WHERE id = ?
                     """,
-                    (entry_id, title, category, body,
-                     relative_path, subfolder,
-                     needs_chord, chord_name, chord_scope,
-                     final_chord_id, final_chord_status, final_chord_repo,
-                     domain_tags, key_phrases, source_transcript,
-                     task_status, due_date, content_hash, updated_at, moved_from_entry_id)
+                    (
+                        entry_id,
+                        title,
+                        category,
+                        body,
+                        relative_path,
+                        subfolder,
+                        needs_chord,
+                        chord_name,
+                        chord_scope,
+                        final_chord_id,
+                        final_chord_status,
+                        final_chord_repo,
+                        domain_tags,
+                        key_phrases,
+                        source_transcript,
+                        task_status,
+                        due_date,
+                        content_hash,
+                        updated_at,
+                        moved_from_entry_id,
+                    ),
                 )
                 self.conn.commit()
                 logger.info(f"Updated (file moved): {entry_id} - {title}")
-                return 'updated'
+                return "updated"
             else:
                 self.conn.execute(
                     """
@@ -887,16 +968,31 @@ class LibrarySync:
                         updated_at = COALESCE(?, CURRENT_TIMESTAMP)
                     WHERE file_path = ?
                     """,
-                    (entry_id, title, category, body,
-                     subfolder,
-                     needs_chord, chord_name, chord_scope,
-                     final_chord_id, final_chord_status, final_chord_repo,
-                     domain_tags, key_phrases, source_transcript,
-                     task_status, due_date, content_hash, updated_at, relative_path)
+                    (
+                        entry_id,
+                        title,
+                        category,
+                        body,
+                        subfolder,
+                        needs_chord,
+                        chord_name,
+                        chord_scope,
+                        final_chord_id,
+                        final_chord_status,
+                        final_chord_repo,
+                        domain_tags,
+                        key_phrases,
+                        source_transcript,
+                        task_status,
+                        due_date,
+                        content_hash,
+                        updated_at,
+                        relative_path,
+                    ),
                 )
                 self.conn.commit()
                 logger.debug(f"Updated: {entry_id} - {title}" + (f" [task:{task_status}]" if task_status else ""))
-                return 'updated'
+                return "updated"
         else:
             # Create new entry - use frontmatter dates if available
             self.conn.execute(
@@ -906,18 +1002,42 @@ class LibrarySync:
                  needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
                  domain_tags, key_phrases, source_transcript,
                  task_status, due_date, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
                 """,
-                (entry_id, title, category, body, relative_path, subfolder,
-                 needs_chord, chord_name, chord_scope, chord_id, chord_status, chord_repo,
-                 domain_tags, key_phrases, source_transcript,
-                 task_status, due_date, content_hash, created_at, updated_at)
+                (
+                    entry_id,
+                    title,
+                    category,
+                    body,
+                    relative_path,
+                    subfolder,
+                    needs_chord,
+                    chord_name,
+                    chord_scope,
+                    chord_id,
+                    chord_status,
+                    chord_repo,
+                    domain_tags,
+                    key_phrases,
+                    source_transcript,
+                    task_status,
+                    due_date,
+                    content_hash,
+                    created_at,
+                    updated_at,
+                ),
             )
             self.conn.commit()
-            logger.info(f"Created: {entry_id} - {title}" + (" [needs_chord]" if needs_chord else "") + (f" [task:{task_status}]" if task_status else "") + (f" [subfolder:{subfolder}]" if subfolder else ""))
-            return 'created'
+            logger.info(
+                f"Created: {entry_id} - {title}"
+                + (" [needs_chord]" if needs_chord else "")
+                + (f" [task:{task_status}]" if task_status else "")
+                + (f" [subfolder:{subfolder}]" if subfolder else "")
+            )
+            return "created"
 
-    def _log_sync(self, source: str, branch: str, stats: Dict):
+    def _log_sync(self, source: str, branch: str, stats: dict):
         """Log sync operation to database."""
         self.conn.execute(
             """
@@ -927,13 +1047,13 @@ class LibrarySync:
             (
                 source,
                 branch,
-                stats['entries_created'] + stats['entries_updated'],
-                'success' if stats['errors'] == 0 else 'partial'
-            )
+                stats["entries_created"] + stats["entries_updated"],
+                "success" if stats["errors"] == 0 else "partial",
+            ),
         )
         self.conn.commit()
 
-    def get_sync_status(self) -> Dict:
+    def get_sync_status(self) -> dict:
         """Get the latest sync status."""
         row = self.conn.execute(
             """
@@ -946,14 +1066,14 @@ class LibrarySync:
 
         if row:
             return dict(row)
-        return {'status': 'never_synced'}
+        return {"status": "never_synced"}
 
     def sync_assets_from_github(
         self,
         repo: str = "bobbyhiddn/Legate.Library",
-        token: Optional[str] = None,
+        token: str | None = None,
         branch: str = "main",
-    ) -> Dict:
+    ) -> dict:
         """Sync assets from GitHub repository.
 
         Scans for files in */assets/ folders and indexes them in the database.
@@ -967,21 +1087,20 @@ class LibrarySync:
         Returns:
             Dict with sync statistics
         """
-        import mimetypes
 
         if not token:
             raise ValueError("GitHub token required for sync")
 
         headers = {
-            'Authorization': f'Bearer {token}',
-            'Accept': 'application/vnd.github+json',
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
         }
 
         stats = {
-            'assets_found': 0,
-            'assets_created': 0,
-            'assets_updated': 0,
-            'errors': 0,
+            "assets_found": 0,
+            "assets_created": 0,
+            "assets_updated": 0,
+            "errors": 0,
         }
 
         try:
@@ -994,26 +1113,27 @@ class LibrarySync:
             # Filter for files in */assets/ folders
             # Pattern: category/assets/filename (not .gitkeep)
             asset_files = [
-                item for item in tree_data.get('tree', [])
-                if item['type'] == 'blob'
-                and '/assets/' in item['path']
-                and not item['path'].endswith('.gitkeep')
-                and not item['path'].startswith('.')
+                item
+                for item in tree_data.get("tree", [])
+                if item["type"] == "blob"
+                and "/assets/" in item["path"]
+                and not item["path"].endswith(".gitkeep")
+                and not item["path"].startswith(".")
             ]
 
-            stats['assets_found'] = len(asset_files)
+            stats["assets_found"] = len(asset_files)
             logger.info(f"Found {len(asset_files)} asset files in {repo}")
 
             for item in asset_files:
                 try:
-                    result = self._process_asset_file(item['path'], item.get('size', 0))
-                    if result == 'created':
-                        stats['assets_created'] += 1
-                    elif result == 'updated':
-                        stats['assets_updated'] += 1
+                    result = self._process_asset_file(item["path"], item.get("size", 0))
+                    if result == "created":
+                        stats["assets_created"] += 1
+                    elif result == "updated":
+                        stats["assets_updated"] += 1
                 except Exception as e:
                     logger.error(f"Error processing asset {item['path']}: {e}")
-                    stats['errors'] += 1
+                    stats["errors"] += 1
 
             return stats
 
@@ -1037,21 +1157,18 @@ class LibrarySync:
         # Parse the path to extract category and filename
         # Expected format: category/assets/filename.ext
         parts = Path(file_path).parts
-        if len(parts) < 3 or parts[-2] != 'assets':
+        if len(parts) < 3 or parts[-2] != "assets":
             logger.debug(f"Skipping non-asset path: {file_path}")
-            return 'skipped'
+            return "skipped"
 
         category = parts[0]
         filename = parts[-1]
 
         # Determine MIME type from filename
-        mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         # Check if asset already exists by file_path
-        existing = self.conn.execute(
-            "SELECT asset_id FROM library_assets WHERE file_path = ?",
-            (file_path,)
-        ).fetchone()
+        existing = self.conn.execute("SELECT asset_id FROM library_assets WHERE file_path = ?", (file_path,)).fetchone()
 
         if existing:
             # Update existing asset
@@ -1061,11 +1178,11 @@ class LibrarySync:
                 SET file_size = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE file_path = ?
                 """,
-                (file_size, mime_type, file_path)
+                (file_size, mime_type, file_path),
             )
             self.conn.commit()
             logger.debug(f"Updated asset: {file_path}")
-            return 'updated'
+            return "updated"
         else:
             # Create new asset record
             asset_id = f"asset-{secrets.token_hex(6)}"
@@ -1075,8 +1192,8 @@ class LibrarySync:
                 (asset_id, category, filename, file_path, mime_type, file_size)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (asset_id, category, filename, file_path, mime_type, file_size)
+                (asset_id, category, filename, file_path, mime_type, file_size),
             )
             self.conn.commit()
             logger.info(f"Created asset: {asset_id} -> {file_path}")
-            return 'created'
+            return "created"

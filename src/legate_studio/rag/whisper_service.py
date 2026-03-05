@@ -5,12 +5,9 @@ Uses OpenAI's Whisper API to transcribe audio files.
 Supports long recordings by chunking audio.
 """
 
-import os
-import io
 import logging
-import tempfile
+import os
 import time
-from typing import Optional, Tuple
 
 import requests
 
@@ -30,7 +27,7 @@ class WhisperService:
     # Whisper API has a 25MB file size limit
     MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
 
-    def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL):
+    def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL):
         """Initialize the Whisper service.
 
         Args:
@@ -48,9 +45,9 @@ class WhisperService:
         self,
         audio_data: bytes,
         filename: str = "audio.webm",
-        language: Optional[str] = None,
-        prompt: Optional[str] = None,
-    ) -> Tuple[bool, str]:
+        language: str | None = None,
+        prompt: str | None = None,
+    ) -> tuple[bool, str]:
         """Transcribe audio data using Whisper API.
 
         Args:
@@ -66,32 +63,32 @@ class WhisperService:
             return False, "No audio data provided"
 
         if len(audio_data) > self.MAX_FILE_SIZE:
-            return False, f"Audio file too large (max {self.MAX_FILE_SIZE // (1024*1024)}MB)"
+            return False, f"Audio file too large (max {self.MAX_FILE_SIZE // (1024 * 1024)}MB)"
 
         # Determine file extension for Content-Type
-        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'webm'
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "webm"
 
         # Map extension to MIME type
         mime_types = {
-            'webm': 'audio/webm',
-            'mp3': 'audio/mpeg',
-            'mp4': 'audio/mp4',
-            'm4a': 'audio/mp4',
-            'wav': 'audio/wav',
-            'ogg': 'audio/ogg',
-            'flac': 'audio/flac',
+            "webm": "audio/webm",
+            "mp3": "audio/mpeg",
+            "mp4": "audio/mp4",
+            "m4a": "audio/mp4",
+            "wav": "audio/wav",
+            "ogg": "audio/ogg",
+            "flac": "audio/flac",
         }
-        mime_type = mime_types.get(ext, 'audio/webm')
+        mime_type = mime_types.get(ext, "audio/webm")
 
         # Prepare multipart form data (built once, reused across retries)
         data = {
-            'model': self.model,
-            'response_format': 'text',  # Plain text response
+            "model": self.model,
+            "response_format": "text",  # Plain text response
         }
         if language:
-            data['language'] = language
+            data["language"] = language
         if prompt:
-            data['prompt'] = prompt
+            data["prompt"] = prompt
 
         logger.info(f"Sending audio to Whisper API: {len(audio_data)} bytes, format={ext}")
 
@@ -99,9 +96,7 @@ class WhisperService:
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 # Rebuild files dict each attempt — requests consumes the bytes object
-                files = {
-                    'file': (filename, audio_data, mime_type)
-                }
+                files = {"file": (filename, audio_data, mime_type)}
 
                 response = requests.post(
                     self.TRANSCRIPTION_URL,
@@ -139,8 +134,8 @@ class WhisperService:
                 last_error_msg = f"Whisper API error: {response.status_code}"
                 try:
                     error_data = response.json()
-                    if 'error' in error_data:
-                        last_error_msg = error_data['error'].get('message', last_error_msg)
+                    if "error" in error_data:
+                        last_error_msg = error_data["error"].get("message", last_error_msg)
                 except Exception:
                     last_error_msg = response.text[:200] if response.text else last_error_msg
                 logger.error(f"Whisper API failed (attempt {attempt}/{_MAX_RETRIES}): {last_error_msg}")
@@ -174,10 +169,10 @@ class WhisperService:
 
 
 # Singleton instance (lazy initialization)
-_whisper_service: Optional[WhisperService] = None
+_whisper_service: WhisperService | None = None
 
 
-def get_whisper_service() -> Optional[WhisperService]:
+def get_whisper_service() -> WhisperService | None:
     """Get or create the Whisper service singleton.
 
     Returns:
