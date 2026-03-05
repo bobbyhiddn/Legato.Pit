@@ -32,9 +32,16 @@
     }
 
     .login-logo {
-        width: 80px;
+        width: 200px;
         height: auto;
         opacity: 0.95;
+        border-radius: 12px;
+    }
+
+    @media (prefers-color-scheme: light) {
+        .login-logo {
+            filter: invert(1);
+        }
     }
 
     .login-brand {
@@ -103,6 +110,38 @@
         font-size: 0.75rem;
         color: var(--text-muted);
         text-align: center;
+    }
+
+    /* Light mode overrides for login page — uses global CSS variables */
+    @media (prefers-color-scheme: light) {
+        .login-page {
+            background: var(--bg-primary);
+        }
+        .login-card {
+            background: var(--bg-elevated);
+            border-color: var(--border-color);
+        }
+        .login-brand h1 {
+            color: var(--text-primary);
+        }
+        .login-subtitle {
+            color: var(--text-secondary);
+        }
+        .btn-github-login {
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+        .btn-github-login:hover {
+            border-color: var(--border-strong);
+            background: var(--hover-tint);
+            color: var(--text-primary);
+        }
+        .login-footer {
+            color: var(--text-muted);
+        }
+        .login-divider {
+            background: var(--border-color);
+        }
     }
 
     /* Suppress the sidebar entirely on the login page */
