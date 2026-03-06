@@ -14,11 +14,21 @@
     }
 
     @media (max-width: 768px) {
+        body {
+            overflow-x: hidden;
+        }
         .graph-card {
             height: 360px;
         }
         .graph-wrapper {
             min-height: 200px;
+        }
+        .graph-controls {
+            gap: 0.5rem;
+        }
+        /* Hide keyboard-only hint on touch devices */
+        .graph-controls .shift-hint {
+            display: none;
         }
         .graph-legend {
             top: 0.25rem;
@@ -37,6 +47,12 @@
         }
         .graph-wrapper {
             min-height: 160px;
+        }
+        .graph-controls {
+            gap: 0.25rem;
+        }
+        .control-group input[type="range"] {
+            width: 60px;
         }
     }
 
@@ -673,7 +689,7 @@
                 <input type="range" id="nodeSizeSlider" min="4" max="12" step="1" value="5">
             </div>
             <div class="control-group">
-                <label style="font-size: 0.7rem; opacity: 0.7">Shift+click to multi-select</label>
+                <label class="shift-hint" style="font-size: 0.7rem; opacity: 0.7">Shift+click to multi-select</label>
             </div>
         </div>
         <div class="graph-wrapper" id="graphWrapper">
