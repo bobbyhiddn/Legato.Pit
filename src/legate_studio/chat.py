@@ -270,20 +270,22 @@ def send_message():
         user_id = _get_user_id()
 
         # ── Credit cap check (Managed tier only) ─────────────────────────────
-        if _is_multi_tenant() and tier == "managed" and user_id:
-            from .rag.usage import check_credit_cap
-            allowed, remaining = check_credit_cap(user_id)
-            if not allowed:
-                return jsonify({
-                    "error": (
-                        "Monthly credit limit reached ($4.50). "
-                        "Purchase more credits or upgrade to BYOK for unlimited chat "
-                        "with your own keys."
-                    ),
-                    "credit_cap_reached": True,
-                    "upgrade_url": url_for("auth.setup"),
-                    "topup_url": url_for("chat.buy_credits"),
-                }), 429
+        if _is_multi_tenant() and user_id:
+            from .rag.usage import is_managed_tier, check_credit_cap, get_cap_for_tier
+            if is_managed_tier(tier):
+                allowed, remaining = check_credit_cap(user_id, tier=tier)
+                cap_dollars = get_cap_for_tier(tier) / 1_000_000
+                if not allowed:
+                    return jsonify({
+                        "error": (
+                            f"Monthly credit limit reached (${cap_dollars:.2f}). "
+                            "Purchase more credits or upgrade to BYOK for unlimited chat "
+                            "with your own keys."
+                        ),
+                        "credit_cap_reached": True,
+                        "upgrade_url": url_for("auth.setup"),
+                        "topup_url": url_for("chat.buy_credits"),
+                    }), 429
 
         # ── Instantiate ChatService with resolved key ────────────────────────
         # In single-tenant mode api_key is None and ChatService falls back to env vars.
@@ -318,7 +320,8 @@ def send_message():
         usage = result["usage"]
 
         # ── Token usage tracking (Managed tier only) ─────────────────────────
-        if _is_multi_tenant() and tier == "managed" and user_id:
+        from .rag.usage import is_managed_tier as _is_managed
+        if _is_multi_tenant() and _is_managed(tier) and user_id:
             from .rag.usage import estimate_cost, record_usage_event, update_usage_meter
             cost = estimate_cost(
                 effective_provider.value,
@@ -421,14 +424,14 @@ def get_usage():
         return jsonify({"tracked": False, "tier": "single-tenant"})
 
     from .core import get_effective_tier
+    from .rag.usage import is_managed_tier, get_usage_summary
     user_id = _get_user_id()
     tier = get_effective_tier(user_id) if user_id else "trial"
 
-    if tier != "managed":
+    if not is_managed_tier(tier):
         return jsonify({"tracked": False, "tier": tier})
 
-    from .rag.usage import get_usage_summary
-    summary = get_usage_summary(user_id)
+    summary = get_usage_summary(user_id, tier=tier)
     summary["tracked"] = True
     summary["tier"] = tier
     summary["topup_price_dollars"] = 5.0
@@ -464,10 +467,11 @@ def buy_credits():
         return jsonify({"error": "Credit top-ups only available in multi-tenant mode"}), 400
 
     from .core import get_effective_tier
+    from .rag.usage import is_managed_tier
     user_id = _get_user_id()
     tier = get_effective_tier(user_id) if user_id else "trial"
 
-    if tier != "managed":
+    if not is_managed_tier(tier):
         return jsonify({
             "error": "Credit top-ups are only available for Managed tier users.",
             "upgrade_url": url_for("auth.setup"),
