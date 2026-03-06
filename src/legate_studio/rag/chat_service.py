@@ -30,14 +30,18 @@ class ChatService:
         self,
         provider: ChatProvider = ChatProvider.CLAUDE,
         model: str | None = None,
+        api_key: str | None = None,
     ):
         """Initialize the chat service.
 
         Args:
             provider: Which LLM provider to use
             model: Specific model to use (defaults to provider's default)
+            api_key: Optional API key to use directly. If not provided, falls back
+                     to environment variable (backward compat / single-tenant mode).
         """
         self.provider = provider
+        self._api_key = api_key
 
         if provider == ChatProvider.CLAUDE:
             self.model = model or self.DEFAULT_CLAUDE_MODEL
@@ -55,7 +59,7 @@ class ChatService:
         """Initialize Anthropic client."""
         import anthropic
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
 
@@ -65,20 +69,28 @@ class ChatService:
         """Initialize OpenAI client."""
         import openai
 
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = self._api_key or os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set")
 
         self.client = openai.OpenAI(api_key=api_key)
 
     def _init_gemini(self):
-        """Initialize Google Gemini client."""
+        """Initialize Google Gemini client.
+
+        Note: google.generativeai configures globally via genai.configure(), which is
+        stateful. For per-user BYOK keys, we pass the api_key directly to the
+        GenerativeModel constructor via client_options, avoiding the global state issue.
+        """
         import google.generativeai as genai
 
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = self._api_key or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not set")
 
+        # Store key for use in _chat_gemini (we create a new model per request there)
+        self._gemini_api_key = api_key
+        # Initialize with the key for list_models / other class methods that need a configured client
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel(self.model)
 
@@ -87,7 +99,7 @@ class ChatService:
         messages: list[dict[str, str]],
         max_tokens: int = 2048,
         temperature: float = 0.7,
-    ) -> str:
+    ) -> dict:
         """Send messages to the LLM and get a response.
 
         Args:
@@ -96,7 +108,9 @@ class ChatService:
             temperature: Sampling temperature
 
         Returns:
-            The assistant's response text
+            Dict with keys:
+              - "text": str — the assistant's response text
+              - "usage": dict with "input_tokens" and "output_tokens" (both int)
         """
         if self.provider == ChatProvider.CLAUDE:
             return self._chat_claude(messages, max_tokens, temperature)
@@ -110,7 +124,7 @@ class ChatService:
         messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
-    ) -> str:
+    ) -> dict:
         """Chat via Claude API."""
         # Extract system messages
         system_parts = []
@@ -133,7 +147,13 @@ class ChatService:
                 messages=chat_messages,
             )
 
-            return response.content[0].text
+            return {
+                "text": response.content[0].text,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                },
+            }
 
         except Exception as e:
             logger.error(f"Claude chat failed: {e}")
@@ -144,7 +164,7 @@ class ChatService:
         messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
-    ) -> str:
+    ) -> dict:
         """Chat via OpenAI API."""
         import openai
 
@@ -173,7 +193,14 @@ class ChatService:
                     messages=messages,
                 )
 
-            return response.choices[0].message.content
+            usage = response.usage
+            return {
+                "text": response.choices[0].message.content,
+                "usage": {
+                    "input_tokens": usage.prompt_tokens if usage else 0,
+                    "output_tokens": usage.completion_tokens if usage else 0,
+                },
+            }
 
         except openai.BadRequestError as e:
             # Handle case where model requires max_completion_tokens
@@ -184,7 +211,14 @@ class ChatService:
                     max_completion_tokens=max_tokens,
                     messages=messages,
                 )
-                return response.choices[0].message.content
+                usage = response.usage
+                return {
+                    "text": response.choices[0].message.content,
+                    "usage": {
+                        "input_tokens": usage.prompt_tokens if usage else 0,
+                        "output_tokens": usage.completion_tokens if usage else 0,
+                    },
+                }
             raise
 
         except Exception as e:
@@ -196,7 +230,7 @@ class ChatService:
         messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
-    ) -> str:
+    ) -> dict:
         """Chat via Google Gemini API."""
         import google.generativeai as genai
 
@@ -214,13 +248,17 @@ class ChatService:
                 chat_history.append({"role": "user", "parts": [msg["content"]]})
 
         try:
-            # Recreate model with system instruction if needed
+            # Always create a fresh model instance with the stored API key.
+            # This avoids the global genai.configure() state issue for per-user BYOK keys.
+            api_key = getattr(self, "_gemini_api_key", None) or os.environ.get("GEMINI_API_KEY")
             model = genai.GenerativeModel(
                 self.model,
                 system_instruction=(
                     "\n\n".join(system_parts) if system_parts else None
                 ),
             )
+            # Re-configure with this instance's key before the call
+            genai.configure(api_key=api_key)
 
             generation_config = genai.types.GenerationConfig(
                 max_output_tokens=max_tokens,
@@ -240,7 +278,18 @@ class ChatService:
                     generation_config=generation_config,
                 )
 
-            return response.text
+            # Extract token usage from usage_metadata
+            usage_meta = getattr(response, "usage_metadata", None)
+            input_tokens = getattr(usage_meta, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage_meta, "candidates_token_count", 0) or 0
+
+            return {
+                "text": response.text,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            }
 
         except Exception as e:
             logger.error(f"Gemini chat failed: {e}")

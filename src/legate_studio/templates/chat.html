@@ -411,6 +411,94 @@
         max-width: 400px;
     }
 
+    /* Credit usage indicator (Managed tier) */
+    .credit-usage-bar {
+        margin-top: 0.5rem;
+        padding: 0.4rem 0.75rem;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        display: none; /* shown via JS when tier=managed */
+    }
+
+    .credit-usage-bar.visible {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .credit-usage-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    .credit-usage-track {
+        flex: 1;
+        min-width: 80px;
+        height: 4px;
+        background: var(--bg-elevated);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+
+    .credit-usage-fill {
+        height: 100%;
+        background: var(--border-strong);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+    }
+
+    .credit-usage-fill.warning {
+        background: #c09a3a; /* amber */
+    }
+
+    .credit-usage-fill.danger {
+        background: var(--accent-red, #e05252);
+    }
+
+    .credit-buy-btn {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.5rem;
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background var(--transition), color var(--transition);
+    }
+
+    .credit-buy-btn:hover {
+        background: var(--hover-tint);
+        color: var(--text-primary);
+    }
+
+    .credit-cap-banner {
+        display: none;
+        margin: 0.5rem 0;
+        padding: 0.6rem 0.75rem;
+        background: rgba(224, 82, 82, 0.08);
+        border: 1px solid var(--accent-red, #e05252);
+        border-radius: 6px;
+        font-size: 0.8rem;
+        color: var(--text-primary);
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .credit-cap-banner.visible {
+        display: flex;
+    }
+
+    .credit-cap-banner a {
+        color: var(--text-primary);
+        text-decoration: underline;
+        white-space: nowrap;
+    }
+
     /* Mobile chat layout */
     @media (max-width: 768px) {
         .chat-wrapper {
@@ -461,6 +549,22 @@
                 <span>{{ stats.knowledge_entries }} entries indexed</span>
                 <span id="currentModelDisplay">{{ provider }}:{{ model }}</span>
             </div>
+            <!-- Credit usage indicator — only shown for managed-tier users via JS -->
+            <div class="credit-usage-bar" id="creditUsageBar">
+                <span class="credit-usage-label" id="creditUsageLabel">Credits: loading…</span>
+                <div class="credit-usage-track">
+                    <div class="credit-usage-fill" id="creditUsageFill" style="width:0%"></div>
+                </div>
+                <button class="credit-buy-btn" onclick="showBuyCredits()" title="Buy more credits">+ Buy credits</button>
+            </div>
+            <!-- Cap reached banner -->
+            <div class="credit-cap-banner" id="creditCapBanner">
+                <span>⚠ Monthly credit limit reached.</span>
+                <a href="#" onclick="showBuyCredits(); return false;">Buy more credits ($5)</a>
+                <span>or</span>
+                <a href="{{ url_for('auth.setup') }}">switch to BYOK</a>
+                <span>for unlimited usage.</span>
+            </div>
         </header>
 
         <div class="chat-messages" id="chatMessages">
@@ -509,6 +613,9 @@
 <!-- Marked.js for markdown rendering -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
+    // Tier passed from Flask — used to decide whether to show credit usage UI
+    const CURRENT_TIER = {{ tier | tojson }};
+
     // Configure marked for safe rendering
     marked.setOptions({
         breaks: true,
@@ -704,6 +811,14 @@
 
             if (response.ok) {
                 addMessage('assistant', data.response, data.context);
+                // Refresh usage after a successful response (managed tier)
+                if (CURRENT_TIER === 'managed') {
+                    fetchUsage();
+                }
+            } else if (response.status === 429 && data.credit_cap_reached) {
+                // Credit cap hit — show banner, hide input
+                showCapBanner();
+                addMessage('assistant', data.error || 'Monthly credit limit reached.');
             } else {
                 addMessage('assistant', `Error: ${data.error}`);
             }
@@ -860,5 +975,89 @@
 
     // Load sessions on page load
     loadSessions();
+
+    // ============ Credit Usage Indicator (Managed tier only) ============
+
+    const creditUsageBar = document.getElementById('creditUsageBar');
+    const creditUsageLabel = document.getElementById('creditUsageLabel');
+    const creditUsageFill = document.getElementById('creditUsageFill');
+    const creditCapBanner = document.getElementById('creditCapBanner');
+
+    async function fetchUsage() {
+        if (CURRENT_TIER !== 'managed') return;
+
+        try {
+            const resp = await fetch('/chat/api/usage');
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            if (!data.tracked) return;
+
+            // Show the usage bar
+            creditUsageBar.classList.add('visible');
+
+            const spent = data.cost_dollars || 0;
+            const cap = data.cap_dollars || 4.5;
+            const pct = Math.min(100, data.percent_used || 0);
+
+            creditUsageLabel.textContent =
+                `Credits: $${spent.toFixed(2)} / $${cap.toFixed(2)} used this month`;
+
+            creditUsageFill.style.width = pct + '%';
+            creditUsageFill.classList.remove('warning', 'danger');
+            if (pct >= 90) {
+                creditUsageFill.classList.add('danger');
+            } else if (pct >= 70) {
+                creditUsageFill.classList.add('warning');
+            }
+
+            // Show cap banner and disable input if over limit
+            if (data.remaining_microdollars <= 0) {
+                showCapBanner();
+            } else {
+                hideCapBanner();
+            }
+        } catch (err) {
+            console.warn('Failed to fetch usage:', err);
+        }
+    }
+
+    function showCapBanner() {
+        creditCapBanner.classList.add('visible');
+        sendBtn.disabled = true;
+        chatInput.disabled = true;
+        chatInput.placeholder = 'Monthly credit limit reached.';
+    }
+
+    function hideCapBanner() {
+        creditCapBanner.classList.remove('visible');
+        sendBtn.disabled = false;
+        chatInput.disabled = false;
+        chatInput.placeholder = 'Ask a question...';
+    }
+
+    async function showBuyCredits() {
+        try {
+            const resp = await fetch('/chat/api/credits/buy', { method: 'POST' });
+            const data = await resp.json();
+
+            if (data.stub) {
+                // Stripe not yet integrated — show info message
+                const msg = data.message || 'Credit top-ups coming soon.';
+                const byokUrl = data.byok_url || '/setup';
+                alert(msg + '\n\nSwitch to BYOK: ' + byokUrl);
+            } else if (data.client_secret) {
+                // Future: launch Stripe payment flow here
+                console.log('Stripe client_secret received:', data.client_secret);
+            }
+        } catch (err) {
+            console.error('Failed to initiate credit purchase:', err);
+        }
+    }
+
+    // Fetch usage on page load if managed tier
+    if (CURRENT_TIER === 'managed') {
+        fetchUsage();
+    }
 </script>
 {% endblock %}
