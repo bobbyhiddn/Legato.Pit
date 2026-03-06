@@ -885,10 +885,10 @@
             14-day free trial &mdash; no credit card required
         </div>
 
-        <h1 class="hero-headline">Your thoughts, organized into a knowledge graph</h1>
+        <h1 class="hero-headline">Persistent memory infrastructure for you and your AI</h1>
 
         <p class="hero-subheadline">
-            Record your thoughts. Build a knowledge graph. Remember everything.
+            Capture thoughts by voice, build a living knowledge graph, and connect it to any AI tool via MCP. Your memory, always within reach.
         </p>
 
         <div class="hero-cta-group">
@@ -899,7 +899,7 @@
             <a href="#how-it-works" onclick="smoothScroll(event,'how-it-works')" class="btn-ghost">See how it works</a>
         </div>
 
-        <p class="hero-trial-note">Full access for 14 days. Then BYOK from $0.99/month or Managed at $5/month.</p>
+        <p class="hero-trial-note">Full access for 14 days. Then BYOK from $0.99/month or Managed at $2.99/month.</p>
     </section>
 
     <div class="hero-divider"></div>
@@ -924,8 +924,8 @@
                 </div>
                 <div class="step-card">
                     <div class="step-num">03</div>
-                    <div class="step-title">Explore</div>
-                    <p class="step-desc">Browse, search, or chat with your growing library. Ask your AI questions about your own knowledge, or use MCP to query it from Claude Desktop and other AI tools &mdash; your second brain, always within reach.</p>
+                    <div class="step-title">Access</div>
+                    <p class="step-desc">Browse and search your growing library, or connect via MCP to query it from Claude Desktop and other AI tools. Your memory layer, always within reach &mdash; wherever your AI is.</p>
                 </div>
             </div>
         </div>
@@ -937,7 +937,7 @@
             <div class="features-header">
                 <div class="section-label">Features</div>
                 <h2 class="section-title">Everything a second brain needs</h2>
-                <p class="section-subtitle">Purpose-built tools for capturing, connecting, and conversing with your personal knowledge.</p>
+                <p class="section-subtitle">Purpose-built tools for capturing, connecting, and accessing your personal knowledge.</p>
             </div>
 
             <div class="features-grid">
@@ -983,24 +983,25 @@
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                        </svg>
-                    </div>
-                    <span class="feature-tag">Converse</span>
-                    <div class="feature-name">AI Chat</div>
-                    <p class="feature-desc">Chat with an AI that already knows your library. Ask questions, explore connections, surface ideas &mdash; your knowledge base is the context. Included on every plan.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
                             <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
                             <path d="M8 21h8M12 17v4"/>
                         </svg>
                     </div>
                     <span class="feature-tag">Integrate</span>
                     <div class="feature-name">MCP Integration</div>
-                    <p class="feature-desc">Connect Legate to Claude Desktop and other AI tools via the Model Context Protocol. Use your knowledge base directly inside your favorite AI assistant.</p>
+                    <p class="feature-desc">Connect Legate to Claude Desktop and other AI tools via the Model Context Protocol. Query your knowledge base, create notes, and search your library directly from inside any MCP-compatible AI assistant.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                    </div>
+                    <span class="feature-tag">Automate</span>
+                    <div class="feature-name">API Access</div>
+                    <p class="feature-desc">Programmatic access to your knowledge base. Build integrations, automate capture pipelines, and connect Legate to your existing tools. Your memory layer as infrastructure.</p>
                 </div>
 
                 <div class="feature-card">
@@ -1047,12 +1048,11 @@
                     <p class="pricing-tagline">Full access to every feature. No credit card required.</p>
                     <div class="pricing-divider"></div>
                     <ul class="pricing-features">
-                        <li>All features unlocked</li>
-                        <li>AI Chat with library awareness</li>
-                        <li>GitHub-backed knowledge repo</li>
-                        <li>Voice memos &amp; text capture</li>
-                        <li>Knowledge graph &amp; library</li>
+                        <li>Full access to every feature</li>
+                        <li>Voice &rarr; note pipeline</li>
+                        <li>Library &amp; knowledge graph</li>
                         <li>MCP integration</li>
+                        <li>No credit card required</li>
                     </ul>
                     <a href="{{ url_for('auth.login') }}" class="pricing-cta">Start Free Trial</a>
                 </div>
@@ -1064,15 +1064,15 @@
                         <span class="pricing-amount">$0.99</span>
                         <span class="pricing-period">/ month</span>
                     </div>
-                    <p class="pricing-tagline">Bring your own API keys. Full features at the lowest possible price.</p>
+                    <p class="pricing-tagline">Bring your own Gemini key. Full platform at the lowest possible price.</p>
                     <div class="pricing-divider"></div>
                     <ul class="pricing-features">
                         <li>Everything in Free Trial</li>
-                        <li>AI Chat &mdash; unlimited, uses your keys</li>
-                        <li>Use your own OpenAI, Anthropic, or Gemini key</li>
-                        <li>Pay only for what the AI actually costs you</li>
+                        <li>Bring your own Gemini API key</li>
+                        <li>Voice transcription &amp; AI categorization</li>
+                        <li>Full platform access</li>
                         <li>No markup on AI usage</li>
-                        <li>Chat has full awareness of your library</li>
+                        <li>Your data, your keys</li>
                     </ul>
                     <a href="{{ url_for('auth.login') }}" class="pricing-cta">Get Started</a>
                 </div>
@@ -1080,18 +1080,17 @@
                 <div class="pricing-card">
                     <div class="pricing-tier-label">Managed</div>
                     <div class="pricing-price">
-                        <span class="pricing-amount">$5</span>
+                        <span class="pricing-amount">$2.99</span>
                         <span class="pricing-period">/ month</span>
                     </div>
-                    <p class="pricing-tagline">We handle the AI. No API key setup, no billing complexity. Chat included.</p>
+                    <p class="pricing-tagline">We handle the AI. No API keys to configure, no setup required.</p>
                     <div class="pricing-divider"></div>
                     <ul class="pricing-features">
                         <li>Everything in BYOK</li>
-                        <li>AI Chat included &mdash; $4.50/mo in token credits</li>
-                        <li>AI provided &amp; managed by us</li>
+                        <li>We handle the AI &mdash; Gemini Flash included</li>
                         <li>No API keys to configure</li>
                         <li>Works out of the box</li>
-                        <li>Includes Claude, GPT &amp; Gemini access</li>
+                        <li>Zero setup, zero hassle</li>
                     </ul>
                     <a href="{{ url_for('auth.login') }}" class="pricing-cta">Get Started</a>
                 </div>
@@ -1135,7 +1134,7 @@
                         <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="faq-answer">
-                        BYOK (Bring Your Own Keys) means you add your own API keys from OpenAI, Anthropic, or Google. You pay those providers directly at their rates &mdash; we just charge $0.99/month for the platform. Chat is unlimited since it uses your keys. Managed means we provide the AI infrastructure: no keys to configure, no per-token billing from AI providers. Everything is handled for $5/month, including AI Chat with up to $4.50/month in token credits.
+                        BYOK (Bring Your Own Key) means you add your own Gemini API key from Google. You pay Google directly at their rates &mdash; we charge $0.99/month for the platform. No markup, no middlemen. Managed means we provide the AI: Gemini Flash is included, nothing to configure, and it works out of the box for $2.99/month.
                     </div>
                 </div>
 
@@ -1146,26 +1145,6 @@
                     </button>
                     <div class="faq-answer">
                         Your knowledge lives in your own GitHub repository. We don't store your notes, read your content for training purposes, or have access to your data beyond what's technically required to run the application. The GitHub repo is yours &mdash; private or public, it's your call.
-                    </div>
-                </div>
-
-                <div class="faq-item" role="listitem">
-                    <button class="faq-question" aria-expanded="false" onclick="toggleFaq(this)">
-                        What AI models are supported?
-                        <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        Legate supports Claude (Anthropic), GPT models (OpenAI), and Gemini (Google). On BYOK, you pick which provider to use and plug in your own key. On Managed, you get access to all three without any setup.
-                    </div>
-                </div>
-
-                <div class="faq-item" role="listitem">
-                    <button class="faq-question" aria-expanded="false" onclick="toggleFaq(this)">
-                        How does AI Chat work?
-                        <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        Legate's AI Chat is a conversational interface that has full awareness of your library. Ask it questions about your notes, explore connections between ideas, or have it surface relevant knowledge as you work. On BYOK, chat is unlimited &mdash; it uses your own API keys. On Managed, chat is included with up to $4.50/month in token credits.
                     </div>
                 </div>
 

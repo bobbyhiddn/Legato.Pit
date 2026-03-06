@@ -19,7 +19,7 @@ import secrets
 
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, session, url_for
 
-from .core import library_required, login_required, paid_required
+from .core import copilot_required, library_required, login_required, paid_required
 from .rag.chat_session_manager import get_chat_manager
 
 logger = logging.getLogger(__name__)
@@ -176,11 +176,10 @@ def save_message(db_conn, session_id: str, role: str, content: str, context=None
 @chat_bp.route("/")
 @library_required
 @paid_required
+@copilot_required
 def index():
     """Chat interface page."""
     user = session.get("user", {})
-    if not user.get("has_chat"):
-        return redirect(url_for("dashboard.index"))
 
     services = get_services()
     stats = services["context"].get_stats()
