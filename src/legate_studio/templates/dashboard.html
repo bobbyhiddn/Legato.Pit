@@ -10,6 +10,7 @@
         height: 500px;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
     }
 
     @media (max-width: 768px) {
@@ -17,7 +18,7 @@
             height: 360px;
         }
         .graph-wrapper {
-            min-height: 260px;
+            min-height: 200px;
         }
         .graph-legend {
             top: 0.25rem;
@@ -27,6 +28,15 @@
             width: auto;
             max-width: 140px;
             font-size: 0.65rem;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .graph-card {
+            height: 300px;
+        }
+        .graph-wrapper {
+            min-height: 160px;
         }
     }
 
