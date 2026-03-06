@@ -5,6 +5,66 @@
 {% block head %}
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
+    /* Dashboard Hero Bar */
+    .dashboard-hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.5rem 0;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .dashboard-hero-inner {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .dashboard-hero-logo {
+        height: 48px;
+        width: auto;
+        border-radius: 10px;
+        opacity: 0.95;
+    }
+
+    [data-theme="light"] .dashboard-hero-logo {
+        filter: invert(1);
+    }
+
+    .dashboard-hero-text h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0;
+        color: var(--text-primary);
+    }
+
+    .dashboard-hero-text p {
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+        margin: 0.125rem 0 0 0;
+    }
+
+    @media (max-width: 480px) {
+        .dashboard-hero {
+            padding: 1rem 0;
+            margin-bottom: 1rem;
+        }
+
+        .dashboard-hero-logo {
+            height: 36px;
+        }
+
+        .dashboard-hero-text h1 {
+            font-size: 1.25rem;
+        }
+
+        .dashboard-hero-text p {
+            font-size: 0.75rem;
+        }
+    }
+
     /* Graph styles */
     .graph-card {
         height: 500px;
@@ -641,10 +701,21 @@
 
 {% block content %}
 <div class="dashboard">
-    <header class="page-header">
-        <h1>Dashboard</h1>
+    <!-- Hero Bar -->
+    <div class="dashboard-hero">
+        <div class="dashboard-hero-inner">
+            <img src="{{ url_for('static', filename='img/logo-dark.png') }}"
+                 alt="{{ app_name }}"
+                 class="dashboard-hero-logo app-logo"
+                 data-logo-dark="{{ url_for('static', filename='img/logo-dark.png') }}"
+                 data-logo-light="{{ url_for('static', filename='img/logo-light.png') }}">
+            <div class="dashboard-hero-text">
+                <h1>{{ app_name }}</h1>
+                <p>Your personal knowledge graph</p>
+            </div>
+        </div>
         <button class="btn btn-small" onclick="refreshDashboard()">Refresh</button>
-    </header>
+    </div>
 
     <section class="stats-row">
         <div class="stat-card">
