@@ -635,7 +635,7 @@ def create_app():
     # SEO: sitemap.xml
     @app.route("/sitemap.xml")
     def sitemap_xml():
-        from .rag.database import get_db_dir, get_user_db_path, init_db
+        from .rag.database import get_user_db_path, init_db
 
         today = datetime.now().strftime("%Y-%m-%d")
         urls = [
@@ -713,7 +713,7 @@ def create_app():
         import json
         import sqlite3
 
-        from .rag.database import get_public_profile, get_user_db_path, init_db
+        from .rag.database import get_public_profile, get_user_db_path
 
         # Look up user by github_login
         profile = get_public_profile(username)
@@ -856,10 +856,7 @@ def create_app():
         import json
         import sqlite3
 
-        import markdown
-        import nh3
-
-        from .rag.database import get_public_profile, get_user_db_path, init_db
+        from .rag.database import get_public_profile, get_user_db_path
 
         # Look up user by github_login in shared DB (and get their profile)
         profile = get_public_profile(username)
@@ -944,7 +941,7 @@ def create_app():
         """Report a published note for content moderation."""
         import sqlite3
 
-        from .rag.database import get_db_path, get_user_db_path, init_db, get_connection
+        from .rag.database import get_connection, get_db_path, get_user_db_path, init_db
 
         # Verify note exists and is published
         shared_db = init_db()

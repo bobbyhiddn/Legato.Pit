@@ -1339,7 +1339,6 @@ def _generate_embedding_for_entry(entry_db_id: int, entry_id: str, content: str)
         entry_id: The entry's semantic ID (for logging)
         content: The entry's content text
     """
-    import os
 
     from .core import get_api_key_for_user
 
@@ -2126,7 +2125,6 @@ def _create_incident_on_chord(
     Returns:
         dict with success/error and dispatch details
     """
-    import os
     import secrets
 
     import requests as http_requests
@@ -4856,7 +4854,6 @@ def tool_upload_asset(args: dict) -> dict:
     """Upload an image or file to a category's assets folder."""
     import base64
     import mimetypes
-    import os
     import secrets
 
     from .auth import get_user_installation_token
@@ -5428,7 +5425,6 @@ def _strip_yaml_frontmatter(content: str) -> str:
 
 def tool_download_note(args: dict) -> dict:
     """Download a single note to a local filesystem path."""
-    import os
 
     entry_id = args.get("entry_id", "").strip() if args.get("entry_id") else None
     file_path_lookup = args.get("file_path", "").strip() if args.get("file_path") else None
@@ -5504,7 +5500,6 @@ def tool_download_note(args: dict) -> dict:
 def tool_download_notes(args: dict) -> dict:
     """Bulk download notes from a category/subfolder to a local directory."""
     import fnmatch
-    import os
 
     from .rag.database import get_user_categories
 
@@ -5625,7 +5620,6 @@ def tool_download_notes(args: dict) -> dict:
 
 def tool_download_notes_batch(args: dict) -> dict:
     """Download specific notes by entry ID to specified destinations."""
-    import os
 
     notes = args.get("notes", [])
     strip_frontmatter = args.get("strip_frontmatter", False)

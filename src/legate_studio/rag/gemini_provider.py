@@ -40,7 +40,10 @@ def _retry_on_quota(func, *args, max_retries: int = 3, **kwargs):
         except gexc.ServiceUnavailable:
             # 503 — service temporarily unavailable
             if attempt < max_retries - 1:
-                logger.warning(f"Gemini service unavailable, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(
+                    f"Gemini service unavailable, retrying in {delay:.1f}s"
+                    f" (attempt {attempt + 1}/{max_retries})"
+                )
                 time.sleep(delay)
                 delay *= 2
             else:

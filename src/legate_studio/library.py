@@ -61,7 +61,6 @@ def _generate_embedding_for_entry(user_id: str, entry_id: str, content: str):
         entry_id: The entry's ID
         content: The entry's content text
     """
-    import os
 
     from .core import get_api_key_for_user
 
@@ -784,7 +783,6 @@ def view_category(category: str, subfolder: str = None):
 @login_required
 def search():
     """Search the library using hybrid semantic + keyword search."""
-    import os
 
     from flask import session
 

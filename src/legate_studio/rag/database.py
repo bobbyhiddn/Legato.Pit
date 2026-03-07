@@ -452,7 +452,10 @@ def init_db(db_path: Path | None = None, user_id: str | None = None) -> sqlite3.
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_content_hash ON knowledge_entries(content_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_published ON knowledge_entries(published)")
-    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_slug ON knowledge_entries(slug) WHERE slug IS NOT NULL")
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_slug"
+        " ON knowledge_entries(slug) WHERE slug IS NOT NULL"
+    )
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_clients ON oauth_clients(client_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes ON oauth_auth_codes(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_oauth_sessions ON oauth_sessions(refresh_token)")
