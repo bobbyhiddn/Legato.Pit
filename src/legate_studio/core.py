@@ -705,6 +705,167 @@ def create_app():
         xml = "\n".join(lines) + "\n"
         return xml, 200, {"Content-Type": "application/xml; charset=utf-8"}
 
+    # SEO: RSS feeds
+    def _build_rss_items(notes_with_author, limit=50):
+        """Build RSS <item> elements from a list of (note_row, username) tuples."""
+        import calendar
+        import html as html_mod
+        from email.utils import formatdate
+
+        items = []
+        for note, username in notes_with_author[:limit]:
+            title = note.get("title") or "Untitled"
+            slug = note.get("slug") or ""
+            content = note.get("content") or ""
+            pub_date_raw = note.get("published_at") or note.get("updated_at") or ""
+            author_name = note.get("display_name") or note.get("author_name") or username
+
+            link = f"https://legate.studio/pub/{username}/{slug}"
+            # Truncate description to 300 chars, strip any markdown fences
+            description = content.replace("\n", " ").strip()[:300]
+            if len(content.strip()) > 300:
+                description += "…"
+
+            # Format pubDate as RFC 2822
+            try:
+                if pub_date_raw:
+                    dt = datetime.fromisoformat(pub_date_raw.replace("Z", "+00:00"))
+                    pub_date = formatdate(calendar.timegm(dt.timetuple()))
+                else:
+                    pub_date = formatdate()
+            except Exception:
+                pub_date = formatdate()
+
+            items.append(
+                f"    <item>\n"
+                f"      <title>{html_mod.escape(title)}</title>\n"
+                f"      <link>{html_mod.escape(link)}</link>\n"
+                f"      <guid isPermaLink=\"true\">{html_mod.escape(link)}</guid>\n"
+                f"      <description>{html_mod.escape(description)}</description>\n"
+                f"      <pubDate>{pub_date}</pubDate>\n"
+                f"      <author>{html_mod.escape(username)}@legate.studio ({html_mod.escape(author_name)})</author>\n"
+                f"    </item>"
+            )
+        return items
+
+    @app.route("/feed.xml")
+    def rss_feed_global():
+        """Global RSS feed — latest 50 published notes across all users."""
+        import sqlite3
+        from email.utils import formatdate
+
+        from .rag.database import get_user_db_path, init_db
+
+        notes_with_author = []
+        try:
+            shared_db = init_db()
+            users = shared_db.execute(
+                "SELECT u.user_id, u.github_login, COALESCE(p.display_name, u.name, u.github_login) AS display_name "
+                "FROM users u LEFT JOIN user_profiles p ON u.user_id = p.user_id"
+            ).fetchall()
+            for user_row in users:
+                user_id = user_row["user_id"]
+                github_login = user_row["github_login"]
+                if not github_login:
+                    continue
+                try:
+                    user_db_path = get_user_db_path(user_id)
+                    if not user_db_path.exists():
+                        continue
+                    uconn = sqlite3.connect(str(user_db_path))
+                    uconn.row_factory = sqlite3.Row
+                    notes = uconn.execute(
+                        "SELECT title, slug, content, published_at, updated_at "
+                        "FROM knowledge_entries WHERE published = 1 AND slug IS NOT NULL "
+                        "ORDER BY COALESCE(published_at, updated_at) DESC"
+                    ).fetchall()
+                    uconn.close()
+                    for note in notes:
+                        row = dict(note)
+                        row["display_name"] = user_row["display_name"]
+                        notes_with_author.append((row, github_login))
+                except Exception as e:
+                    logger.warning(f"RSS global: failed to read notes for {user_id}: {e}")
+        except Exception as e:
+            logger.warning(f"RSS global: failed to enumerate user DBs: {e}")
+
+        # Sort all notes by published_at DESC, take latest 50
+        notes_with_author.sort(
+            key=lambda x: x[0].get("published_at") or x[0].get("updated_at") or "",
+            reverse=True,
+        )
+
+        last_build = formatdate()
+        items = _build_rss_items(notes_with_author, limit=50)
+
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+            "  <channel>\n"
+            "    <title>Legate Studio — Latest Notes</title>\n"
+            "    <link>https://legate.studio</link>\n"
+            "    <description>The latest published notes from Legate Studio knowledge bases.</description>\n"
+            "    <language>en-us</language>\n"
+            f"    <lastBuildDate>{last_build}</lastBuildDate>\n"
+            '    <atom:link href="https://legate.studio/feed.xml" rel="self" type="application/rss+xml"/>\n'
+            + "\n".join(items)
+            + "\n  </channel>\n</rss>\n"
+        )
+        return xml, 200, {"Content-Type": "application/rss+xml; charset=utf-8"}
+
+    @app.route("/pub/<username>/feed.xml")
+    def rss_feed_user(username: str):
+        """Per-user RSS feed of their published notes."""
+        from email.utils import formatdate
+
+        from .rag.database import get_public_profile, get_user_db_path
+
+        profile = get_public_profile(username)
+        if not profile:
+            return "", 404
+
+        user_id = profile["user_id"]
+        display_name = profile.get("display_name") or profile.get("name") or username
+        user_db_path = get_user_db_path(user_id)
+
+        notes_with_author = []
+        if user_db_path.exists():
+            try:
+                import sqlite3 as _sq3
+                uconn = _sq3.connect(str(user_db_path))
+                uconn.row_factory = _sq3.Row
+                notes = uconn.execute(
+                    "SELECT title, slug, content, published_at, updated_at "
+                    "FROM knowledge_entries WHERE published = 1 AND slug IS NOT NULL "
+                    "ORDER BY COALESCE(published_at, updated_at) DESC"
+                ).fetchall()
+                uconn.close()
+                for note in notes:
+                    row = dict(note)
+                    row["display_name"] = display_name
+                    notes_with_author.append((row, username))
+            except Exception as e:
+                logger.warning(f"RSS user feed: failed for {username}: {e}")
+
+        last_build = formatdate()
+        items = _build_rss_items(notes_with_author)
+
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+            "  <channel>\n"
+            f"    <title>{display_name} — Notes on Legate Studio</title>\n"
+            f"    <link>https://legate.studio/pub/{username}</link>\n"
+            f"    <description>Published notes from {display_name} on Legate Studio.</description>\n"
+            "    <language>en-us</language>\n"
+            f"    <lastBuildDate>{last_build}</lastBuildDate>\n"
+            f'    <atom:link href="https://legate.studio/pub/{username}/feed.xml"'
+            ' rel="self" type="application/rss+xml"/>\n'
+            + "\n".join(items)
+            + "\n  </channel>\n</rss>\n"
+        )
+        return xml, 200, {"Content-Type": "application/rss+xml; charset=utf-8"}
+
     # ============ Public profile routes (no auth) ============
 
     @app.route("/pub/<username>")

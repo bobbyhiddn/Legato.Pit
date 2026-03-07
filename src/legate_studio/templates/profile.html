@@ -26,11 +26,51 @@
     <!-- Canonical -->
     <link rel="canonical" href="{{ og_url }}">
 
+    <!-- RSS Feed for this profile -->
+    <link rel="alternate" type="application/rss+xml" title="{{ og_title }} — Notes" href="https://legate.studio/pub/{{ username }}/feed.xml">
+
     <!-- Favicon -->
     <link rel="icon" href="/static/img/favicon.png" type="image/png">
 
+    <!-- Performance hints -->
+    <link rel="preconnect" href="https://plausible.io">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
     <!-- Plausible analytics -->
     <script defer data-domain="legate.studio" src="https://plausible.io/js/script.js"></script>
+
+    <!-- JSON-LD: BreadcrumbList schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Legate Studio",
+          "item": "https://legate.studio"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": {{ (profile.display_name or profile.name or username) | tojson }},
+          "item": {{ og_url | tojson }}
+        }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: Person schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      "name": {{ (profile.display_name or profile.name or username) | tojson }},
+      "url": {{ og_url | tojson }},
+      "image": {{ (og_image or 'https://legate.studio/static/img/og-share.png') | tojson }}
+    }
+    </script>
 
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

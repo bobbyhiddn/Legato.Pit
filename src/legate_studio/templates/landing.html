@@ -23,6 +23,13 @@
     <!-- Canonical URL -->
     <link rel="canonical" href="https://legate.studio/">
 
+    <!-- RSS Feeds -->
+    <link rel="alternate" type="application/rss+xml" title="Legate Studio — Latest Notes" href="https://legate.studio/feed.xml">
+
+    <!-- Performance hints -->
+    <link rel="preconnect" href="https://plausible.io">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
     <title>Legate Studio — Your Personal Knowledge Base</title>
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
@@ -927,6 +934,19 @@
         ]
       }
     ]
+    </script>
+
+    <!-- JSON-LD: Organization schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Legate Studio",
+      "url": "https://legate.studio",
+      "logo": "https://legate.studio/static/img/og-share.png",
+      "description": "Legate Studio is a personal knowledge base that lets you record thoughts, build a knowledge graph, and remember everything — with voice input, AI-powered search, and MCP integration for Claude.",
+      "sameAs": []
+    }
     </script>
 
     <!-- Plausible Analytics -->
