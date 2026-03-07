@@ -320,17 +320,23 @@ def api_upload():
 @login_required
 def api_transcribe():
     """
-    Transcribe audio using OpenAI Whisper.
+    Transcribe audio using Gemini Flash multimodal transcription.
 
     Accepts audio file upload via multipart/form-data.
     Returns: {"success": true, "transcript": "..."} or {"error": "..."}
     """
-    from .rag.whisper_service import get_whisper_service
+    from .core import get_api_key_for_user
+    from .rag.whisper_service import get_transcription_service
 
-    # Check if Whisper service is available
-    whisper = get_whisper_service()
+    # Resolve BYOK Gemini key for the current user (falls back to system key / env var)
+    user = session.get("user", {})
+    user_id = user.get("user_id")
+    byok_key = get_api_key_for_user(user_id, "gemini") if user_id else None
+
+    # Check if transcription service is available
+    whisper = get_transcription_service(api_key=byok_key)
     if not whisper:
-        return jsonify({"error": "Voice transcription not available. OPENAI_API_KEY not configured."}), 503
+        return jsonify({"error": "Voice transcription not available. GEMINI_API_KEY not configured."}), 503
 
     # Check for audio file
     if "audio" not in request.files:
@@ -371,11 +377,16 @@ def api_transcribe_status():
     """
     Check if voice transcription is available.
 
-    Returns: {"available": true/false, "model": "whisper-1"}
+    Returns: {"available": true/false, "model": "gemini-2.0-flash"}
     """
-    from .rag.whisper_service import get_whisper_service
+    from .core import get_api_key_for_user
+    from .rag.whisper_service import get_transcription_service
 
-    whisper = get_whisper_service()
+    user = session.get("user", {})
+    user_id = user.get("user_id")
+    byok_key = get_api_key_for_user(user_id, "gemini") if user_id else None
+
+    whisper = get_transcription_service(api_key=byok_key)
     if whisper:
         return jsonify(
             {
@@ -385,4 +396,4 @@ def api_transcribe_status():
             }
         )
     else:
-        return jsonify({"available": False, "reason": "OPENAI_API_KEY not configured"})
+        return jsonify({"available": False, "reason": "GEMINI_API_KEY not configured"})
