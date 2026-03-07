@@ -696,6 +696,89 @@
         color: var(--accent-color);
         font-weight: 600;
     }
+
+    /* ── Mobile Fixes (768px and below) ─────────────────────────────── */
+    @media (max-width: 768px) {
+        /* Dashboard grid: tighter gap on mobile */
+        .dashboard-grid {
+            gap: 0.75rem;
+        }
+
+        /* Cards: less padding on mobile */
+        .card {
+            padding: 0.875rem;
+        }
+
+        /* Recent Notes: cap height so it doesn't eat the viewport */
+        .recent-notes-list {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .recent-note-item {
+            padding: 0.5rem;
+        }
+
+        /* Calendar: compact layout — roughly half desktop height */
+        .mini-calendar {
+            font-size: 0.7rem;
+        }
+
+        .calendar-week {
+            gap: 1px;
+        }
+
+        .calendar-day {
+            /* Remove the square aspect-ratio — use fixed height instead */
+            aspect-ratio: unset;
+            height: 28px;
+            font-size: 0.65rem;
+        }
+
+        .day-count {
+            font-size: 0.55rem;
+        }
+    }
+
+    /* Extra small screens: even tighter */
+    @media (max-width: 480px) {
+        .dashboard-grid {
+            gap: 0.5rem;
+        }
+
+        .card {
+            padding: 0.75rem;
+        }
+
+        .calendar-day {
+            height: 24px;
+            font-size: 0.6rem;
+        }
+
+        .recent-notes-list {
+            max-height: 200px;
+        }
+    }
+
+    /* Very small screens (360px) */
+    @media (max-width: 360px) {
+        .calendar-day {
+            height: 22px;
+            font-size: 0.55rem;
+        }
+
+        .calendar-header {
+            font-size: 0.6rem;
+        }
+
+        .mini-calendar {
+            font-size: 0.65rem;
+        }
+
+        .recent-notes-list {
+            max-height: 180px;
+        }
+    }
 </style>
 {% endblock %}
 
