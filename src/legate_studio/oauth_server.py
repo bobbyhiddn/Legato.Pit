@@ -88,13 +88,29 @@ def _get_or_create_user_id(github_id: int, github_login: str) -> str:
 
 
 def get_jwt_secret() -> str:
-    """Get JWT secret key, falling back to Flask secret if not set.
+    """Get JWT signing secret, separate from Flask's SESSION secret.
 
-    Uses persistent key storage so JWTs survive Fly.io restarts.
-    Falls back to Flask's SECRET_KEY which is also now persisted.
+    P2-04: JWT_SECRET_KEY is intentionally separate from Flask's SECRET_KEY
+    so that rotating one does not invalidate the other.
+
+    Resolution order:
+      1. JWT_SECRET_KEY env var  (recommended for production)
+      2. Persisted key in /data/.jwt_secret_key  (auto-generated on first run)
+
+    A warning is logged when the env var is absent so operators know to set it.
+    Falls back to Flask's SECRET_KEY env var only as a last resort, which is
+    why the persistent-key file is named differently (.jwt_secret_key vs
+    .flask_secret_key).
     """
+    import os
+
     from .core import _get_or_create_persistent_key
 
+    if not os.getenv("JWT_SECRET_KEY"):
+        logger.warning(
+            "JWT_SECRET_KEY env var not set — using persisted auto-generated key. "
+            "Set JWT_SECRET_KEY in production to keep it separate from SESSION secret."
+        )
     return _get_or_create_persistent_key("JWT_SECRET_KEY", ".jwt_secret_key")
 
 
@@ -114,7 +130,18 @@ def get_base_url() -> str:
 
 @oauth_bp.route("/oauth/debug")
 def oauth_debug():
-    """Debug endpoint to verify URL generation and OAuth state."""
+    """Debug endpoint to verify URL generation and OAuth state.
+
+    P1-01: Restricted to debug mode only. Returns 404 in production to
+    avoid leaking OAuth state (client counts, recent client IDs) to
+    unauthenticated callers.
+    """
+    # P1-01: Gate behind debug mode — never expose in production
+    if not current_app.debug:
+        from flask import abort as flask_abort
+
+        flask_abort(404)
+
     db = get_db()
 
     # Count registered clients
@@ -358,6 +385,11 @@ def authorize():
         return jsonify({"error": "invalid_request", "error_description": "redirect_uri required"}), 400
     if response_type != "code":
         return jsonify({"error": "unsupported_response_type"}), 400
+    # P0-01: PKCE enforcement — code_challenge is REQUIRED per OAuth 2.1
+    if not code_challenge:
+        return jsonify(
+            {"error": "invalid_request", "error_description": "code_challenge required (PKCE)"}
+        ), 400
     if code_challenge_method != "S256":
         return jsonify({"error": "invalid_request", "error_description": "Only S256 PKCE supported"}), 400
 
@@ -647,13 +679,19 @@ def _handle_authorization_code_grant():
     code = _get_token_param("code")
     code_verifier = _get_token_param("code_verifier")
     redirect_uri = _get_token_param("redirect_uri")
-    _client_id = _get_token_param("client_id")  # noqa: F841 — received but not validated
+    # P0-02: client_id is now required and validated against the auth code record
+    client_id = _get_token_param("client_id")
 
     logger.debug(f"Auth code grant: code={code[:10] if code else 'None'}..., has_verifier={bool(code_verifier)}")
 
     if not code:
         logger.warning("Token request missing code parameter")
         return jsonify({"error": "invalid_request", "error_description": "code required"}), 400
+
+    # P0-02: Require client_id in token request (OAuth 2.1 §4.1.3)
+    if not client_id:
+        logger.warning("Token request missing client_id parameter")
+        return jsonify({"error": "invalid_request", "error_description": "client_id required"}), 400
 
     # Look up auth code
     db = get_db()
@@ -662,6 +700,13 @@ def _handle_authorization_code_grant():
     if not auth_code:
         logger.warning(f"Auth code not found in database: {code[:15]}...")
         return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired code"}), 400
+
+    # P0-02: Validate client_id matches what was used at authorization time
+    if client_id != auth_code["client_id"]:
+        logger.warning(
+            f"Token request client_id mismatch: got {client_id}, expected {auth_code['client_id']}"
+        )
+        return jsonify({"error": "invalid_grant", "error_description": "client_id mismatch"}), 400
 
     logger.info(f"Found auth code for client {auth_code['client_id']}, user {auth_code['github_login']}")
 
@@ -674,9 +719,17 @@ def _handle_authorization_code_grant():
     if datetime.utcnow() > expires_at:
         return jsonify({"error": "invalid_grant", "error_description": "Code expired"}), 400
 
-    # Verify redirect_uri matches
-    if redirect_uri and redirect_uri != auth_code["redirect_uri"]:
-        return jsonify({"error": "invalid_grant", "error_description": "redirect_uri mismatch"}), 400
+    # P2-01: Verify redirect_uri matches stored value (RFC 6749 §4.1.3)
+    # redirect_uri is required if it was provided at authorization time
+    if auth_code["redirect_uri"]:
+        if not redirect_uri:
+            return jsonify({"error": "invalid_grant", "error_description": "redirect_uri required"}), 400
+        if redirect_uri != auth_code["redirect_uri"]:
+            logger.warning(
+                f"Token request redirect_uri mismatch: got {redirect_uri}, "
+                f"expected {auth_code['redirect_uri']}"
+            )
+            return jsonify({"error": "invalid_grant", "error_description": "redirect_uri mismatch"}), 400
 
     # Verify PKCE code_verifier
     if auth_code["code_challenge"]:
