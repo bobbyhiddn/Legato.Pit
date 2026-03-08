@@ -3476,3 +3476,112 @@ pre {
         color: #000;
     }
 }
+
+/* ===== Shared Libraries ===== */
+
+/* Role badges — pill style used across shared library pages */
+.lib-role-badge,
+.sld-role-badge,
+.member-role-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+}
+
+.lib-role-badge.role-owner,
+.sld-role-badge.role-owner,
+.member-role-badge.role-owner {
+    background: rgba(63, 185, 80, 0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.lib-role-badge.role-collaborator,
+.sld-role-badge.role-collaborator,
+.member-role-badge.role-collaborator {
+    background: rgba(139, 148, 158, 0.1);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+/* Member status badge */
+.member-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.member-status-badge.status-invited {
+    background: rgba(210, 153, 34, 0.1);
+    color: var(--accent-yellow);
+    border: 1px solid rgba(210, 153, 34, 0.25);
+}
+
+.member-status-badge.status-active {
+    display: none;
+}
+
+/* 32px member avatar circles */
+.member-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+    object-fit: cover;
+}
+
+.member-avatar-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    text-transform: uppercase;
+}
+
+/* Shared library card grid */
+.libs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.lib-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-decoration: none;
+    color: var(--text-primary);
+    display: block;
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.lib-card:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+    .libs-grid {
+        grid-template-columns: 1fr;
+    }
+}

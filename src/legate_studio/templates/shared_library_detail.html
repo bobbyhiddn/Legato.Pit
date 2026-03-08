@@ -1,0 +1,564 @@
+{% extends "base.html" %}
+
+{% block title %}{{ library.name }} - Shared Libraries - {{ app_name }}{% endblock %}
+
+{% block head %}
+<style>
+    .sld-container {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    /* ── Back link ── */
+    .sld-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 0.875rem;
+        margin-bottom: 1.5rem;
+        transition: color var(--transition);
+    }
+
+    .sld-back:hover {
+        color: var(--text-primary);
+    }
+
+    /* ── Library header ── */
+    .sld-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .sld-header-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sld-header h1 {
+        margin: 0 0 0.375rem 0;
+        font-size: 1.5rem;
+        line-height: 1.2;
+    }
+
+    .sld-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .sld-meta a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: color var(--transition);
+    }
+
+    .sld-meta a:hover {
+        color: var(--text-primary);
+    }
+
+    .sld-role-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.125rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .sld-role-badge.role-owner {
+        background: rgba(63, 185, 80, 0.12);
+        color: var(--accent-green);
+        border: 1px solid rgba(63, 185, 80, 0.3);
+    }
+
+    .sld-role-badge.role-collaborator {
+        background: rgba(139, 148, 158, 0.12);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+    }
+
+    .sld-description {
+        margin-top: 0.75rem;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    /* ── Sections ── */
+    .sld-section {
+        margin-bottom: 2.5rem;
+    }
+
+    .sld-section-title {
+        font-size: 0.8125rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    /* ── Members table ── */
+    .members-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .members-table th {
+        text-align: left;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+        white-space: nowrap;
+    }
+
+    .members-table td {
+        padding: 0.625rem 0.75rem;
+        border-bottom: 1px solid var(--border-subtle);
+        vertical-align: middle;
+    }
+
+    .members-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .members-table tr:hover td {
+        background: var(--hover-tint);
+    }
+
+    .member-identity {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+    }
+
+    .member-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1px solid var(--border-color);
+        flex-shrink: 0;
+        object-fit: cover;
+    }
+
+    .member-avatar-placeholder {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+        text-transform: uppercase;
+    }
+
+    .member-username {
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+
+    .member-role-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.125rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .member-role-badge.role-owner {
+        background: rgba(63, 185, 80, 0.12);
+        color: var(--accent-green);
+        border: 1px solid rgba(63, 185, 80, 0.3);
+    }
+
+    .member-role-badge.role-collaborator {
+        background: rgba(139, 148, 158, 0.1);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+    }
+
+    .member-status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.125rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 500;
+    }
+
+    .member-status-badge.status-invited {
+        background: rgba(210, 153, 34, 0.1);
+        color: var(--accent-yellow);
+        border: 1px solid rgba(210, 153, 34, 0.25);
+    }
+
+    .member-status-badge.status-active {
+        /* no badge for active — just show role */
+        display: none;
+    }
+
+    /* ── Invite form ── */
+    .invite-form {
+        display: flex;
+        gap: 0.625rem;
+        align-items: flex-start;
+    }
+
+    .invite-form input {
+        flex: 1;
+        padding: 0.5rem 0.75rem;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        font-family: var(--font-sans);
+        transition: border-color var(--transition);
+    }
+
+    .invite-form input:focus {
+        outline: none;
+        border-color: var(--border-strong);
+    }
+
+    .invite-form input::placeholder {
+        color: var(--text-muted);
+    }
+
+    .invite-hint {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+    }
+
+    /* ── Collaborator notice ── */
+    .collab-notice {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.875rem 1rem;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+
+    .collab-notice strong {
+        color: var(--text-primary);
+    }
+
+    /* ── Empty members state ── */
+    .members-empty {
+        padding: 1.5rem;
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    @media (max-width: 640px) {
+        .sld-header {
+            flex-direction: column;
+        }
+
+        .members-table th:nth-child(3),
+        .members-table td:nth-child(3) {
+            display: none;
+        }
+
+        .invite-form {
+            flex-direction: column;
+        }
+
+        .invite-form button {
+            align-self: flex-end;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sld-container">
+
+    <a href="{{ url_for('shared_libraries.index') }}" class="sld-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Shared Libraries
+    </a>
+
+    {# ── Library header ── #}
+    <div class="sld-header">
+        <div class="sld-header-info">
+            <h1>{{ library.name }}</h1>
+            <div class="sld-meta">
+                <span class="sld-role-badge {{ 'role-owner' if is_owner else 'role-collaborator' }}">
+                    {{ 'Owner' if is_owner else 'Collaborator' }}
+                </span>
+                {% if library.repo_full_name %}
+                <a href="https://github.com/{{ library.repo_full_name }}" target="_blank" rel="noopener">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+                    {{ library.repo_full_name }}
+                </a>
+                {% endif %}
+            </div>
+            {% if library.description %}
+            <p class="sld-description">{{ library.description }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Members section ── #}
+    <div class="sld-section">
+        <div class="sld-section-title">Members</div>
+
+        {% if members %}
+        <table class="members-table">
+            <thead>
+                <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    {% if is_owner %}<th></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody id="membersTableBody">
+                {% for m in members %}
+                <tr id="member-row-{{ m.user_id }}">
+                    <td>
+                        <div class="member-identity">
+                            {% if m.github_login %}
+                            <img src="https://avatars.githubusercontent.com/{{ m.github_login }}?s=64"
+                                 alt="{{ m.github_login }}"
+                                 class="member-avatar"
+                                 loading="lazy"
+                                 onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
+                            <span class="member-avatar-placeholder" style="display:none">{{ m.github_login[0] }}</span>
+                            {% else %}
+                            <span class="member-avatar-placeholder">?</span>
+                            {% endif %}
+                            <span class="member-username">
+                                {% if m.github_login %}@{{ m.github_login }}{% else %}{{ m.display_name or m.user_id[:8] }}{% endif %}
+                            </span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="member-role-badge role-{{ m.role }}">{{ m.role }}</span>
+                    </td>
+                    <td>
+                        <span class="member-status-badge status-{{ m.status }}">
+                            {% if m.status == 'invited' %}Pending{% endif %}
+                        </span>
+                    </td>
+                    {% if is_owner %}
+                    <td style="text-align:right;">
+                        {% if m.role != 'owner' %}
+                        <button class="btn btn-danger btn-sm"
+                                onclick="removeMember('{{ m.user_id }}', '{{ m.github_login or m.display_name or m.user_id | e }}')">
+                            Remove
+                        </button>
+                        {% else %}
+                        <span style="font-size:0.75rem;color:var(--text-muted);">You</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="members-empty">No members found.</div>
+        {% endif %}
+    </div>
+
+    {# ── Invite / Collaborator section ── #}
+    <div class="sld-section">
+        {% if is_owner %}
+        <div class="sld-section-title">Invite Collaborator</div>
+        <div class="invite-form">
+            <input type="text"
+                   id="inviteUsername"
+                   placeholder="GitHub username"
+                   autocomplete="off"
+                   autocorrect="off"
+                   autocapitalize="off"
+                   spellcheck="false">
+            <button class="btn btn-primary" id="inviteBtn" onclick="sendInvite()">Send Invite</button>
+        </div>
+        <p class="invite-hint">The user must already have a Legate Studio account.</p>
+        {% else %}
+        <div class="sld-section-title">Collaboration</div>
+        <div class="collab-notice">
+            <strong>Draft &amp; Merge workflow</strong><br>
+            As a collaborator, use MCP tools to create and submit drafts. The library owner reviews and merges them.
+            Collaborators cannot directly edit the shared library via the browser; use MCP tool <code>create_draft</code> to propose changes.
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const LIBRARY_ID = '{{ library.id }}';
+
+    // ── Send Invite ──
+    async function sendInvite() {
+        const input = document.getElementById('inviteUsername');
+        const username = input.value.trim().replace(/^@/, '');
+
+        if (!username) {
+            showError('Please enter a GitHub username.');
+            input.focus();
+            return;
+        }
+
+        const btn = document.getElementById('inviteBtn');
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+
+        try {
+            const resp = await fetch(`/shared/api/${LIBRARY_ID}/invite`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ github_username: username })
+            });
+
+            const data = await resp.json();
+
+            if (resp.ok && data.success) {
+                let msg = `Invited @${data.github_login} to this library.`;
+                if (data.github_warning) {
+                    msg += ` (${data.github_warning})`;
+                }
+                showSuccess(msg);
+                input.value = '';
+
+                // Add pending member row to the table immediately
+                addPendingMemberRow(username);
+            } else {
+                showError(data.error || 'Failed to send invitation.');
+            }
+        } catch (err) {
+            showError(err.message || 'Network error. Please try again.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Send Invite';
+        }
+    }
+
+    function addPendingMemberRow(githubLogin) {
+        const tbody = document.getElementById('membersTableBody');
+        if (!tbody) return;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>
+                <div class="member-identity">
+                    <img src="https://avatars.githubusercontent.com/${escapeHtml(githubLogin)}?s=64"
+                         alt="${escapeHtml(githubLogin)}"
+                         class="member-avatar"
+                         loading="lazy"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
+                    <span class="member-avatar-placeholder" style="display:none">${escapeHtml(githubLogin[0])}</span>
+                    <span class="member-username">@${escapeHtml(githubLogin)}</span>
+                </div>
+            </td>
+            <td><span class="member-role-badge role-collaborator">collaborator</span></td>
+            <td><span class="member-status-badge status-invited">Pending</span></td>
+            <td style="text-align:right;"><span style="font-size:0.75rem;color:var(--text-muted);">Invited</span></td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    // ── Remove Member ──
+    async function removeMember(userId, displayName) {
+        if (!confirm(`Remove @${displayName} from this library? Their pending drafts will be deleted.`)) return;
+
+        const row = document.getElementById(`member-row-${userId}`);
+        const btn = row ? row.querySelector('.btn-danger') : null;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '…';
+        }
+
+        try {
+            const resp = await fetch(`/shared/api/${LIBRARY_ID}/members/${encodeURIComponent(userId)}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await resp.json();
+
+            if (resp.ok && data.success) {
+                let msg = `@${displayName} removed from library.`;
+                if (data.drafts_deleted > 0) {
+                    msg += ` ${data.drafts_deleted} pending draft(s) deleted.`;
+                }
+                if (data.github_warning) {
+                    msg += ` Note: ${data.github_warning}`;
+                }
+                showSuccess(msg);
+
+                if (row) {
+                    row.style.transition = 'opacity 0.3s';
+                    row.style.opacity = '0';
+                    setTimeout(() => row.remove(), 300);
+                }
+            } else {
+                showError(data.error || 'Failed to remove member.');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Remove';
+                }
+            }
+        } catch (err) {
+            showError(err.message || 'Network error. Please try again.');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Remove';
+            }
+        }
+    }
+
+    // ── Invite on Enter ──
+    document.addEventListener('DOMContentLoaded', () => {
+        const input = document.getElementById('inviteUsername');
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') sendInvite();
+            });
+        }
+    });
+
+    function escapeHtml(text) {
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+</script>
+{% endblock %}
