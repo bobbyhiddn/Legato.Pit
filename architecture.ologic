@@ -1,5 +1,6 @@
 # Legato Platform Architecture — Product-Level .ologic Model
 # REQ-LEGA-001: User State Integrity traced to auth, billing/webhook, and database nodes
+# REQ-LEGA-002 through REQ-LEGA-027: Shared Library feature traced to factories 6-9
 # Product-level: shows major subsystems and cross-cutting concerns
 
 name: Legato Platform Architecture
@@ -467,9 +468,466 @@ logic:
                 metrics to the admin panel.
               inputs: [admin-machine, deployment-machine]
 
+        # ═══════════════════════════════════════════════════════════
+        # FACTORY 6: Shared Library Infrastructure
+        # Multi-library data model, repo provisioning, DB isolation,
+        # access control, tier gating
+        # ═══════════════════════════════════════════════════════════
+        - id: shared-library-infra-factory
+          label: Shared Library Infrastructure
+
+          machines:
+            - id: shared-data-model-machine
+              label: Shared Library Data Model
+              nodes:
+                - id: shared-library-registry
+                  type: database
+                  title: Shared Library Registry
+                  description: >
+                    shared_libraries table in legato.db: id (UUID), name,
+                    slug (unique per owner), owner_user_id, repo_full_name,
+                    description, created_at, updated_at, status. Each shared
+                    library maps 1:1 to a GitHub repo under the owner's account.
+                  requirements:
+                    - REQ-LEGA-002
+                  outputs: [collaborator-membership]
+
+                - id: collaborator-membership
+                  type: database
+                  title: Collaborator Membership Table
+                  description: >
+                    shared_library_members table: id, shared_library_id (FK),
+                    user_id (FK to users), role (owner/collaborator), invited_at,
+                    accepted_at, status (invited/active/revoked). FK constraint
+                    enforces all collaborators are registered Legate users. Owner
+                    row auto-created on library creation.
+                  requirements:
+                    - REQ-LEGA-003
+                  outputs: [per-library-db]
+
+                - id: per-library-db
+                  type: database
+                  title: Per-Library SQLite Database
+                  description: >
+                    Each shared library gets its own SQLite DB file
+                    (shared_{library_id}.db) with the same schema as per-user
+                    databases: knowledge_entries, embeddings, note_links,
+                    library_assets, user_categories. Ensures independent note
+                    stores, search indices, and embedding spaces — fully isolated
+                    from personal library and other shared libraries.
+                  requirements:
+                    - REQ-LEGA-005
+
+            - id: repo-provisioning-machine
+              label: GitHub Repo Provisioning
+              nodes:
+                - id: repo-creator
+                  type: api
+                  title: GitHub Repo Creator
+                  description: >
+                    On shared library creation, auto-creates a GitHub repo under
+                    the owner's account using the GitHub App installation token.
+                    Naming convention: Legate.Library.{slug}. Initialized with
+                    README and standard category folder structure. Stores
+                    repo_full_name in shared_libraries table. Rolls back library
+                    creation if repo creation fails.
+                  requirements:
+                    - REQ-LEGA-004
+                  outputs: [github-collab-manager]
+
+                - id: github-collab-manager
+                  type: api
+                  title: GitHub Collaborator Manager
+                  description: >
+                    Manages GitHub collaborator access on shared library repos.
+                    On invite accept: adds collaborator with write permissions
+                    (needed for draft branches). On removal: revokes access.
+                    Uses owner's GitHub App installation token. Handles graceful
+                    fallback if collaborator's installation lacks repo access —
+                    read via API, draft branches via API-only (no local git).
+                  requirements:
+                    - REQ-LEGA-027
+
+            - id: access-control-machine
+              label: Access Control & Tier Gating
+              nodes:
+                - id: library-context-switch
+                  type: process
+                  title: Library Context Switcher
+                  description: >
+                    All existing MCP tools accept optional library_id parameter.
+                    When omitted: personal library (backward compatible). When
+                    provided: operates against shared library's DB, but ONLY if
+                    authenticated user is a member. Invalid or unauthorized
+                    library_id returns error, never falls through to personal.
+                  requirements:
+                    - REQ-LEGA-006
+                  outputs: [write-permission-enforcer]
+
+                - id: write-permission-enforcer
+                  type: firewall
+                  title: Write Permission Enforcer
+                  description: >
+                    In shared library context, enforces role-based write permissions.
+                    Owners: direct write (same as personal flow). Collaborators:
+                    BLOCKED from direct writes — write attempts return error
+                    instructing use of Draft & Merge workflow. Read operations
+                    (get_note, search_library, list_categories) permitted for both.
+                  requirements:
+                    - REQ-LEGA-007
+                  outputs: [tier-gate-shared]
+
+                - id: tier-gate-shared
+                  type: firewall
+                  title: Shared Library Tier Gate
+                  description: >
+                    Shared library creation and collaboration gated to managed-tier
+                    subscribers (managed_lite, managed_standard, managed_plus) and
+                    beta users. Trial and BYOK ($0.99) users get clear error
+                    indicating managed subscription required. Uses get_effective_tier()
+                    to respect beta overrides.
+                  requirements:
+                    - REQ-LEGA-008
+
+          # Cross-machine node: connects data model, provisioning, and access control
+          nodes:
+            - id: shared-infra-bridge
+              type: process
+              title: Shared Library Infrastructure Bridge
+              description: >
+                Coordinates the data model, GitHub repo provisioning, and access
+                control layers. Library creation flows through here: tier check →
+                registry insert → repo provision → DB creation → owner membership.
+                All shared library MCP operations route through context switch →
+                permission check before hitting the library's DB.
+              inputs: [shared-data-model-machine, repo-provisioning-machine, access-control-machine]
+
+        # ═══════════════════════════════════════════════════════════
+        # FACTORY 7: Draft & Merge Workflow
+        # Collaboration workflow: drafts, submission, review, merge/reject
+        # Concurrent draft isolation
+        # ═══════════════════════════════════════════════════════════
+        - id: draft-merge-factory
+          label: Draft & Merge Workflow
+
+          machines:
+            - id: draft-storage-machine
+              label: Draft Storage
+              nodes:
+                - id: drafts-table
+                  type: database
+                  title: Drafts Table
+                  description: >
+                    drafts table in each shared library's DB: id (UUID),
+                    author_user_id, author_login, target_entry_id (FK, NULL for
+                    new notes), draft_type (new_note/edit/delete), title, content,
+                    category, subfolder, status (draft/submitted/merged/rejected),
+                    feedback, created_at, updated_at, submitted_at, resolved_at.
+                    Per-user per-note constraint: one active draft per collaborator
+                    per target note.
+                  requirements:
+                    - REQ-LEGA-009
+                  outputs: [draft-branch-engine]
+
+                - id: draft-branch-engine
+                  type: process
+                  title: Draft Branch Engine
+                  description: >
+                    Manages transparent Git branching for drafts. Creates branch
+                    drafts/{username}/{note-id} when collaborator initiates edit.
+                    Branching is completely invisible to user — they interact only
+                    through MCP tools, never through Git. For new note drafts,
+                    content stored only in drafts table (no branch until submission).
+                  requirements:
+                    - REQ-LEGA-010
+
+            - id: draft-lifecycle-machine
+              label: Draft Lifecycle Tools
+              nodes:
+                - id: create-draft-tool
+                  type: api
+                  title: MCP Tool — create_draft
+                  description: >
+                    Allows collaborators to create a new draft. Params: library_id
+                    (required), title + content + category + subfolder (new note),
+                    OR target_entry_id + content (edit), OR target_entry_id +
+                    draft_type=delete (deletion proposal). Returns draft_id.
+                    Only callable by collaborators (owners write directly).
+                    Enforces one active draft per collaborator per target note.
+                  requirements:
+                    - REQ-LEGA-011
+                  outputs: [submit-draft-tool]
+
+                - id: submit-draft-tool
+                  type: api
+                  title: MCP Tool — submit_draft
+                  description: >
+                    Marks a draft as 'submitted' (ready for owner review). Params:
+                    library_id (required), draft_id (required). Only the draft's
+                    author can submit it. Changes status from 'draft' to 'submitted',
+                    sets submitted_at. Returns confirmation with draft details.
+                  requirements:
+                    - REQ-LEGA-012
+                  outputs: [list-drafts-tool]
+
+                - id: list-drafts-tool
+                  type: api
+                  title: MCP Tool — list_drafts
+                  description: >
+                    Lists drafts in a shared library. Params: library_id (required),
+                    status filter, author filter. Owners see all submitted drafts
+                    across collaborators. Collaborators see only their own. Returns
+                    draft summaries: author, target note, type, status, timestamps.
+                  requirements:
+                    - REQ-LEGA-013
+                  outputs: [review-draft-tool]
+
+                - id: review-draft-tool
+                  type: api
+                  title: MCP Tool — review_draft
+                  description: >
+                    Shows full draft content alongside current target note version.
+                    Params: library_id (required), draft_id (required). Returns:
+                    draft content, original note content (if edit), diff summary,
+                    author info, timestamps. Available to owners and draft author.
+                  requirements:
+                    - REQ-LEGA-014
+
+            - id: draft-resolution-machine
+              label: Draft Resolution
+              nodes:
+                - id: merge-draft-tool
+                  type: api
+                  title: MCP Tool — merge_draft
+                  description: >
+                    Owner approves and applies a submitted draft. Params: library_id,
+                    draft_id. By draft type: new_note → creates note (DB + GitHub),
+                    edit → updates target note content, delete → removes target note.
+                    Sets status to 'merged', resolved_at. Only callable by owner.
+                    Handles conflicts: if target note modified since draft creation,
+                    returns conflict warning rather than silently overwriting.
+                  requirements:
+                    - REQ-LEGA-015
+                  outputs: [reject-draft-tool]
+
+                - id: reject-draft-tool
+                  type: api
+                  title: MCP Tool — reject_draft
+                  description: >
+                    Owner rejects a submitted draft. Params: library_id, draft_id,
+                    feedback (optional reason). Sets status to 'rejected', stores
+                    feedback, sets resolved_at. Only callable by owner. Collaborator
+                    can view rejection feedback via list_drafts or review_draft.
+                  requirements:
+                    - REQ-LEGA-016
+                  outputs: [concurrent-draft-isolator]
+
+                - id: concurrent-draft-isolator
+                  type: process
+                  title: Concurrent Draft Isolator
+                  description: >
+                    Ensures multiple collaborators can have drafts in flight
+                    simultaneously without interference. Each collaborator's drafts
+                    are isolated — they see/manage only their own (owners see all).
+                    If two collaborators submit drafts editing the same note, owner
+                    merges sequentially; second merge checks for conflicts against
+                    post-first-merge state and warns if target note changed.
+                  requirements:
+                    - REQ-LEGA-017
+
+          # Cross-machine node: connects draft storage, lifecycle, and resolution
+          nodes:
+            - id: draft-workflow-bridge
+              type: orchestrator
+              title: Draft Workflow Orchestrator
+              description: >
+                Coordinates the full draft lifecycle: draft creation in storage →
+                lifecycle tools (create, submit, list, review) → resolution
+                (merge/reject). Ensures draft state transitions are valid and
+                concurrent draft isolation is enforced throughout.
+              inputs: [draft-storage-machine, draft-lifecycle-machine, draft-resolution-machine]
+
+        # ═══════════════════════════════════════════════════════════
+        # FACTORY 8: Shared Library Management & Publishing
+        # Library CRUD MCP tools, invitation flow, publishing as spaces
+        # ═══════════════════════════════════════════════════════════
+        - id: shared-library-mgmt-factory
+          label: Shared Library Management & Publishing
+
+          machines:
+            - id: library-crud-machine
+              label: Library CRUD Tools
+              nodes:
+                - id: create-shared-library-tool
+                  type: api
+                  title: MCP Tool — create_shared_library
+                  description: >
+                    Managed-tier users create a named shared library. Params: name
+                    (required), slug (optional, auto-generated from name), description.
+                    Provisions GitHub repo (Legate.Library.{slug}), creates
+                    shared_libraries record, creates per-library SQLite DB, auto-creates
+                    owner membership row, registers repo in user_repos. Returns
+                    library_id, name, slug, repo_full_name. Rejects duplicate slugs.
+                  requirements:
+                    - REQ-LEGA-018
+                  outputs: [list-libraries-tool]
+
+                - id: list-libraries-tool
+                  type: api
+                  title: MCP Tool — list_libraries
+                  description: >
+                    Lists all libraries accessible to the authenticated user.
+                    Returns: personal library (always first) + all shared libraries
+                    where user is active member. Each entry: library_id (NULL for
+                    personal), name, slug, role (owner/collaborator/NULL), member_count,
+                    note_count, last_activity. Primary tool for library discovery
+                    and context switching.
+                  requirements:
+                    - REQ-LEGA-019
+
+            - id: invitation-machine
+              label: Invitation Flow
+              nodes:
+                - id: invite-collaborator-tool
+                  type: api
+                  title: MCP Tool — invite_collaborator
+                  description: >
+                    Owner invites a registered Legate user as collaborator. Params:
+                    library_id (required), github_login (required). Verifies target
+                    user exists in users table, creates membership row with
+                    status='invited', adds collaborator to GitHub repo with write
+                    access (needed for draft branches). Rejects if: user not found,
+                    already member, caller not owner.
+                  requirements:
+                    - REQ-LEGA-020
+                  outputs: [accept-invitation-tool]
+
+                - id: accept-invitation-tool
+                  type: api
+                  title: MCP Tool — accept_invitation
+                  description: >
+                    Invited user accepts collaboration invitation. Params: library_id
+                    (required). Changes membership status from 'invited' to 'active',
+                    sets accepted_at. Only callable by the invited user. After
+                    acceptance, collaborator can read all notes and create drafts.
+                  requirements:
+                    - REQ-LEGA-021
+                  outputs: [remove-collaborator-tool]
+
+                - id: remove-collaborator-tool
+                  type: api
+                  title: MCP Tool — remove_collaborator
+                  description: >
+                    Owner revokes collaborator access. Params: library_id (required),
+                    github_login (required). Sets membership status to 'revoked',
+                    removes GitHub write access, discards pending/submitted drafts
+                    by that collaborator. Owner cannot remove themselves.
+                    Only callable by owner.
+                  requirements:
+                    - REQ-LEGA-022
+
+            - id: library-publishing-machine
+              label: Shared Library Publishing
+              nodes:
+                - id: named-publish-surface
+                  type: api
+                  title: Named Publish Surface
+                  description: >
+                    Each shared library functions as its own named publishable space.
+                    Published notes accessible at /pub/{owner_login}/{library_slug}/{note_slug}
+                    (three-segment path), distinct from personal at /pub/{username}/{note_slug}
+                    (two-segment). Library name, description, and owner displayed on
+                    public landing page at /pub/{owner_login}/{library_slug}/.
+                  requirements:
+                    - REQ-LEGA-023
+                  outputs: [publish-permissions]
+
+                - id: publish-permissions
+                  type: firewall
+                  title: Shared Library Publish Permissions
+                  description: >
+                    Only the library owner can publish/unpublish notes from the shared
+                    library. Collaborators cannot publish directly — they draft and
+                    submit, but the publish toggle is owner-only. Ensures owner
+                    maintains editorial control over what goes public under the
+                    library's name.
+                  requirements:
+                    - REQ-LEGA-024
+                  outputs: [shared-library-landing]
+
+                - id: shared-library-landing
+                  type: server
+                  title: Shared Library Landing Page
+                  description: >
+                    Public landing page at /pub/{owner_login}/{library_slug}/ listing
+                    all published notes. Displays: library name, description, owner
+                    display name/avatar, published notes (title, date, category).
+                    Proper SEO metadata: OG tags, canonical URL, JSON-LD.
+                    Catppuccin Mocha design matching personal profile pages but
+                    with library name as heading.
+                  requirements:
+                    - REQ-LEGA-025
+
+          # Cross-machine node: connects CRUD, invitations, and publishing
+          nodes:
+            - id: library-mgmt-bridge
+              type: orchestrator
+              title: Library Management Orchestrator
+              description: >
+                Coordinates library creation, invitation flow, and publishing.
+                Library creation flows through CRUD → infra factory for provisioning.
+                Invitations use CRUD → invitation flow → GitHub collab manager.
+                Publishing routes through permissions check before rendering.
+              inputs: [library-crud-machine, invitation-machine, library-publishing-machine]
+
+        # ═══════════════════════════════════════════════════════════
+        # FACTORY 9: Shared Library Sync
+        # Sync engine extension for shared library repos
+        # ═══════════════════════════════════════════════════════════
+        - id: shared-sync-factory
+          label: Shared Library Sync
+
+          machines:
+            - id: shared-sync-machine
+              label: Shared Library Sync Engine
+              nodes:
+                - id: shared-sync-engine
+                  type: process
+                  title: Shared Library Sync Engine
+                  description: >
+                    LibrarySync engine extended for shared library repos. Fetches
+                    repo tree using owner's GitHub App installation token (repo is
+                    under owner's account). Syncs to shared library's dedicated
+                    SQLite DB. Same frequency and deduplication rules as personal
+                    sync. Only main branch is synced — draft branches are NOT synced
+                    (they back the drafts table, not the knowledge store).
+                  requirements:
+                    - REQ-LEGA-026
+                  outputs: [shared-sync-store]
+
+                - id: shared-sync-store
+                  type: database
+                  title: Shared Sync Target Store
+                  description: >
+                    The per-library SQLite database that receives synced content.
+                    Same schema as personal library DB. Sync writes here, MCP tools
+                    read/write here (via library context switching). Embeddings
+                    generated per-library for independent semantic search.
+
+          # Standalone node: sync monitor connects machine to factory level
+          nodes:
+            - id: shared-sync-monitor
+              type: monitor
+              title: Shared Sync Monitor
+              description: >
+                Monitors shared library sync health. Detects sync drift between
+                GitHub repo state and library SQLite DB. Surfaces sync status
+                via the verify_sync_state MCP tool (extended for shared libraries).
+              inputs: [shared-sync-machine]
+
       # ═══════════════════════════════════════════════════════════
       # NETWORK-LEVEL CROSS-FACTORY NODES
-      # Connect the five factories at the platform level
+      # Connect the nine factories at the platform level
       # ═══════════════════════════════════════════════════════════
       nodes:
         - id: platform-orchestrator
@@ -478,10 +936,12 @@ logic:
           description: >
             Top-level coordination node. User authentication (identity-factory)
             gates access to all other subsystems. Billing state (billing-factory)
-            determines tier, which gates voice pipeline (voice-factory) and
-            knowledge engine (knowledge-factory) feature access. Platform ops
-            (platform-factory) provides admin visibility and Fly.io hosting for all.
+            determines tier, which gates voice pipeline (voice-factory),
+            knowledge engine (knowledge-factory), and shared library features
+            (shared-library-infra-factory, draft-merge-factory, shared-library-mgmt-factory,
+            shared-sync-factory). Platform ops (platform-factory) provides admin
+            visibility and Fly.io hosting for all.
           requirements:
             - REQ-LEGA-001
           inputs: [identity-factory, billing-factory]
-          outputs: [voice-factory, knowledge-factory, platform-factory]
+          outputs: [voice-factory, knowledge-factory, platform-factory, shared-library-infra-factory, draft-merge-factory, shared-library-mgmt-factory, shared-sync-factory]
