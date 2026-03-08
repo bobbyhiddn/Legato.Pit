@@ -958,8 +958,10 @@ def create_app():
     # ============ Shared library public routes (no auth) ============
     # IMPORTANT: 3-segment routes must be registered BEFORE 2-segment routes
     # to avoid Flask matching /pub/<owner>/<lib_slug> as /pub/<username>/<slug>.
+    # strict_slashes=False ensures /pub/owner/lib_slug (no trailing slash) is
+    # also handled by this route instead of falling through to pub_note.
 
-    @app.route("/pub/<owner>/<lib_slug>/")
+    @app.route("/pub/<owner>/<lib_slug>/", strict_slashes=False)
     def pub_shared_library_profile(owner: str, lib_slug: str):
         """Render a public landing page for a shared library. No authentication required."""
         import sqlite3

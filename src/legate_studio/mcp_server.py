@@ -3095,7 +3095,11 @@ def tool_update_note(args: dict) -> dict:
     if not new_title and not has_content_update and not new_category:
         return {"error": "At least one of title, content, edits, or category must be provided"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Get existing note (include id for embedding generation)
     entry = db.execute(
@@ -3313,7 +3317,11 @@ def tool_move_category(args: dict) -> dict:
     if not new_category:
         return {"error": "new_category is required"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     user_id = g.mcp_user.get("user_id") if hasattr(g, "mcp_user") else None
 
     # Validate new category
@@ -3487,7 +3495,11 @@ def tool_create_subfolder(args: dict) -> dict:
     if not re.match(r"^[a-zA-Z0-9_-]+$", subfolder_name):
         return {"error": "Subfolder name can only contain letters, numbers, underscores, and hyphens"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     user_id = g.mcp_user.get("user_id") if hasattr(g, "mcp_user") else None
 
     # Validate category
@@ -3713,7 +3725,11 @@ def tool_move_to_subfolder(args: dict) -> dict:
     if new_subfolder and ("/" in new_subfolder or "\\" in new_subfolder):
         return {"error": "Subfolder name cannot contain slashes"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     user_id = g.mcp_user.get("user_id") if hasattr(g, "mcp_user") else None
 
     # Get existing note
@@ -3880,7 +3896,11 @@ def tool_rename_note(args: dict) -> dict:
     if not new_title:
         return {"error": "new_title is required"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     user_id = g.mcp_user.get("user_id") if hasattr(g, "mcp_user") else None
 
     # Get existing note
@@ -4169,7 +4189,11 @@ def tool_rename_subfolder(args: dict) -> dict:
     if not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
         return {"error": ("New subfolder name can only contain letters, numbers, underscores, and hyphens")}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     user_id = g.mcp_user.get("user_id") if hasattr(g, "mcp_user") else None
 
     # Validate category
@@ -4361,7 +4385,11 @@ def tool_delete_note(args: dict) -> dict:
             "warning": ("This will permanently delete the note from both GitHub and the local database."),
         }
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Get existing note
     entry = db.execute(
@@ -4513,7 +4541,11 @@ def tool_update_task_status(args: dict) -> dict:
     if status not in valid_statuses:
         return {"error": f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Check note exists
     entry = db.execute(
@@ -4583,7 +4615,11 @@ def tool_link_notes(args: dict) -> dict:
     if link_type not in valid_link_types:
         return {"error": f"Invalid link_type. Must be one of: {', '.join(sorted(valid_link_types))}"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Verify both notes exist
     source = db.execute("SELECT entry_id, title FROM knowledge_entries WHERE entry_id = ?", (source_id,)).fetchone()
@@ -5434,7 +5470,11 @@ def tool_delete_asset(args: dict) -> dict:
     if not confirm:
         return {"error": "confirm must be true to delete an asset"}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Get asset info
     row = db.execute(
@@ -5599,8 +5639,12 @@ def tool_upload_asset(args: dict) -> dict:
         return {"error": "Library repo not configured"}
 
     try:
-        db = get_db()
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
+    try:
         # Generate asset ID and sanitized filename
         asset_id = f"asset-{secrets.token_hex(6)}"
 
@@ -5780,7 +5824,11 @@ def tool_upload_markdown_as_note(args: dict) -> dict:
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
     # Validate category
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
     categories = get_user_categories(db, user_id or "default")
     valid_categories = {c["name"] for c in categories}
     category_folders = {c["name"]: c["folder_name"] for c in categories}
@@ -6001,7 +6049,11 @@ def tool_create_category(args: dict) -> dict:
     if not token:
         return {"error": "GitHub authorization required. Please re-authenticate."}
 
-    db = get_db()
+    try:
+        db, role = get_library_db(args)
+        check_write_permission(args.get("library_id"), role)
+    except ValueError as e:
+        return {"error": str(e)}
 
     # Check if category already exists (including inactive ones)
     existing = db.execute(
