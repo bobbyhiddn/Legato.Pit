@@ -867,7 +867,8 @@ Full documentation: https://legate.studio/docs/mcp
         instructions_summary = (
             "1. Add config_example to .mcp.json or ~/.claude/mcp.json. "
             "2. RESTART your MCP client (close and reopen the session) — MCP servers are loaded at startup. "
-            "3. On restart, the client will open a browser for GitHub OAuth. Log in with your Legate Studio GitHub account. "
+            "3. On restart, the client will open a browser for GitHub OAuth. "
+            "Log in with your Legate Studio GitHub account. "
             "4. Call check_connection to verify. "
             "No API key required. OAuth 2.1 handles authentication automatically."
         )
@@ -879,7 +880,11 @@ Full documentation: https://legate.studio/docs/mcp
                 "auth_method": "oauth2.1",
                 "well_known_url": "https://legate.studio/.well-known/oauth-authorization-server",
                 "config_example": config_example,
-                "post_setup_action": "RESTART your MCP client after saving config. MCP servers are loaded at startup — the new server will not appear until the client is restarted.",
+                "post_setup_action": (
+                    "RESTART your MCP client after saving config. "
+                    "MCP servers are loaded at startup — "
+                    "the new server will not appear until the client is restarted."
+                ),
                 "verification_tool": "check_connection",
                 "instructions": instructions_summary,
                 "docs_url": "https://legate.studio/docs/mcp",
